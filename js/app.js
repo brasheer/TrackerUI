@@ -1,6 +1,8 @@
 // --- STATE ---
 let parentDirHandle = null;
 let cachedDirHandle = null;
+let supervisorDirHandle = null;
+let cachedSupervisorDirHandle = null;
 let availableWorkbooks = []; // [{ name, handle, lastModified, sortWeight }]
 let workingFileHandle = null;
 let workbook = null;
@@ -8,6 +10,11 @@ let allRows = []; // Flattened index across all MM-DD-YYYY tabs
 let dateSheets = []; // Ordered list of MM-DD-YYYY sheet names (newest first)
 let activeKeyFilter = null;
 let editingTarget = null; // { sheetName, rowNumber, key } or null for new
+
+// Delete Mode State
+let isDeleteMode = false;
+let currentlyVisibleRows = [];
+const selectedForDelete = new Set(); // Stores "${sheetName}::${rowNumber}"
 
 // Dynamic Reference Data
 let masterAccountsMap = []; // [{ broker, master, bidder }]
@@ -29,7 +36,8 @@ const DATE_TAB_REGEX = /^\d{2}-\d{2}-\d{4}$/;
 
 const IDB_NAME = 'TrackerUI_DirectoryDB';
 const IDB_STORE = 'handles';
-const IDB_KEY = 'agentFolderHandle';
+const IDB_AGENT_KEY = 'agentFolderHandle';
+const IDB_SUPERVISOR_KEY = 'supervisorFolderHandle';
 
 // --- DOM ELEMENTS ---
 const statusPill = document.getElementById('statusPill');
@@ -37,17 +45,30 @@ const workbookPickerWrap = document.getElementById('workbookPickerWrap');
 const workbookSelect = document.getElementById('workbookSelect');
 const btnReconnect = document.getElementById('btnReconnect');
 const btnLinkFile = document.getElementById('btnLinkFile');
+const btnSupervisorDir = document.getElementById('btnSupervisorDir');
+const btnResetSupervisorDir = document.getElementById('btnResetSupervisorDir');
 const btnRollover = document.getElementById('btnRollover');
+const btnDeleteMode = document.getElementById('btnDeleteMode');
 const btnNewEntry = document.getElementById('btnNewEntry');
 const sheetSelect = document.getElementById('sheetSelect');
 const scopeSelect = document.getElementById('scopeSelect');
 const searchInput = document.getElementById('searchInput');
+const searchScopeHint = document.getElementById('searchScopeHint');
 const listBody = document.getElementById('listBody');
 const filterBanner = document.getElementById('filterBanner');
 const filterKeyText = document.getElementById('filterKeyText');
 const editModal = document.getElementById('editModal');
 const rolloverModal = document.getElementById('rolloverModal');
 const toastContainer = document.getElementById('toastContainer');
+
+// Delete Mode DOM Elements
+const deleteBanner = document.getElementById('deleteBanner');
+const thDeleteSelect = document.getElementById('thDeleteSelect');
+const chkSelectAllHeader = document.getElementById('chkSelectAllHeader');
+const chkSelectAllBanner = document.getElementById('chkSelectAllBanner');
+const deleteSelectedCountEl = document.getElementById('deleteSelectedCount');
+const btnConfirmDeleteSelected = document.getElementById('btnConfirmDeleteSelected');
+const btnCancelDeleteMode = document.getElementById('btnCancelDeleteMode');
 
 const fSubject = document.getElementById('fSubject');
 const fTicket = document.getElementById('fTicket');
@@ -101,48 +122,87 @@ function openHandleDB() {
   });
 }
 
-async function saveDirHandleToIDB(dirHandle) {
+async function saveHandleToIDB(key, dirHandle) {
   try {
     const db = await openHandleDB();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(dirHandle, IDB_KEY);
+      tx.objectStore(IDB_STORE).put(dirHandle, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
-    console.warn('Could not persist directory handle in IndexedDB:', err);
+    console.warn(`Could not persist handle (${key}) in IndexedDB:`, err);
   }
 }
 
-async function getDirHandleFromIDB() {
+async function getHandleFromIDB(key) {
   try {
     const db = await openHandleDB();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readonly');
-      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      const req = tx.objectStore(IDB_STORE).get(key);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
   } catch (err) {
-    console.warn('Could not read directory handle from IndexedDB:', err);
+    console.warn(`Could not read handle (${key}) from IndexedDB:`, err);
     return null;
   }
 }
 
-async function initCachedDirectoryHandle() {
-  if (!('indexedDB' in window)) return;
-  const savedHandle = await getDirHandleFromIDB();
-  if (savedHandle) {
-    cachedDirHandle = savedHandle;
-    btnReconnect.textContent = `🔄 Reconnect Folder (${savedHandle.name})`;
-    btnReconnect.style.display = 'inline-block';
+async function deleteHandleFromIDB(key) {
+  try {
+    const db = await openHandleDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn(`Could not delete handle (${key}) from IndexedDB:`, err);
   }
 }
 
-initCachedDirectoryHandle();
+function updateSupervisorDirUI() {
+  if (supervisorDirHandle) {
+    btnSupervisorDir.textContent = `👁️ Supervisor Folder: ${supervisorDirHandle.name}`;
+    btnSupervisorDir.title = `Saving (VIEW ONLY).xlsx copies to "${supervisorDirHandle.name}". Click to change folder.`;
+    btnSupervisorDir.classList.add('custom-active');
+    btnResetSupervisorDir.style.display = 'inline-block';
+  } else if (cachedSupervisorDirHandle) {
+    btnSupervisorDir.textContent = `👁️ Reconnect Supervisor: ${cachedSupervisorDirHandle.name}`;
+    btnSupervisorDir.title = `Click to reconnect saved Supervisor folder "${cachedSupervisorDirHandle.name}"`;
+    btnSupervisorDir.classList.add('custom-active');
+    btnResetSupervisorDir.style.display = 'inline-block';
+  } else {
+    btnSupervisorDir.textContent = '👁️ Supervisor Folder: Same as Agent';
+    btnSupervisorDir.title = 'Select a custom folder where (VIEW ONLY).xlsx copies are saved';
+    btnSupervisorDir.classList.remove('custom-active');
+    btnResetSupervisorDir.style.display = 'none';
+  }
+}
 
-// --- 1. DIRECTORY SELECTION & WORKBOOK DISCOVERY ---
+async function initCachedDirectoryHandles() {
+  if (!('indexedDB' in window)) return;
+  const savedAgentHandle = await getHandleFromIDB(IDB_AGENT_KEY);
+  if (savedAgentHandle) {
+    cachedDirHandle = savedAgentHandle;
+    btnReconnect.textContent = `🔄 Reconnect Folder (${savedAgentHandle.name})`;
+    btnReconnect.style.display = 'inline-block';
+  }
+
+  const savedSupHandle = await getHandleFromIDB(IDB_SUPERVISOR_KEY);
+  if (savedSupHandle) {
+    cachedSupervisorDirHandle = savedSupHandle;
+  }
+  updateSupervisorDirUI();
+}
+
+initCachedDirectoryHandles();
+
+// --- 1. DIRECTORY SELECTION, SUPERVISOR EXPORT FOLDER & WORKBOOK DISCOVERY ---
 btnLinkFile.addEventListener('click', async () => {
   try {
     if (typeof window.showDirectoryPicker !== 'function') {
@@ -151,7 +211,7 @@ btnLinkFile.addEventListener('click', async () => {
     const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
     parentDirHandle = dirHandle;
     cachedDirHandle = dirHandle;
-    await saveDirHandleToIDB(dirHandle);
+    await saveHandleToIDB(IDB_AGENT_KEY, dirHandle);
     btnReconnect.style.display = 'none';
     await scanDirectoryAndLoadWorkbooks();
   } catch (err) {
@@ -171,6 +231,23 @@ btnReconnect.addEventListener('click', async () => {
     if (perm === 'granted') {
       parentDirHandle = cachedDirHandle;
       btnReconnect.style.display = 'none';
+
+      // Also attempt to reconnect cached Supervisor folder if one was configured
+      if (cachedSupervisorDirHandle && !supervisorDirHandle) {
+        try {
+          let supPerm = await cachedSupervisorDirHandle.queryPermission({ mode: 'readwrite' });
+          if (supPerm !== 'granted') {
+            supPerm = await cachedSupervisorDirHandle.requestPermission({ mode: 'readwrite' });
+          }
+          if (supPerm === 'granted') {
+            supervisorDirHandle = cachedSupervisorDirHandle;
+          }
+        } catch (supErr) {
+          console.warn('Could not auto-reconnect supervisor folder:', supErr);
+        }
+        updateSupervisorDirUI();
+      }
+
       await scanDirectoryAndLoadWorkbooks();
     } else {
       alert('Read/Write permission was not granted for the folder.');
@@ -180,6 +257,73 @@ btnReconnect.addEventListener('click', async () => {
     alert('Could not reconnect folder: ' + err.message);
   }
 });
+
+btnSupervisorDir.addEventListener('click', async () => {
+  try {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      return alert('Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost/HTTPS.');
+    }
+
+    // If a cached supervisor folder exists but isn't connected yet, try reconnecting it first
+    if (cachedSupervisorDirHandle && !supervisorDirHandle) {
+      let perm = await cachedSupervisorDirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') {
+        perm = await cachedSupervisorDirHandle.requestPermission({ mode: 'readwrite' });
+      }
+      if (perm === 'granted') {
+        supervisorDirHandle = cachedSupervisorDirHandle;
+        updateSupervisorDirUI();
+        showToast(`Reconnected Supervisor export folder: "${supervisorDirHandle.name}"`, 'success');
+        if (workbook && workingFileHandle) {
+          await writeMirrorOnly();
+        }
+        return;
+      }
+    }
+
+    const supDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    supervisorDirHandle = supDir;
+    cachedSupervisorDirHandle = supDir;
+    await saveHandleToIDB(IDB_SUPERVISOR_KEY, supDir);
+    updateSupervisorDirUI();
+    showToast(`Supervisor (VIEW ONLY) export folder set to "${supDir.name}"`, 'success');
+
+    // If a workbook is already loaded, immediately write a fresh (VIEW ONLY) copy to the selected folder
+    if (workbook && workingFileHandle) {
+      await writeMirrorOnly();
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      alert('Could not select Supervisor export folder: ' + err.message);
+    }
+  }
+});
+
+btnResetSupervisorDir.addEventListener('click', async () => {
+  supervisorDirHandle = null;
+  cachedSupervisorDirHandle = null;
+  await deleteHandleFromIDB(IDB_SUPERVISOR_KEY);
+  updateSupervisorDirUI();
+  showToast('Supervisor (VIEW ONLY) export reset to Agent workbook folder.', 'info');
+});
+
+async function writeMirrorOnly() {
+  const targetMirrorDir = supervisorDirHandle || parentDirHandle;
+  if (!workbook || !workingFileHandle || !targetMirrorDir) return;
+
+  const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
+  try {
+    const buffer = await workbook.xlsx.writeBuffer();
+    const mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: true });
+    const mirrorWritable = await mirrorHandle.createWritable();
+    await mirrorWritable.write(buffer);
+    await mirrorWritable.close();
+    showToast(`Synced "${mirrorFileName}" to "${targetMirrorDir.name}".`, 'success');
+  } catch (err) {
+    console.warn('Immediate mirror export failed:', err);
+    showToast(`⚠️ Could not write "${mirrorFileName}" to "${targetMirrorDir.name}" (file may be open in Excel).`, 'warning');
+  }
+}
 
 function extractMonthYearWeight(fileName, fallbackLastModified) {
   const months = {
@@ -243,7 +387,7 @@ async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
     workbookPickerWrap.style.display = 'none';
     workingFileHandle = null;
     setStatus(`No working .xlsx in ${parentDirHandle.name}`, 'locked');
-    listBody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding: 30px;">No working <code>.xlsx</code> files found in folder <strong>${escapeHtml(parentDirHandle.name)}</strong> (ignoring <code>~$</code> lock files and <code>(VIEW ONLY).xlsx</code>).</td></tr>`;
+    listBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:var(--text-muted); padding: 30px;">No working <code>.xlsx</code> files found in folder <strong>${escapeHtml(parentDirHandle.name)}</strong> (ignoring <code>~$</code> lock files and <code>(VIEW ONLY).xlsx</code>).</td></tr>`;
     return;
   }
 
@@ -282,6 +426,7 @@ workbookSelect.addEventListener('change', async () => {
     workingFileHandle = availableWorkbooks[idx].handle;
     activeKeyFilter = null;
     filterBanner.style.display = 'none';
+    setDeleteMode(false);
     await loadWorkbookFromDisk();
   }
 });
@@ -331,6 +476,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   searchInput.disabled = false;
   btnNewEntry.style.display = 'inline-block';
   btnRollover.style.display = 'inline-block';
+  btnDeleteMode.style.display = 'inline-block';
 
   if (!options.preserveStatus) {
     setStatus(`Synced: ${file.name}`, 'ready');
@@ -550,44 +696,72 @@ function populateSheetDropdown(preserveSheet) {
   }
 }
 
-// --- 4. RENDER LIST VIEW WITH COLLAPSIBLE NOTES & 8-CHAR GUID CHIP ---
+// --- 4. RENDER LIST VIEW, AUTOMATIC GLOBAL SEARCH, & DELETE SELECTION MODE ---
+function getRowCompositeId(sheetName, rowNumber) {
+  return `${sheetName}::${rowNumber}`;
+}
+
 function renderList() {
   const query = searchInput.value.trim().toLowerCase();
   const scope = scopeSelect.value;
   const currentSheet = sheetSelect.value;
 
+  // Show visual indicator when search automatically pulls across all tabs
+  if (searchScopeHint) {
+    searchScopeHint.style.display = query.length > 0 ? 'inline-block' : 'none';
+  }
+
   const filtered = allRows.filter(item => {
-    // If a unique Tracking ID filter is active, show ALL occurrences across all MM-DD-YYYY tabs
+    // 1. If a unique Tracking ID filter is active, show ALL occurrences across all MM-DD-YYYY tabs
     if (activeKeyFilter) {
       return item.key.toLowerCase() === activeKeyFilter.toLowerCase();
     }
-    // Otherwise respect scope dropdown
+    // 2. When typing a search query, automatically pull matching results across ALL sheets
+    if (query.length > 0) {
+      const haystack = [
+        item.subject, item.ticket, item.broker, item.master,
+        item.bidder, item.action, item.yard, item.lots, item.notes, item.key, item.sheetName
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    }
+    // 3. When search is empty, respect the View Scope dropdown
     if (scope === 'current' && item.sheetName !== currentSheet) {
       return false;
     }
-    if (!query) return true;
-
-    const haystack = [
-      item.subject, item.ticket, item.broker, item.master,
-      item.bidder, item.action, item.yard, item.lots, item.notes, item.key
-    ].join(' ').toLowerCase();
-    return haystack.includes(query);
+    return true;
   });
 
+  currentlyVisibleRows = filtered;
+
   listBody.innerHTML = '';
+  const colSpan = isDeleteMode ? 12 : 11;
   if (filtered.length === 0) {
-    listBody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding: 24px;">No matching requests found.</td></tr>`;
+    listBody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center; color:var(--text-muted); padding: 24px;">No matching requests found.</td></tr>`;
+    syncSelectAllCheckboxes();
     return;
   }
 
   filtered.forEach((item, idx) => {
     const tr = document.createElement('tr');
+    const compId = getRowCompositeId(item.sheetName, item.rowNumber);
+    const isCheckedForDelete = isDeleteMode && selectedForDelete.has(compId);
+    if (isCheckedForDelete) {
+      tr.classList.add('selected-for-delete');
+    }
+
     const isComplete = item.status.toLowerCase() === 'complete';
     const noteText = item.notes || '—';
     const isLongNote = noteText.length > 45 || noteText.includes('\n');
     const shortGuid = item.key.length > 8 ? `${item.key.slice(0, 8)}...` : item.key;
 
+    const deleteCheckboxCell = isDeleteMode
+      ? `<td class="delete-cell">
+           <input type="checkbox" class="chk-delete-row" data-comp="${escapeHtml(compId)}" ${isCheckedForDelete ? 'checked' : ''}>
+         </td>`
+      : '';
+
     tr.innerHTML = `
+      ${deleteCheckboxCell}
       <td style="white-space:nowrap; font-weight:500;">${escapeHtml(item.sheetName)}</td>
       <td>
         <span class="key-chip" title="${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
@@ -619,7 +793,144 @@ function renderList() {
     `;
     listBody.appendChild(tr);
   });
+
+  syncSelectAllCheckboxes();
 }
+
+// --- DELETE SELECTION MODE & CONFIRMATION ---
+function setDeleteMode(enabled) {
+  isDeleteMode = Boolean(enabled);
+  selectedForDelete.clear();
+  btnDeleteMode.classList.toggle('active', isDeleteMode);
+  btnDeleteMode.textContent = isDeleteMode ? '✕ Exit Delete Mode' : '🗑️ Delete Requests';
+  deleteBanner.style.display = isDeleteMode ? 'flex' : 'none';
+  thDeleteSelect.style.display = isDeleteMode ? 'table-cell' : 'none';
+  updateDeleteSelectionUI();
+  renderList();
+}
+
+function updateDeleteSelectionUI() {
+  const count = selectedForDelete.size;
+  deleteSelectedCountEl.textContent = String(count);
+  btnConfirmDeleteSelected.textContent = `🗑️ Delete Selected (${count})`;
+  btnConfirmDeleteSelected.disabled = count === 0;
+  syncSelectAllCheckboxes();
+}
+
+function syncSelectAllCheckboxes() {
+  if (!isDeleteMode || currentlyVisibleRows.length === 0) {
+    chkSelectAllHeader.checked = false;
+    chkSelectAllBanner.checked = false;
+    return;
+  }
+  const allVisibleSelected = currentlyVisibleRows.every(item =>
+    selectedForDelete.has(getRowCompositeId(item.sheetName, item.rowNumber))
+  );
+  chkSelectAllHeader.checked = allVisibleSelected;
+  chkSelectAllBanner.checked = allVisibleSelected;
+}
+
+function handleToggleSelectAllVisible(checked) {
+  currentlyVisibleRows.forEach(item => {
+    const compId = getRowCompositeId(item.sheetName, item.rowNumber);
+    if (checked) {
+      selectedForDelete.add(compId);
+    } else {
+      selectedForDelete.delete(compId);
+    }
+  });
+  updateDeleteSelectionUI();
+  renderList();
+}
+
+btnDeleteMode.addEventListener('click', () => {
+  setDeleteMode(!isDeleteMode);
+});
+
+btnCancelDeleteMode.addEventListener('click', () => {
+  setDeleteMode(false);
+});
+
+chkSelectAllHeader.addEventListener('change', (e) => {
+  handleToggleSelectAllVisible(e.target.checked);
+});
+
+chkSelectAllBanner.addEventListener('change', (e) => {
+  handleToggleSelectAllVisible(e.target.checked);
+});
+
+listBody.addEventListener('change', (e) => {
+  const chk = e.target.closest('.chk-delete-row');
+  if (!chk) return;
+  const compId = chk.dataset.comp;
+  if (!compId) return;
+
+  const tr = chk.closest('tr');
+  if (chk.checked) {
+    selectedForDelete.add(compId);
+    if (tr) tr.classList.add('selected-for-delete');
+  } else {
+    selectedForDelete.delete(compId);
+    if (tr) tr.classList.remove('selected-for-delete');
+  }
+  updateDeleteSelectionUI();
+});
+
+btnConfirmDeleteSelected.addEventListener('click', async () => {
+  if (selectedForDelete.size === 0 || !workbook) return;
+
+  // Gather selected items
+  const itemsToDelete = allRows.filter(item =>
+    selectedForDelete.has(getRowCompositeId(item.sheetName, item.rowNumber))
+  );
+  if (itemsToDelete.length === 0) return;
+
+  const previewLines = itemsToDelete
+    .slice(0, 12)
+    .map(r => `• [${r.sheetName} • Row ${r.rowNumber}] ${r.subject} (${r.broker || 'No Broker'})`)
+    .join('\n');
+  const moreNotice = itemsToDelete.length > 12 ? `\n...and ${itemsToDelete.length - 12} more.` : '';
+
+  const confirmed = confirm(
+    `Are you sure you want to permanently delete ${itemsToDelete.length} selected request(s)?\n\n` +
+    `${previewLines}${moreNotice}\n\n` +
+    `This will remove the row(s) from the workbook and save immediately.`
+  );
+  if (!confirmed) return;
+
+  const currentTab = sheetSelect.value;
+  await loadWorkbookFromDisk(currentTab);
+
+  // Group deletions by sheetName and sort rowNumber DESCENDING so spliceRows never shifts earlier row indices
+  const bySheet = new Map();
+  itemsToDelete.forEach(item => {
+    if (!bySheet.has(item.sheetName)) {
+      bySheet.set(item.sheetName, []);
+    }
+    bySheet.get(item.sheetName).push(item);
+  });
+
+  let deletedCount = 0;
+  bySheet.forEach((sheetItems, sheetName) => {
+    const ws = workbook.getWorksheet(sheetName);
+    if (!ws) return;
+
+    sheetItems.sort((a, b) => b.rowNumber - a.rowNumber);
+    sheetItems.forEach(delItem => {
+      ws.spliceRows(delItem.rowNumber, 1);
+      deletedCount++;
+    });
+  });
+
+  const saveResult = await saveWorkbookToDisk();
+  if (saveResult) {
+    setDeleteMode(false);
+    await loadWorkbookFromDisk(currentTab, {
+      preserveStatus: saveResult === 'mirror-locked'
+    });
+    showToast(`Deleted ${deletedCount} request(s) from workbook.`, 'success');
+  }
+});
 
 // Delegate clicks for Key Chip filter, Collapsible Notes, and Edit button
 listBody.addEventListener('click', (e) => {
@@ -817,7 +1128,6 @@ function getNextEmptyRow(worksheet) {
 // --- 6. SMART MULTI-SHEET & IDEMPOTENT ROLLOVER ENGINE WITH FUTURE DATE HANDLING ---
 btnRollover.addEventListener('click', async () => {
   if (!workbook) return;
-  // Reload fresh state from disk before opening Rollover planner
   await loadWorkbookFromDisk(sheetSelect.value);
   openRolloverModal();
 });
@@ -835,7 +1145,6 @@ function openRolloverModal() {
   const latestTime = latestSheet ? parseDateTab(latestSheet) : 0;
   const hasFutureSheet = latestSheet && latestTime > todayTime;
 
-  // Build quick preset buttons
   rolloverPresetBtns.innerHTML = '';
   const presets = [];
 
@@ -856,7 +1165,6 @@ function openRolloverModal() {
     presets.push({ label: `Next Day (${nextAfterLatest})`, date: nextAfterLatest });
     presets.push({ label: `Today (${todayStr})`, date: todayStr });
 
-    // Default to Latest Tab when a future tab is active so existing entries on the future sheet are immediately visible
     rolloverTargetDate.value = latestSheet;
   } else {
     rolloverFutureBanner.style.display = 'none';
@@ -899,7 +1207,6 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
   const targetTime = parseDateTab(targetTabName);
   const targetExists = Boolean(workbook.getWorksheet(targetTabName));
 
-  // Partition other MM-DD-YYYY sheets into prior (< target) and future (> target)
   const priorSheets = dateSheets
     .filter(name => parseDateTab(name) < targetTime)
     .sort((a, b) => parseDateTab(a) - parseDateTab(b));
@@ -912,7 +1219,6 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     ? [...priorSheets, ...futureSheets]
     : priorSheets;
 
-  // Track both the latest overall state AND the last open (non-Complete) state per UUID
   const latestByKey = new Map();
   const lastOpenByKey = new Map();
 
@@ -930,7 +1236,6 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     });
   });
 
-  // Existing rows on targetTabName
   const existingTargetRows = allRows.filter(r => r.sheetName === targetTabName);
   const existingOnTargetByKey = new Map();
   existingTargetRows.forEach(r => {
@@ -939,7 +1244,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
 
   const toRollOver = [];
   const alreadyOnTarget = [];
-  const supersededByComplete = []; // Open on an older sheet, but marked Complete on a later sheet
+  const supersededByComplete = [];
 
   latestByKey.forEach((latestRow, normKey) => {
     const isLatestComplete = latestRow.status.trim().toLowerCase() === 'complete';
@@ -955,7 +1260,6 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     } else if (!isLatestComplete) {
       toRollOver.push(latestRow);
     } else if (lastOpenByKey.has(normKey)) {
-      // This request had an open status on an earlier sheet, but a later sheet marked it Complete
       supersededByComplete.push({
         openRow: lastOpenByKey.get(normKey),
         completedRow: latestRow
@@ -963,7 +1267,6 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     }
   });
 
-  // Also include any rows on targetTabName that did not come from sourceSheets (e.g. created directly on targetTabName)
   existingTargetRows.forEach(targetRow => {
     const normKey = targetRow.key.toLowerCase();
     if (!latestByKey.has(normKey)) {
@@ -990,7 +1293,6 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
 function updateRolloverModalPreview() {
   const targetVal = rolloverTargetDate.value.trim();
 
-  // Highlight active preset button
   Array.from(rolloverPresetBtns.children).forEach(btn => {
     btn.classList.toggle('active', btn.dataset.date === targetVal);
   });
@@ -1001,7 +1303,6 @@ function updateRolloverModalPreview() {
     return;
   }
 
-  // First check if there are any sheets dated after targetVal
   const targetTime = parseDateTab(targetVal);
   const futureTabs = dateSheets.filter(name => parseDateTab(name) > targetTime);
   if (futureTabs.length > 0) {
@@ -1107,7 +1408,6 @@ rolloverForm.addEventListener('submit', async (e) => {
     return alert('Please use exact MM-DD-YYYY format (e.g., 10-25-2026).');
   }
 
-  // Collect any user-checked force-reopen keys before reloading
   const forcedKeys = new Set(
     Array.from(rolloverPreviewBox.querySelectorAll('.chk-force-rollover:checked'))
       .map(cb => cb.dataset.key.toLowerCase())
@@ -1117,18 +1417,15 @@ rolloverForm.addEventListener('submit', async (e) => {
   const hasFuture = dateSheets.some(name => parseDateTab(name) > targetTime);
   const includeFuture = hasFuture && chkIncludeFutureTabs.checked;
 
-  // Reload fresh state from disk right before mutating
   await loadWorkbookFromDisk(sheetSelect.value);
 
   const plan = computeRolloverAnalysis(targetTabName, includeFuture);
   if (!plan.valid) return;
 
-  // Combine standard unfinished items + any user-selected force-reopened items
   const itemsToCarry = [...plan.toRollOver];
   plan.supersededByComplete.forEach(({ openRow, completedRow }) => {
     if (forcedKeys.has(openRow.key.toLowerCase())) {
       itemsToCarry.push(openRow);
-      // Also update the later sheet where it was marked Complete so it stays reopened
       const completedWs = workbook.getWorksheet(completedRow.sheetName);
       if (completedWs) {
         const cr = completedWs.getRow(completedRow.rowNumber);
@@ -1146,7 +1443,6 @@ rolloverForm.addEventListener('submit', async (e) => {
     const templateSheet = findTemplateSheet();
     targetSheet = workbook.addWorksheet(targetTabName);
 
-    // Position the new daily sheet as the first tab in the workbook
     placeWorksheetFirst(targetSheet);
 
     if (templateSheet) {
@@ -1156,7 +1452,6 @@ rolloverForm.addEventListener('submit', async (e) => {
     }
   }
 
-  // Always keep Column K hidden
   targetSheet.getColumn(11).hidden = true;
 
   const existingTargetRows = allRows.filter(r => r.sheetName === targetTabName);
@@ -1180,7 +1475,6 @@ rolloverForm.addEventListener('submit', async (e) => {
     }
   }
 
-  // Also check if any item already on targetTabName was marked Complete on target, but reopened on a prior sheet
   for (const entry of plan.alreadyOnTarget) {
     if (entry.reopenedOnSource) {
       const excelRow = targetSheet.getRow(entry.targetRow.rowNumber);
@@ -1284,7 +1578,7 @@ function writeItemToWorksheetRow(row, item) {
   row.commit();
 }
 
-// --- 7. DUAL-WRITE MIRRORING + LOCK DETECTION ---
+// --- 7. DUAL-WRITE MIRRORING + CUSTOM SUPERVISOR DIRECTORY + LOCK DETECTION ---
 async function saveWorkbookToDisk() {
   if (!workingFileHandle) return false;
 
@@ -1315,11 +1609,12 @@ async function saveWorkbookToDisk() {
     return false;
   }
 
-  // 2. Dual-Write Mirroring to (VIEW ONLY).xlsx in same directory
-  if (parentDirHandle) {
+  // 2. Dual-Write Mirroring to (VIEW ONLY).xlsx in Supervisor Folder (or Agent Folder fallback)
+  const targetMirrorDir = supervisorDirHandle || parentDirHandle;
+  if (targetMirrorDir) {
     const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
     try {
-      const mirrorHandle = await parentDirHandle.getFileHandle(mirrorFileName, { create: true });
+      const mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: true });
       const mirrorWritable = await mirrorHandle.createWritable();
       await mirrorWritable.write(buffer);
       await mirrorWritable.close();
@@ -1331,7 +1626,8 @@ async function saveWorkbookToDisk() {
     }
   }
 
-  setStatus(`Saved & Mirrored: ${workingFileHandle.name}`, 'ready');
+  const mirrorLocationNote = supervisorDirHandle ? ` (Mirrored to ${supervisorDirHandle.name})` : '';
+  setStatus(`Saved & Mirrored: ${workingFileHandle.name}${mirrorLocationNote}`, 'ready');
   return true;
 }
 

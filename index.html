@@ -33,7 +33,12 @@
       </div>
       <button id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
       <button id="btnLinkFile">📂 Select Agent Folder</button>
+      <div class="supervisor-dir-group">
+        <button id="btnSupervisorDir" class="btn-supervisor" title="Select folder where (VIEW ONLY).xlsx copies are saved">👁️ Supervisor Folder: Same as Agent</button>
+        <button id="btnResetSupervisorDir" class="btn-supervisor-reset" style="display:none;" title="Reset Supervisor export back to Agent folder">✕</button>
+      </div>
       <button id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync Unfinished to Today</button>
+      <button id="btnDeleteMode" class="btn-danger-outline" style="display:none;">🗑️ Delete Requests</button>
       <button id="btnNewEntry" class="btn-primary" style="display:none;">+ New Request</button>
     </div>
   </header>
@@ -44,13 +49,14 @@
       <option>Connect agent folder first...</option>
     </select>
 
-    <label for="scopeSelect" style="color:var(--text-muted); font-size:12px;">Search Scope:</label>
+    <label for="scopeSelect" style="color:var(--text-muted); font-size:12px;">View Scope:</label>
     <select id="scopeSelect" disabled>
       <option value="current">Current Day Tab Only</option>
       <option value="all">All Daily Tabs (Full History)</option>
     </select>
 
-    <input type="text" id="searchInput" class="search-box" placeholder="Search Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID..." disabled>
+    <input type="text" id="searchInput" class="search-box" placeholder="Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)..." disabled>
+    <span id="searchScopeHint" class="search-scope-pill" style="display:none;">🌐 Searching All Tabs</span>
   </div>
 
   <div id="filterBanner">
@@ -60,10 +66,26 @@
     <button id="btnClearKeyFilter" style="padding: 4px 10px; font-size:12px;">Clear ID Filter</button>
   </div>
 
+  <div id="deleteBanner" class="delete-banner" style="display:none;">
+    <div class="delete-banner-left">
+      <label class="checkbox-label">
+        <input type="checkbox" id="chkSelectAllBanner">
+        <span><strong>Delete Selection Mode:</strong> Check requests below to remove (<span id="deleteSelectedCount">0</span> selected)</span>
+      </label>
+    </div>
+    <div class="delete-banner-actions">
+      <button type="button" id="btnConfirmDeleteSelected" class="btn-danger" disabled>🗑️ Delete Selected (0)</button>
+      <button type="button" id="btnCancelDeleteMode">Cancel</button>
+    </div>
+  </div>
+
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
+          <th id="thDeleteSelect" class="delete-col" style="display:none;">
+            <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
+          </th>
           <th>Date Tab</th>
           <th>Tracking ID (Col K)</th>
           <th>Subject</th>
@@ -78,7 +100,7 @@
         </tr>
       </thead>
       <tbody id="listBody">
-        <tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
+        <tr><td colspan="12" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
       </tbody>
     </table>
   </div>
