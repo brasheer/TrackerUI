@@ -24,11 +24,16 @@
   <header>
     <div class="brand">
       <h1>Bidder Support Tracker PWA</h1>
-      <span id="statusPill" class="status-pill">No File Linked</span>
+      <span id="statusPill" class="status-pill">No Folder Linked</span>
     </div>
-    <div style="display:flex; gap: 8px;">
-      <button id="btnLinkFile">📂 Open Agent Tracker (.xlsx)</button>
-      <button id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover Unfinished to Today</button>
+    <div class="header-actions">
+      <div id="workbookPickerWrap" class="workbook-picker-wrap">
+        <label for="workbookSelect">Workbook:</label>
+        <select id="workbookSelect" title="Select active monthly workbook"></select>
+      </div>
+      <button id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
+      <button id="btnLinkFile">📂 Select Agent Folder</button>
+      <button id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync Unfinished to Today</button>
       <button id="btnNewEntry" class="btn-primary" style="display:none;">+ New Request</button>
     </div>
   </header>
@@ -36,7 +41,7 @@
   <div class="controls">
     <label for="sheetSelect" style="color:var(--text-muted); font-size:12px;">Day Tab:</label>
     <select id="sheetSelect" disabled>
-      <option>Load workbook first...</option>
+      <option>Connect agent folder first...</option>
     </select>
 
     <label for="scopeSelect" style="color:var(--text-muted); font-size:12px;">Search Scope:</label>
@@ -50,9 +55,9 @@
 
   <div id="filterBanner">
     <div>
-      <strong>History Trace Active:</strong> Showing all daily entries matching Key <code id="filterKeyText" style="color:var(--accent);"></code>
+      <strong>History Trace Active:</strong> Showing all daily entries matching Tracking ID <code id="filterKeyText" style="color:var(--accent);"></code>
     </div>
-    <button id="btnClearKeyFilter" style="padding: 4px 10px; font-size:12px;">Clear Key Filter</button>
+    <button id="btnClearKeyFilter" style="padding: 4px 10px; font-size:12px;">Clear ID Filter</button>
   </div>
 
   <div class="table-wrap">
@@ -60,7 +65,7 @@
       <thead>
         <tr>
           <th>Date Tab</th>
-          <th>Key (Col K)</th>
+          <th>Tracking ID (Col K)</th>
           <th>Subject</th>
           <th>Ticket #</th>
           <th>Broker</th>
@@ -73,7 +78,7 @@
         </tr>
       </thead>
       <tbody id="listBody">
-        <tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Open Agent Tracker (.xlsx)" to load your workbook.</td></tr>
+        <tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
       </tbody>
     </table>
   </div>
@@ -93,16 +98,16 @@
           </div>
           <div class="form-group">
             <label>Ticket Number (Col B)</label>
-            <input type="text" id="fTicket" placeholder="Optional (uses fallback hash if blank)">
+            <input type="text" id="fTicket" placeholder="Optional metadata">
           </div>
           <div class="form-group">
             <label>Broker Name (Col C)</label>
-            <input type="text" id="fBroker" list="brokerList" required>
+            <input type="text" id="fBroker" list="brokerList" placeholder="Select or type broker..." required>
             <datalist id="brokerList"></datalist>
           </div>
           <div class="form-group">
             <label>Master # (Col D)</label>
-            <input type="text" id="fMaster">
+            <input type="text" id="fMaster" placeholder="Auto-fills from Broker (or reverse)">
           </div>
           <div class="form-group">
             <label>Bidder # (Col E)</label>
@@ -110,7 +115,7 @@
           </div>
           <div class="form-group">
             <label>Requested Action (Col F)</label>
-            <input type="text" id="fAction" list="actionList">
+            <input type="text" id="fAction" list="actionList" placeholder="Select or type action...">
             <datalist id="actionList"></datalist>
           </div>
           <div class="form-group">
@@ -143,6 +148,44 @@
       </form>
     </div>
   </div>
+
+  <!-- Smart Rollover / Sync Modal -->
+  <div id="rolloverModal" class="modal-backdrop">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3>⏭️ Rollover / Sync Unfinished Requests</h3>
+        <span id="rolloverTodayBadge" class="key-chip" style="cursor:default;"></span>
+      </div>
+      <form id="rolloverForm">
+        <div id="rolloverFutureBanner" class="rollover-banner" style="display:none;"></div>
+
+        <div class="form-group full" style="margin-bottom: 12px;">
+          <label for="rolloverTargetDate">Target Daily Tab (MM-DD-YYYY)</label>
+          <div class="rollover-target-row">
+            <input type="text" id="rolloverTargetDate" placeholder="MM-DD-YYYY" required>
+            <div id="rolloverPresetBtns" class="rollover-presets"></div>
+          </div>
+        </div>
+
+        <div id="rolloverFutureOptionWrap" class="rollover-option-row" style="display:none;">
+          <label class="checkbox-label">
+            <input type="checkbox" id="chkIncludeFutureTabs" checked>
+            <span id="chkIncludeFutureText">Also include unfinished requests from future-dated tabs</span>
+          </label>
+        </div>
+
+        <div id="rolloverPreviewBox" class="rollover-preview-box"></div>
+
+        <div class="modal-actions">
+          <button type="button" id="btnCancelRollover">Cancel</button>
+          <button type="submit" id="btnConfirmRollover" class="btn-primary">⏭️ Run Rollover / Sync</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Non-blocking Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
 
   <script src="js/app.js"></script>
 </body>

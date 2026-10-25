@@ -1,17 +1,25 @@
 # Bidder Support Tracker (TrackerUI)
 
-A lightweight, standalone Progressive Web App (PWA) designed to read, search, update, and manage agent support logs directly from an Excel workbook (`.xlsx`) stored locally or synced via OneDrive.
+A zero-build, standalone Progressive Web App (PWA) designed to read, search, update, and manage agent support logs directly from Excel workbooks (`.xlsx`) stored locally or synced via OneDrive.
 
 ---
 
-## Features
+## Key Features
 
-- **Direct In-Browser Excel Sync**: Powered by [ExcelJS](https://github.com/exceljs/exceljs) and the native browser **File System Access API**. Edits write back directly to the local/OneDrive `.xlsx` file without needing an external database or server backend.
-- **Daily Rollover Engine**: One-click rollover to copy all unfinished requests (status $\neq$ `Complete`) from the most recent day tab to a newly created day tab (`MM-DD-YYYY`), automatically cloning column widths, headers, and styles.
-- **Cross-Day History Tracking**: Each request maintains a unique persistent key in hidden **Column K**. Clicking any Key chip filters the entire workbook history to show the full multi-day lifecycle of that request.
-- **Search & Scope Filters**: Filter records by current day tab or search across all historical tabs simultaneously.
-- **Excel Lock Detection**: Alerts when the target `.xlsx` file is currently open and locked by desktop Excel, preventing silent corruption or lost edits.
-- **Progressive Web App (PWA)**: Installable as a desktop app in Chrome, Edge, and other Chromium browsers with offline caching via Service Worker (`sw.js`).
+- **Directory-Based Dual-Write Architecture (`showDirectoryPicker`)**:
+  - Connect your agent directory (e.g., `.\trackers\[Agent Name]\`) with 1-click folder reconnection persisted via `IndexedDB`.
+  - Automatically scans for monthly working `.xlsx` workbooks while ignoring Excel lock files (`~$*`) and supervisor mirror files (`*(VIEW ONLY).xlsx`).
+  - **Dual-Write Mirroring**: Every save writes both the primary working workbook (`Agent Name Bidder Support Tracker - October 2026.xlsx`) and an identical supervisor mirror (`Agent Name Bidder Support Tracker - October 2026 (VIEW ONLY).xlsx`). If a supervisor has the `(VIEW ONLY)` mirror open in Desktop Excel, the agent's save still succeeds with a non-blocking warning pill.
+- **Pure Immutable GUIDs in Hidden Column K (`Tracking ID`)**:
+  - Uses `crypto.randomUUID()` to assign a permanent lowercase 36-character UUIDv4 to every request in hidden Column K, completely decoupled from optional Ticket numbers (Col B).
+  - Automatically backfills UUIDs for legacy rows missing a Column K identifier.
+  - Displays a compact 8-character chip (`🔍 8f4a92c1...`) with full UUID hover tooltip and 1-click cross-workbook history tracing.
+- **Dynamic Reference Sheet Parsing & Auto-Fill**:
+  - **`validation lists` (or `Validation List`)**: Populates `Requested Action` (Col A) autocomplete and `Request Status` (Col B) dropdown options dynamically.
+  - **`Master Accounts` (or `Master Account`)**: Maps `Broker Name` (Col A), `Master#` (Col B), and optional `Default Bidder#` (Col C), providing bidirectional auto-fill in the New/Edit Request modal.
+- **Smart Multi-Sheet & Idempotent Rollover Engine**:
+  - Scans **all** prior `MM-DD-YYYY` sheets in chronological order (oldest to newest) to resolve the latest historical state of every unique request UUID across the entire workbook.
+  - Safely creates or merges unfinished requests (`status !== 'Complete'`) into the target `MM-DD-YYYY` tab without duplicating rows or failing if the target tab already exists.
 
 ---
 
@@ -26,10 +34,10 @@ TrackerUI/
 │   │   └── icon.svg           # Scalable vector icon
 │   └── images/
 ├── css/
-│   └── styles.css             # Dark-themed UI styles
+│   └── styles.css             # Dark-themed UI styles & toast notifications
 ├── data/                      # Folder for sample data or template files
 ├── js/
-│   └── app.js                 # PWA logic, ExcelJS I/O, search & rollover
+│   └── app.js                 # Directory I/O, dual-write, UUID tracking & rollover engine
 ├── .gitignore                 # Configured for OneDrive/Google Drive & OS temp files
 ├── index.html                 # App shell and modal markup
 ├── manifest.json              # PWA manifest
@@ -41,82 +49,42 @@ TrackerUI/
 
 ## Workbook Structure
 
-The workbook uses daily sheets with date-formatted tab names (`MM-DD-YYYY`), alongside optional template and lookup sheets:
-
-### Daily Sheet Columns
+### Daily Sheet Columns (`MM-DD-YYYY`)
 
 | Col | Header | Description |
 |---|---|---|
 | **A** | `Subject` | Request subject line |
-| **B** | `Ticket Number` | Ticket identifier |
-| **C** | `Broker Name` | Broker associated with the request |
-| **D** | `Master #` | Master account number |
-| **E** | `Bidder #` | Bidder number |
-| **F** | `Requested Action` | Action requested |
-| **G** | `Yard #` | Yard or branch location |
+| **B** | `Ticket Number` | Optional ticket identifier (normalized to uppercase) |
+| **C** | `Broker Name` | Broker associated with the request (linked to `Master Accounts`) |
+| **D** | `Master #` | Master account number (auto-filled & normalized to uppercase) |
+| **E** | `Bidder #` | Bidder number (normalized to uppercase) |
+| **F** | `Requested Action` | Action requested (populated from `validation lists` Col A) |
+| **G** | `Yard #` | Yard or branch location (normalized to uppercase) |
 | **H** | `Lot Numbers` | Specific lot numbers |
 | **I** | `Action Notes` | Detailed notes (collapsible preview in UI) |
-| **J** | `Request Status` | `Pending`, `In Progress`, `Waiting on Buyer`, `Escalated`, or `Complete` |
-| **K** | `Key` | **Hidden column**: Persistent tracking key preserved across rollovers |
+| **J** | `Request Status` | Populated from `validation lists` Col B (falls back to `Pending`, `In Progress`, `Waiting on Buyer`, `Escalated`, `Complete`) |
+| **K** | `Tracking ID` | **Hidden column**: Pure immutable UUIDv4 (`crypto.randomUUID()`) preserved across rollovers |
 
-### Specialized Sheets
-- `template`: (Optional) Blueprint sheet used to inherit headers, column widths, and cell formatting when generating new daily tabs. If omitted, the most recent daily tab is used as the template.
-- `Validation List`: Reference sheet for dropdown lookups.
-- `Master Account`: Reference sheet for master account mappings.
+### Specialized Reference Sheets
+- `template`: Blueprint sheet used to clone headers, column widths, and cell formatting when creating new daily tabs.
+- `validation lists` / `Validation List`:
+  - **Column A** (Row 2+): `Requested Action` autocomplete options.
+  - **Column B** (Row 2+): `Request Status` select options.
+- `Master Accounts` / `Master Account`:
+  - **Column A** (Row 2+): `Broker Name`
+  - **Column B** (Row 2+): `Master#`
+  - **Column C** (Row 2+): `Default Bidder#` (optional)
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
-The **File System Access API** (`window.showOpenFilePicker`) requires:
+The **File System Access API** (`window.showDirectoryPicker`) requires:
 1. A Chromium-based browser (**Google Chrome**, **Microsoft Edge**, **Brave**, or **Opera**).
 2. A secure origin (`http://localhost` or `https://`). Opening `index.html` directly as `file:///` is not permitted by browser security policies.
 
----
-
 ### Running Locally
-
-#### Option 1: VS Code Live Server (Recommended)
-1. Install the **Live Server** extension in VS Code.
-2. Right-click [`index.html`](index.html) and select **"Open with Live Server"**.
-
-#### Option 2: Python HTTP Server
-Run from the project root in PowerShell:
-```powershell
-python -m http.server 8080
-```
-Then visit `http://localhost:8080` in your browser.
-
-#### Option 3: Node.js `serve`
-```powershell
-npx serve .
-```
-
----
-
-### Hosting on GitHub Pages
-
-1. Push your repository to GitHub:
-   ```powershell
-   git remote add origin https://github.com/<your-username>/TrackerUI.git
-   git push -u origin main
-   ```
-2. In your GitHub repository:
-   - Navigate to **Settings** > **Pages**.
-   - Under **Build and deployment** > **Source**, choose **Deploy from a branch**.
-   - Select branch **`main`** and folder **`/ (root)`**, then click **Save**.
-3. Access your live PWA at:
-   ```
-   https://<your-username>.github.io/TrackerUI/
-   ```
-4. Click the install icon in your browser's address bar to install TrackerUI to your desktop.
-
----
-
-## OneDrive Integration & Best Practices
-
-- When opening an Excel file synced via OneDrive, keep desktop Excel closed while actively editing and saving requests in the PWA to avoid Windows file locks.
-- If desktop Excel has the file open, the app detects the lock and instructs you to close Excel before retrying the save.
-- All OneDrive and Google Drive temporary lock files (`~$*`, `*.tmp`, `*.cloud`, conflict copies) are automatically excluded by [`.gitignore`](.gitignore).
-
+- **VS Code Live Server**: Right-click [`index.html`](index.html) and select **"Open with Live Server"**.
+- **Python HTTP Server**: `python -m http.server 8080` -> `http://localhost:8080`.
+- **Node.js**: `npx serve .`
