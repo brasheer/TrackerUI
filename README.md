@@ -119,3 +119,4 @@ npx serve .
 - When opening an Excel file synced via OneDrive, keep desktop Excel closed while actively editing and saving requests in the PWA to avoid Windows file locks.
 - If desktop Excel has the file open, the app detects the lock and instructs you to close Excel before retrying the save.
 - All OneDrive and Google Drive temporary lock files (`~$*`, `*.tmp`, `*.cloud`, conflict copies) are automatically excluded by [`.gitignore`](.gitignore).
+
