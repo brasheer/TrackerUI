@@ -153,6 +153,153 @@ const chkIncludeFutureText = document.getElementById('chkIncludeFutureText');
 const rolloverPreviewBox = document.getElementById('rolloverPreviewBox');
 const btnCancelRollover = document.getElementById('btnCancelRollover');
 
+// In-App Dialog Modal DOM Elements
+const dialogModal = document.getElementById('dialogModal');
+const dialogForm = document.getElementById('dialogForm');
+const dialogTitle = document.getElementById('dialogTitle');
+const dialogBadge = document.getElementById('dialogBadge');
+const dialogMessage = document.getElementById('dialogMessage');
+const dialogInputWrap = document.getElementById('dialogInputWrap');
+const dialogInputLabel = document.getElementById('dialogInputLabel');
+const dialogInput = document.getElementById('dialogInput');
+const dialogInputError = document.getElementById('dialogInputError');
+const btnDialogCancel = document.getElementById('btnDialogCancel');
+const btnDialogConfirm = document.getElementById('btnDialogConfirm');
+
+// --- IN-APP POPUP DIALOG ENGINE (Replaces native alert / confirm / prompt) ---
+let activeDialogResolver = null;
+let activeDialogMode = 'alert'; // 'alert' | 'confirm' | 'prompt'
+let activeDialogValidator = null;
+
+function closeDialogModal(resultValue) {
+  if (!dialogModal) return;
+  dialogModal.classList.remove('open');
+  dialogInputError.style.display = 'none';
+  dialogInputError.textContent = '';
+  const resolver = activeDialogResolver;
+  activeDialogResolver = null;
+  activeDialogValidator = null;
+  if (resolver) {
+    resolver(resultValue);
+  }
+}
+
+function openDialogBase({
+  mode,
+  title = 'Notification',
+  message = '',
+  badge = '',
+  confirmText = 'OK',
+  cancelText = 'Cancel',
+  variant = 'primary',
+  inputLabel = 'Value',
+  defaultValue = '',
+  placeholder = '',
+  validate = null
+}) {
+  if (activeDialogResolver) {
+    closeDialogModal(mode === 'prompt' ? null : false);
+  }
+
+  return new Promise((resolve) => {
+    activeDialogResolver = resolve;
+    activeDialogMode = mode;
+    activeDialogValidator = typeof validate === 'function' ? validate : null;
+
+    dialogTitle.textContent = title;
+    if (badge) {
+      dialogBadge.textContent = badge;
+      dialogBadge.style.display = 'inline-block';
+    } else {
+      dialogBadge.style.display = 'none';
+    }
+
+    dialogMessage.textContent = message;
+    dialogInputError.style.display = 'none';
+    dialogInputError.textContent = '';
+
+    if (mode === 'prompt') {
+      dialogInputWrap.style.display = 'flex';
+      dialogInputLabel.textContent = inputLabel;
+      dialogInput.value = defaultValue;
+      dialogInput.placeholder = placeholder;
+    } else {
+      dialogInputWrap.style.display = 'none';
+      dialogInput.value = '';
+    }
+
+    btnDialogCancel.style.display = mode === 'alert' ? 'none' : 'inline-block';
+    btnDialogCancel.textContent = cancelText;
+
+    btnDialogConfirm.textContent = confirmText;
+    btnDialogConfirm.className = variant === 'danger' ? 'btn-danger' : 'btn-primary';
+
+    dialogModal.classList.add('open');
+
+    setTimeout(() => {
+      if (mode === 'prompt') {
+        dialogInput.focus();
+        dialogInput.select();
+      } else {
+        btnDialogConfirm.focus();
+      }
+    }, 20);
+  });
+}
+
+function showModalAlert(optionsOrMessage, title = 'TrackerUI Notice') {
+  if (typeof optionsOrMessage === 'string') {
+    return openDialogBase({ mode: 'alert', title, message: optionsOrMessage, confirmText: 'OK' });
+  }
+  return openDialogBase({ mode: 'alert', ...optionsOrMessage });
+}
+
+function showModalConfirm(optionsOrMessage, title = 'Confirm Action') {
+  if (typeof optionsOrMessage === 'string') {
+    return openDialogBase({ mode: 'confirm', title, message: optionsOrMessage });
+  }
+  return openDialogBase({ mode: 'confirm', ...optionsOrMessage });
+}
+
+function showModalPrompt(options) {
+  return openDialogBase({ mode: 'prompt', ...options });
+}
+
+btnDialogCancel.addEventListener('click', () => {
+  closeDialogModal(activeDialogMode === 'prompt' ? null : false);
+});
+
+dialogInput.addEventListener('input', () => {
+  if (dialogInputError.style.display !== 'none') {
+    dialogInputError.style.display = 'none';
+  }
+});
+
+dialogForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (activeDialogMode === 'prompt') {
+    const val = dialogInput.value.trim();
+    if (!val) {
+      dialogInputError.textContent = 'Please enter a value.';
+      dialogInputError.style.display = 'block';
+      dialogInput.focus();
+      return;
+    }
+    if (activeDialogValidator) {
+      const errMsg = activeDialogValidator(val);
+      if (errMsg) {
+        dialogInputError.textContent = errMsg;
+        dialogInputError.style.display = 'block';
+        dialogInput.focus();
+        return;
+      }
+    }
+    closeDialogModal(val);
+  } else {
+    closeDialogModal(true);
+  }
+});
+
 // --- UUID GENERATOR (PURE IMMUTABLE GUID FOR COLUMN K) ---
 function generateTrackingGuid() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -185,6 +332,10 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (dialogModal && dialogModal.classList.contains('open')) {
+      closeDialogModal(activeDialogMode === 'prompt' ? null : false);
+      return;
+    }
     closeToolsMenu();
   }
 });
@@ -290,7 +441,10 @@ async function promptSelectAgentFolder() {
   closeToolsMenu();
   try {
     if (typeof window.showDirectoryPicker !== 'function') {
-      return alert('Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost/HTTPS.');
+      return showModalAlert({
+        title: 'Browser Not Supported',
+        message: 'Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost or HTTPS.'
+      });
     }
     const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
     parentDirHandle = dirHandle;
@@ -302,7 +456,10 @@ async function promptSelectAgentFolder() {
     await scanDirectoryAndLoadWorkbooks();
   } catch (err) {
     if (err.name !== 'AbortError') {
-      alert('Could not open agent folder: ' + err.message);
+      await showModalAlert({
+        title: 'Could Not Open Agent Folder',
+        message: err.message
+      });
     }
   }
 }
@@ -340,11 +497,17 @@ btnReconnect.addEventListener('click', async () => {
 
       await scanDirectoryAndLoadWorkbooks();
     } else {
-      alert('Read/Write permission was not granted for the folder.');
+      await showModalAlert({
+        title: 'Permission Required',
+        message: 'Read/Write permission was not granted for the folder.'
+      });
     }
   } catch (err) {
     console.error('Reconnect folder error:', err);
-    alert('Could not reconnect folder: ' + err.message);
+    await showModalAlert({
+      title: 'Could Not Reconnect Folder',
+      message: err.message
+    });
   }
 });
 
@@ -352,7 +515,10 @@ btnSupervisorDir.addEventListener('click', async () => {
   closeToolsMenu();
   try {
     if (typeof window.showDirectoryPicker !== 'function') {
-      return alert('Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost/HTTPS.');
+      return showModalAlert({
+        title: 'Browser Not Supported',
+        message: 'Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost or HTTPS.'
+      });
     }
 
     if (cachedSupervisorDirHandle && !supervisorDirHandle) {
@@ -385,7 +551,10 @@ btnSupervisorDir.addEventListener('click', async () => {
     }
   } catch (err) {
     if (err.name !== 'AbortError') {
-      alert('Could not select Supervisor export folder: ' + err.message);
+      await showModalAlert({
+        title: 'Supervisor Folder Error',
+        message: 'Could not select Supervisor export folder: ' + err.message
+      });
     }
   }
 });
@@ -576,7 +745,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   scopeSelect.disabled = dateSheets.length === 0;
   searchInput.disabled = dateSheets.length === 0;
 
-  btnNewEntry.style.display = 'inline-block';
+  btnNewEntry.style.display = 'inline-flex';
   btnRollover.style.display = 'inline-block';
   btnRepairSchema.disabled = false;
   btnAddBlankTab.disabled = false;
@@ -745,22 +914,37 @@ function bootstrapWorkbookSchemaInMemory(wb) {
 async function promptCreateNewWorkbook() {
   closeToolsMenu();
   if (!parentDirHandle) {
-    return alert('Please select an Agent Folder first.');
+    return showModalAlert({
+      title: 'Select Agent Folder First',
+      message: 'Please connect an Agent Folder before creating a new workbook.'
+    });
   }
 
   const now = new Date();
   const monthName = now.toLocaleString('en-US', { month: 'long' });
   const defaultFileName = `Agent Bidder Support Tracker - ${monthName} ${now.getFullYear()}.xlsx`;
 
-  const rawName = prompt('Enter filename for the new Tracker Workbook (.xlsx):', defaultFileName);
+  const rawName = await showModalPrompt({
+    title: '✨ Create New Monthly Workbook',
+    badge: parentDirHandle.name,
+    message: 'Enter a filename for the new Excel tracker workbook (.xlsx). It will be initialized with template, validation lists, Master Accounts, and today\'s daily tab.',
+    inputLabel: 'Workbook Filename (.xlsx)',
+    defaultValue: defaultFileName,
+    confirmText: '✨ Create Workbook',
+    validate: (val) => {
+      let checkName = val.trim();
+      if (!checkName.toLowerCase().endsWith('.xlsx')) checkName += '.xlsx';
+      if (checkName.toLowerCase().endsWith('(view only).xlsx') || checkName.startsWith('~$')) {
+        return 'Filename cannot start with "~$" or end with "(VIEW ONLY).xlsx".';
+      }
+      return null;
+    }
+  });
   if (!rawName) return;
 
   let fileName = rawName.trim();
   if (!fileName.toLowerCase().endsWith('.xlsx')) {
     fileName += '.xlsx';
-  }
-  if (fileName.toLowerCase().endsWith('(view only).xlsx') || fileName.startsWith('~$')) {
-    return alert('Workbook filename cannot start with "~$" or end with "(VIEW ONLY).xlsx".');
   }
 
   try {
@@ -774,7 +958,13 @@ async function promptCreateNewWorkbook() {
     }
 
     if (exists) {
-      const overwrite = confirm(`"${fileName}" already exists in ${parentDirHandle.name}. Overwrite it with a fresh workbook?`);
+      const overwrite = await showModalConfirm({
+        title: '⚠️ Workbook Already Exists',
+        badge: fileName,
+        message: `"${fileName}" already exists in "${parentDirHandle.name}".\n\nDo you want to overwrite it with a fresh workbook?`,
+        confirmText: 'Overwrite Workbook',
+        variant: 'danger'
+      });
       if (!overwrite) return;
     }
 
@@ -792,7 +982,10 @@ async function promptCreateNewWorkbook() {
     }
   } catch (err) {
     console.error('Error creating new workbook:', err);
-    alert('Could not create workbook: ' + err.message);
+    await showModalAlert({
+      title: 'Could Not Create Workbook',
+      message: err.message
+    });
   }
 }
 
@@ -839,17 +1032,33 @@ btnAddBlankTab.addEventListener('click', async () => {
     ? addDaysToDateTab(latestSheet, 1)
     : getTodayFormatted();
 
-  const rawInput = prompt('Enter new blank daily tab name (MM-DD-YYYY):', suggestedDate);
+  const rawInput = await showModalPrompt({
+    title: '➕ New Blank Day Tab',
+    badge: 'MM-DD-YYYY',
+    message: 'Enter the date for the new blank daily worksheet tab (cloned from your template headers):',
+    inputLabel: 'Daily Tab Date (MM-DD-YYYY)',
+    defaultValue: suggestedDate,
+    placeholder: 'MM-DD-YYYY',
+    confirmText: '➕ Create Tab',
+    validate: (val) => {
+      if (!DATE_TAB_REGEX.test(val)) {
+        return 'Please use exact MM-DD-YYYY format (e.g., 10-25-2026).';
+      }
+      if (workbook.getWorksheet(val)) {
+        return `Worksheet tab "${val}" already exists in this workbook.`;
+      }
+      return null;
+    }
+  });
   if (!rawInput) return;
   const newTabName = rawInput.trim();
 
-  if (!DATE_TAB_REGEX.test(newTabName)) {
-    return alert('Please use exact MM-DD-YYYY format (e.g., 10-25-2026).');
-  }
-
   await loadWorkbookFromDisk(sheetSelect.value);
   if (workbook.getWorksheet(newTabName)) {
-    return alert(`Worksheet tab "${newTabName}" already exists!`);
+    return showModalAlert({
+      title: 'Tab Already Exists',
+      message: `Worksheet tab "${newTabName}" already exists!`
+    });
   }
 
   const templateSheet = findTemplateSheet();
@@ -875,25 +1084,50 @@ btnRenameTab.addEventListener('click', async () => {
   closeToolsMenu();
   const currentTab = sheetSelect.value;
   if (!workbook || !currentTab || !DATE_TAB_REGEX.test(currentTab)) {
-    return alert('Select a valid daily MM-DD-YYYY tab to rename.');
+    return showModalAlert({
+      title: 'No Daily Tab Selected',
+      message: 'Select a valid daily MM-DD-YYYY tab to rename.'
+    });
   }
 
-  const rawNewName = prompt(`Rename daily tab "${currentTab}" to (MM-DD-YYYY):`, currentTab);
+  const rawNewName = await showModalPrompt({
+    title: '✏️ Rename Current Day Tab',
+    badge: currentTab,
+    message: `Enter a new date name (MM-DD-YYYY) for worksheet tab "${currentTab}":`,
+    inputLabel: 'New Tab Name (MM-DD-YYYY)',
+    defaultValue: currentTab,
+    placeholder: 'MM-DD-YYYY',
+    confirmText: '✏️ Rename Tab',
+    validate: (val) => {
+      if (!DATE_TAB_REGEX.test(val)) {
+        return 'New tab name must use exact MM-DD-YYYY format.';
+      }
+      if (val !== currentTab && workbook.getWorksheet(val)) {
+        return `A worksheet named "${val}" already exists in this workbook.`;
+      }
+      return null;
+    }
+  });
   if (!rawNewName) return;
   const newTabName = rawNewName.trim();
 
   if (newTabName === currentTab) return;
-  if (!DATE_TAB_REGEX.test(newTabName)) {
-    return alert('New tab name must use exact MM-DD-YYYY format.');
-  }
 
   await loadWorkbookFromDisk(currentTab);
   if (workbook.getWorksheet(newTabName)) {
-    return alert(`A worksheet named "${newTabName}" already exists in this workbook.`);
+    return showModalAlert({
+      title: 'Tab Already Exists',
+      message: `A worksheet named "${newTabName}" already exists in this workbook.`
+    });
   }
 
   const ws = workbook.getWorksheet(currentTab);
-  if (!ws) return alert(`Worksheet "${currentTab}" not found.`);
+  if (!ws) {
+    return showModalAlert({
+      title: 'Worksheet Not Found',
+      message: `Worksheet "${currentTab}" was not found.`
+    });
+  }
 
   ws.name = newTabName;
   const saved = await saveWorkbookToDisk();
@@ -909,20 +1143,33 @@ btnDeleteTab.addEventListener('click', async () => {
   closeToolsMenu();
   const currentTab = sheetSelect.value;
   if (!workbook || !currentTab || !DATE_TAB_REGEX.test(currentTab)) {
-    return alert('Select a valid daily MM-DD-YYYY tab to delete.');
+    return showModalAlert({
+      title: 'No Daily Tab Selected',
+      message: 'Select a valid daily MM-DD-YYYY tab to delete.'
+    });
   }
 
   const rowsOnTab = allRows.filter(r => r.sheetName === currentTab);
-  const confirmed = confirm(
-    `Are you sure you want to permanently delete worksheet tab "${currentTab}"?\n\n` +
-    `This tab currently contains ${rowsOnTab.length} request(s).\n` +
-    `Reference tabs (template, validation lists, Master Accounts) will not be affected.`
-  );
+  const confirmed = await showModalConfirm({
+    title: `🗑️ Delete Daily Tab "${currentTab}"?`,
+    badge: `${rowsOnTab.length} request(s)`,
+    message:
+      `Are you sure you want to permanently delete worksheet tab "${currentTab}"?\n\n` +
+      `This tab currently contains ${rowsOnTab.length} request(s).\n` +
+      `Reference tabs (template, validation lists, Master Accounts) will not be affected.`,
+    confirmText: '🗑️ Delete Tab',
+    variant: 'danger'
+  });
   if (!confirmed) return;
 
   await loadWorkbookFromDisk(currentTab);
   const ws = workbook.getWorksheet(currentTab);
-  if (!ws) return alert(`Worksheet "${currentTab}" not found.`);
+  if (!ws) {
+    return showModalAlert({
+      title: 'Worksheet Not Found',
+      message: `Worksheet "${currentTab}" was not found.`
+    });
+  }
 
   // Ensure workbook always retains at least 1 sheet so ExcelJS produces a valid .xlsx
   if (workbook.worksheets.length <= 1) {
@@ -1214,6 +1461,34 @@ function getRowCompositeId(sheetName, rowNumber) {
   return `${sheetName}::${rowNumber}`;
 }
 
+function createShadowNewRowElement(colSpan, currentSheet) {
+  if (!workbook || isDeleteMode || !currentSheet || !DATE_TAB_REGEX.test(currentSheet)) {
+    return null;
+  }
+  const tr = document.createElement('tr');
+  tr.className = 'shadow-new-row';
+  tr.title = `Click to add a new support request to ${currentSheet}`;
+  tr.innerHTML = `
+    <td colspan="${colSpan}">
+      <div class="shadow-row-inner">
+        <div class="shadow-row-left">
+          <span class="shadow-plus-btn" aria-hidden="true">＋</span>
+          <span class="shadow-row-label">Add new support request to <strong>${escapeHtml(currentSheet)}</strong>...</span>
+          <div class="shadow-ghost-pills">
+            <span class="shadow-ghost-pill">Subject</span>
+            <span class="shadow-ghost-pill">Ticket #</span>
+            <span class="shadow-ghost-pill">Broker &amp; Master #</span>
+            <span class="shadow-ghost-pill">Requested Action</span>
+            <span class="shadow-ghost-pill">Yard / Lots</span>
+          </div>
+        </div>
+        <span class="shadow-action-pill">＋ New Request</span>
+      </div>
+    </td>
+  `;
+  return tr;
+}
+
 function renderList() {
   const query = searchInput.value.trim().toLowerCase();
   const scope = scopeSelect.value;
@@ -1246,6 +1521,10 @@ function renderList() {
   const colSpan = isDeleteMode ? 12 : 11;
   if (filtered.length === 0) {
     listBody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center; color:var(--text-muted); padding: 24px;">No matching requests found.</td></tr>`;
+    const shadowRowEmpty = createShadowNewRowElement(colSpan, currentSheet);
+    if (shadowRowEmpty) {
+      listBody.appendChild(shadowRowEmpty);
+    }
     syncSelectAllCheckboxes();
     updateStatusBarTelemetry();
     return;
@@ -1303,6 +1582,11 @@ function renderList() {
     `;
     listBody.appendChild(tr);
   });
+
+  const shadowRow = createShadowNewRowElement(colSpan, currentSheet);
+  if (shadowRow) {
+    listBody.appendChild(shadowRow);
+  }
 
   syncSelectAllCheckboxes();
   updateStatusBarTelemetry();
@@ -1404,11 +1688,16 @@ btnConfirmDeleteSelected.addEventListener('click', async () => {
     .join('\n');
   const moreNotice = itemsToDelete.length > 12 ? `\n...and ${itemsToDelete.length - 12} more.` : '';
 
-  const confirmed = confirm(
-    `Are you sure you want to permanently delete ${itemsToDelete.length} selected request(s)?\n\n` +
-    `${previewLines}${moreNotice}\n\n` +
-    `This will remove the row(s) from the workbook and save immediately.`
-  );
+  const confirmed = await showModalConfirm({
+    title: `🗑️ Delete ${itemsToDelete.length} Selected Request(s)?`,
+    badge: `${itemsToDelete.length} selected`,
+    message:
+      `Are you sure you want to permanently delete ${itemsToDelete.length} selected request(s)?\n\n` +
+      `${previewLines}${moreNotice}\n\n` +
+      `This will remove the row(s) from the workbook and save immediately.`,
+    confirmText: `🗑️ Delete ${itemsToDelete.length} Request(s)`,
+    variant: 'danger'
+  });
   if (!confirmed) return;
 
   const currentTab = sheetSelect.value;
@@ -1444,8 +1733,14 @@ btnConfirmDeleteSelected.addEventListener('click', async () => {
   }
 });
 
-// Delegate clicks for Key Chip filter, Collapsible Notes, and Edit button
+// Delegate clicks for Shadow New Request Row, Key Chip filter, Collapsible Notes, and Edit button
 listBody.addEventListener('click', (e) => {
+  const shadowRow = e.target.closest('.shadow-new-row');
+  if (shadowRow) {
+    openNewRequestModal();
+    return;
+  }
+
   const keyChip = e.target.closest('.key-chip');
   if (keyChip && keyChip.dataset.key) {
     activeKeyFilter = keyChip.dataset.key;
@@ -1481,9 +1776,12 @@ scopeSelect.addEventListener('change', renderList);
 searchInput.addEventListener('input', renderList);
 
 // --- 6. EDIT & CREATE MODAL + INPUT HYGIENE + CROSS-TAB STATUS PROPAGATION ---
-btnNewEntry.addEventListener('click', () => {
+async function openNewRequestModal() {
   if (!sheetSelect.value || !DATE_TAB_REGEX.test(sheetSelect.value)) {
-    return alert('Create or select a daily tab (MM-DD-YYYY) first using Bootstrap or Rollover / Sync.');
+    return showModalAlert({
+      title: 'No Daily Tab Active',
+      message: 'Create or select a daily tab (MM-DD-YYYY) first using Bootstrap or Rollover / Sync.'
+    });
   }
   editingTarget = null;
   document.getElementById('modalTitle').textContent = `New Request (${sheetSelect.value})`;
@@ -1495,7 +1793,10 @@ btnNewEntry.addEventListener('click', () => {
   ensureStatusOptionExists('Pending');
   fStatus.value = 'Pending';
   editModal.classList.add('open');
-});
+  setTimeout(() => fSubject.focus(), 20);
+}
+
+btnNewEntry.addEventListener('click', openNewRequestModal);
 
 function ensureStatusOptionExists(statusValue) {
   if (!statusValue) return;
@@ -1544,7 +1845,12 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
 
   await loadWorkbookFromDisk(currentSheetName);
   const worksheet = workbook.getWorksheet(currentSheetName);
-  if (!worksheet) return alert('Target worksheet not found!');
+  if (!worksheet) {
+    return showModalAlert({
+      title: 'Worksheet Not Found',
+      message: `Target worksheet "${currentSheetName}" was not found in the workbook.`
+    });
+  }
 
   const subjectVal = fSubject.value.trim();
   const ticketVal = fTicket.value.trim().toUpperCase();
@@ -1594,10 +1900,15 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     );
     if (newerInstances.length > 0) {
       const newerSummary = newerInstances.map(r => `${r.sheetName} (${r.status})`).join(', ');
-      const syncNewer = confirm(
-        `This request also exists on newer tab(s): ${newerSummary}.\n\n` +
-        `Update its status to "${statusVal}" on those newer tab(s) as well so Rollover uses your updated status?`
-      );
+      const syncNewer = await showModalConfirm({
+        title: '🔄 Sync Status Across Newer Tab(s)?',
+        badge: statusVal,
+        message:
+          `This request also exists on newer tab(s): ${newerSummary}.\n\n` +
+          `Update its status to "${statusVal}" on those newer tab(s) as well so Rollover uses your updated status?`,
+        confirmText: '🔄 Update Newer Tab(s)',
+        cancelText: 'Only This Tab'
+      });
       if (syncNewer) {
         newerInstances.forEach(inst => {
           const newerWs = workbook.getWorksheet(inst.sheetName);
@@ -1907,7 +2218,10 @@ rolloverForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const targetTabName = rolloverTargetDate.value.trim();
   if (!DATE_TAB_REGEX.test(targetTabName)) {
-    return alert('Please use exact MM-DD-YYYY format (e.g., 10-25-2026).');
+    return showModalAlert({
+      title: 'Invalid Date Format',
+      message: 'Please use exact MM-DD-YYYY format (e.g., 10-25-2026).'
+    });
   }
 
   const forcedKeys = new Set(
@@ -1996,7 +2310,6 @@ rolloverForm.addEventListener('submit', async (e) => {
     const actionLabel = createdNewSheet ? `Created & synced ${targetTabName}` : `Synced ${targetTabName}`;
     const msg = `${actionLabel}: Added ${addedCount} newly rolled-over request(s) (${alreadyPresentCount} already present on sheet${reopenSuffix}).`;
     showToast(msg, 'success');
-    alert(msg);
   }
 });
 
@@ -2178,7 +2491,11 @@ async function saveWorkbookToDisk() {
   } catch (err) {
     console.error('Failed to serialize workbook buffer:', err);
     setStatus('Serialization Error', 'locked');
-    alert('Failed to generate Excel buffer: ' + err.message);
+    await showModalAlert({
+      title: 'Excel Serialization Error',
+      message: 'Failed to generate Excel buffer: ' + err.message,
+      variant: 'danger'
+    });
     return false;
   }
 
@@ -2190,11 +2507,14 @@ async function saveWorkbookToDisk() {
   } catch (err) {
     console.error('Primary file write error:', err);
     setStatus('File Locked! Close Excel & Retry', 'locked');
-    alert(
-      'SAVE BLOCKED BY WINDOWS:\n\n' +
-      `The working workbook ("${workingFileHandle.name}") is currently open in Desktop Excel.\n\n` +
-      'Close the file in Excel and click Save again.'
-    );
+    await showModalAlert({
+      title: '🔒 Save Blocked by Windows (File Locked)',
+      badge: workingFileHandle.name,
+      message:
+        `The working workbook ("${workingFileHandle.name}") is currently open and locked in Desktop Excel.\n\n` +
+        'Please close the file in Desktop Excel and click Save again.',
+      variant: 'danger'
+    });
     return false;
   }
 

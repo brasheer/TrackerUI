@@ -35,7 +35,6 @@
       <button type="button" id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
       <button type="button" id="btnLinkFile">📂 Select Agent Folder</button>
       <button type="button" id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync</button>
-      <button type="button" id="btnNewEntry" class="btn-primary" style="display:none;">+ New Request</button>
 
       <!-- Clean Popover Workspace & Tools Menu -->
       <div class="tools-menu-wrap" id="toolsMenuWrap">
@@ -93,6 +92,10 @@
   </header>
 
   <div class="controls">
+    <button type="button" id="btnNewEntry" class="btn-primary btn-new-request-bar" style="display:none;" title="Add a new support request to the active Day Tab">
+      <span class="plus-icon">＋</span> New Request
+    </button>
+
     <div class="sheet-nav-group">
       <label for="sheetSelect" style="color:var(--text-muted); font-size:12px;">Day Tab:</label>
       <button type="button" id="btnPrevSheet" class="btn-sheet-step" title="Previous (Older) Day Tab" disabled>◀</button>
@@ -267,6 +270,28 @@
         <div class="modal-actions">
           <button type="button" id="btnCancelRollover">Cancel</button>
           <button type="submit" id="btnConfirmRollover" class="btn-primary">⏭️ Run Rollover / Sync</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- In-App Dialog Modal (Replaces native browser alert / confirm / prompt) -->
+  <div id="dialogModal" class="modal-backdrop dialog-backdrop">
+    <div class="modal dialog-modal">
+      <div class="modal-header">
+        <h3 id="dialogTitle">Notification</h3>
+        <span id="dialogBadge" class="key-chip" style="display:none; cursor:default;"></span>
+      </div>
+      <form id="dialogForm">
+        <div id="dialogMessage" class="dialog-message"></div>
+        <div id="dialogInputWrap" class="form-group" style="display:none; margin-top: 14px;">
+          <label id="dialogInputLabel" for="dialogInput">Value</label>
+          <input type="text" id="dialogInput" autocomplete="off">
+          <div id="dialogInputError" class="dialog-input-error" style="display:none;"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btnDialogCancel">Cancel</button>
+          <button type="submit" id="btnDialogConfirm" class="btn-primary">OK</button>
         </div>
       </form>
     </div>
