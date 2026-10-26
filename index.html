@@ -113,6 +113,9 @@
 
     <input type="text" id="searchInput" class="search-box" placeholder="Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)..." disabled>
     <span id="searchScopeHint" class="search-scope-pill" style="display:none;">🌐 Searching All Tabs</span>
+    <button type="button" id="btnClearSortFilter" class="btn-clear-sort-filter" style="display:none;" title="Clear active search, like-item filter, and column sort">
+      ✕ Clear Sort / Filter
+    </button>
   </div>
 
   <!-- Quick Scrollable Sheet Tab Strip (Ordered Oldest Left -> Newest Right to match ◀ / ▶ arrows) -->
@@ -129,10 +132,14 @@
   </div>
 
   <div id="filterBanner">
-    <div>
-      <strong>History Trace Active:</strong> Showing all daily entries matching Tracking ID <code id="filterKeyText" style="color:var(--accent);"></code>
+    <div id="filterBannerContent">
+      <strong id="filterBannerTitle">Like-Item Filter Active:</strong>
+      <span id="filterBannerDesc">Showing all daily entries matching</span>
+      <code id="filterKeyText" style="color:var(--accent);"></code>
     </div>
-    <button id="btnClearKeyFilter" style="padding: 4px 10px; font-size:12px;">Clear ID Filter</button>
+    <div class="filter-banner-actions">
+      <button type="button" id="btnClearKeyFilter" style="padding: 4px 10px; font-size:12px;">✕ Clear Filter / Sort</button>
+    </div>
   </div>
 
   <div id="deleteBanner" class="delete-banner" style="display:none;">
@@ -150,21 +157,45 @@
 
   <div class="table-wrap">
     <table>
-      <thead>
+      <thead id="tableHead">
         <tr>
           <th id="thDeleteSelect" class="delete-col" style="display:none;">
             <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
           </th>
-          <th>Date Tab</th>
-          <th>Tracking ID (Col K)</th>
-          <th>Subject</th>
-          <th>Ticket #</th>
-          <th>Broker</th>
-          <th>Master / Bidder</th>
-          <th>Action</th>
-          <th>Yard / Lots</th>
-          <th>Action Notes</th>
-          <th>Status</th>
+          <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
+            <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="key" title="Click to sort by Tracking ID">
+            <span>Tracking ID (Col K)</span><span class="sort-indicator" data-ind="key">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="subject" title="Click to sort by Subject">
+            <span>Subject</span><span class="sort-indicator" data-ind="subject">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="ticket" title="Click to sort by Ticket #">
+            <span>Ticket #</span><span class="sort-indicator" data-ind="ticket">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="broker" title="Click to sort by Broker Name">
+            <span>Broker</span><span class="sort-indicator" data-ind="broker">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="master" title="Click Master or Bidder to sort">
+            <span class="th-sub-sort" data-sort="master" title="Sort by Master #">Master<span class="sort-indicator" data-ind="master">↕</span></span>
+            <span class="th-sep">/</span>
+            <span class="th-sub-sort" data-sort="bidder" title="Sort by Bidder #">Bidder<span class="sort-indicator" data-ind="bidder">↕</span></span>
+          </th>
+          <th class="sortable-th" data-sort="action" title="Click to sort by Requested Action">
+            <span>Action</span><span class="sort-indicator" data-ind="action">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="yard" title="Click Yard or Lots to sort">
+            <span class="th-sub-sort" data-sort="yard" title="Sort by Yard #">Yard<span class="sort-indicator" data-ind="yard">↕</span></span>
+            <span class="th-sep">/</span>
+            <span class="th-sub-sort" data-sort="lots" title="Sort by Lot Numbers">Lots<span class="sort-indicator" data-ind="lots">↕</span></span>
+          </th>
+          <th class="sortable-th" data-sort="notes" title="Click to sort by Action Notes">
+            <span>Action Notes</span><span class="sort-indicator" data-ind="notes">↕</span>
+          </th>
+          <th class="sortable-th" data-sort="status" title="Click to sort by Status">
+            <span>Status</span><span class="sort-indicator" data-ind="status">↕</span>
+          </th>
           <th>Edit</th>
         </tr>
       </thead>

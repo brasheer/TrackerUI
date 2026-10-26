@@ -1,0 +1,8 @@
+add feature 
+
+enable clicking on master/bidder id's, lot numbers,
+and yard numbers to populate a like item list based on the data clicked on
+clicking on the date should bring up the date tab
+perhaps everything should be clickable. 
+
+We also need sort by header options with a clear sort/filter option?
