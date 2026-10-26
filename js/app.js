@@ -3978,11 +3978,25 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// --- 9. PWA SERVICE WORKER REGISTRATION ---
+// --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
+const APP_VERSION = 'v1.10.0';
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
-      .then((reg) => console.log('Service Worker registered with scope:', reg.scope))
+      .then((reg) => {
+        console.log(`Service Worker (${APP_VERSION}) registered with scope:`, reg.scope);
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                showToast(`✨ TrackerUI updated from GitHub! Reload to apply latest version.`, 'info');
+              }
+            });
+          }
+        });
+      })
       .catch((err) => console.warn('Service Worker registration failed:', err));
   });
 }
