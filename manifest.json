@@ -1,5 +1,5 @@
 {
-  "name": "Bidder Support Tracker",
+  "name": "TrackerUI",
   "short_name": "TrackerUI",
   "description": "Support tracker and daily rollover workspace for agent Excel workbooks",
   "start_url": "./index.html",
