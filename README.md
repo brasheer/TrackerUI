@@ -9,12 +9,18 @@ A zero-build, standalone Progressive Web App (PWA) designed to read, search, upd
 - **Directory-Based Dual-Write Architecture (`showDirectoryPicker`)**:
   - Connect your agent directory (e.g., `.\trackers\[Agent Name]\`) with 1-click folder reconnection persisted via `IndexedDB`.
   - Automatically scans for monthly working `.xlsx` workbooks while ignoring Excel lock files (`~$*`) and supervisor mirror files (`*(VIEW ONLY).xlsx`).
-  - **Custom Supervisor Export Folder**: Choose a dedicated directory where `<Workbook Name> (VIEW ONLY).xlsx` copies are written (persisted in `IndexedDB`), or default to the same directory as the working workbook. If a supervisor has the `(VIEW ONLY)` mirror open in Desktop Excel, the agent's save still succeeds with a non-blocking warning pill.
+  - **Custom Supervisor Export Folder & Mirror Auto-Retry**: Choose a dedicated directory where `<Workbook Name> (VIEW ONLY).xlsx` copies are written (persisted in `IndexedDB`), or default to the same directory as the working workbook. If a supervisor has the `(VIEW ONLY)` mirror locked in Desktop Excel, the agent's save succeeds immediately, starts a **15-second background auto-retry countdown**, and surfaces a 1-click **`🔄 Retry Mirror`** button next to the status pill.
+- **Workbook Bootstrapping & Non-Destructive Schema Repair**:
+  - **Create New Monthly Workbook**: Generate a brand-new, formatted `.xlsx` tracker workbook directly inside your Agent Folder (including from an empty directory).
+  - **Auto-Detect & Repair Incomplete Workbooks**: If you open a blank `.xlsx` file or one missing `template`, `validation lists`, `Master Accounts`, or a `MM-DD-YYYY` daily tab, a banner offers 1-click non-destructive initialization of all missing sheets and headers.
+- **Streamlined Workspace Menu & Fast Day-Tab Navigation**:
+  - **`⚙️ Tools & Setup ▾` Popover Menu**: Houses folder management, supervisor mirror settings, workbook creation/schema repair, daily tab creation/renaming/deletion, and batch delete mode so the primary header stays clean.
+  - **`◀` / `▶` Day Tab Stepper & Quick Tab Strip**: Step chronologically between older and newer daily sheets using the `◀` / `▶` buttons flanking the Day Tab dropdown, or click any sheet pill in the scrollable tab bar (complete with per-sheet request counts).
+  - **Daily Sheet Creation, Renaming & Deletion**: Create blank `MM-DD-YYYY` tabs, rename existing daily tabs, or delete obsolete daily tabs directly from the UI while protecting reference sheets (`template`, `validation lists`, `Master Accounts`).
 - **Automatic Global Search Across All Sheets**:
   - Typing in the search bar automatically queries across **all** daily `MM-DD-YYYY` sheets in the workbook (displaying a `🌐 Searching All Tabs` indicator) and returns to your selected view scope (`Current Day Tab Only` or `All Daily Tabs`) as soon as the search box is cleared.
 - **Batch Delete Selection Mode**:
-  - Click **`🗑️ Delete Requests`** to reveal selection checkboxes next to every visible request (plus a "Select All" toggle).
-  - Requires explicit confirmation listing the selected items before safely splicing rows from the workbook (in descending row order to preserve row indexing).
+  - Enable **Batch Delete Requests Mode** from the Tools menu to reveal selection checkboxes next to every visible request (plus a "Select All" toggle) with confirmation before safely splicing rows.
 - **Pure Immutable GUIDs in Hidden Column K (`Tracking ID`)**:
   - Uses `crypto.randomUUID()` to assign a permanent lowercase 36-character UUIDv4 to every request in hidden Column K, completely decoupled from optional Ticket numbers (Col B).
   - Automatically backfills UUIDs for legacy rows missing a Column K identifier.
@@ -26,7 +32,6 @@ A zero-build, standalone Progressive Web App (PWA) designed to read, search, upd
   - Scans **all** prior `MM-DD-YYYY` sheets in chronological order (oldest to newest) to resolve the latest historical state of every unique request UUID across the entire workbook.
   - **Future-Dated Tab Handling**: Detects when a workbook contains tabs dated ahead of today's calendar date, offering 1-click presets for `Latest Tab`, `Next Day`, or `Today`, plus an option to include open items from future-dated tabs.
   - **Superseded Request Override**: Highlights requests that were open on an older tab (`In Progress`, `Escalated`, `Pending`) but marked `Complete` on a later tab, allowing 1-click reopening and carryover.
-  - **Cross-Tab Status Propagation**: Editing a request's status on an older tab prompts to sync the updated status to any newer tabs where that same Tracking ID exists.
 
 ---
 
@@ -41,13 +46,13 @@ TrackerUI/
 │   │   └── icon.svg           # Scalable vector icon
 │   └── images/
 ├── css/
-│   └── styles.css             # Dark-themed UI styles, banners, modals & toasts
+│   └── styles.css             # Dark-themed UI styles, popover menu, tab bar & modals
 ├── data/                      # Folder for sample data or template files
 ├── js/
-│   └── app.js                 # Directory I/O, dual-write, search, delete & rollover engine
+│   └── app.js                 # Directory I/O, dual-write + retry, schema bootstrap & rollover
 ├── .gitignore                 # Configured for OneDrive/Google Drive & OS temp files
 ├── AGENTS.md                  # Always-on workspace rules for AI coding assistants
-├── index.html                 # App shell and modal markup
+├── index.html                 # App shell, popover menu, banners & modal markup
 ├── manifest.json              # PWA manifest
 ├── README.md                  # Project documentation
 └── sw.js                      # Service Worker for offline shell caching
@@ -101,9 +106,3 @@ The **File System Access API** (`window.showDirectoryPicker`) requires:
 
 ## AI Assistant Governance ([`AGENTS.md`](AGENTS.md))
 This repository includes an always-on [`AGENTS.md`](AGENTS.md) rules file that enforces the modular file layout, `showDirectoryPicker` dual-write architecture, immutable UUIDv4 primary keys, and ExcelJS conventions across all AI models.
-
----
-
-## AI Assistant Governance ([`AGENTS.md`](AGENTS.md))
-This repository includes an always-on [`AGENTS.md`](AGENTS.md) rules file that enforces the modular file layout, `showDirectoryPicker` dual-write architecture, immutable UUIDv4 primary keys, and ExcelJS conventions across all AI models.
-

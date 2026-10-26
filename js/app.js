@@ -11,6 +11,14 @@ let dateSheets = []; // Ordered list of MM-DD-YYYY sheet names (newest first)
 let activeKeyFilter = null;
 let editingTarget = null; // { sheetName, rowNumber, key } or null for new
 
+// Mirror Retry State
+let pendingMirrorBuffer = null;
+let mirrorCountdownInterval = null;
+let mirrorCountdownSec = 0;
+let mirrorRetryCount = 0;
+const MIRROR_RETRY_INTERVAL_SEC = 15;
+const MIRROR_MAX_AUTO_RETRIES = 20;
+
 // Delete Mode State
 let isDeleteMode = false;
 let currentlyVisibleRows = [];
@@ -24,12 +32,36 @@ let validationStatuses = [];
 // Stable in-memory backfill cache so legacy rows without Col K keep the same UUID before & during save
 const legacyBackfillMap = new Map();
 
+const DEFAULT_ACTIONS = [
+  'Title Inquiry',
+  'Gate Pass Reissue',
+  'Relist Dispute',
+  'Wire Transfer Trace',
+  'Bidder Account Unlock',
+  'Storage Fee Waiver',
+  'Lot Cancellation'
+];
+
 const DEFAULT_STATUSES = [
   'Pending',
   'In Progress',
   'Waiting on Buyer',
   'Escalated',
   'Complete'
+];
+
+const STANDARD_HEADERS = [
+  'Subject',
+  'Ticket Number',
+  'Broker Name',
+  'Master #',
+  'Bidder #',
+  'Requested Action',
+  'Yard #',
+  'Lot Numbers',
+  'Action Notes',
+  'Request Status',
+  'Tracking ID'
 ];
 
 const DATE_TAB_REGEX = /^\d{2}-\d{2}-\d{4}$/;
@@ -41,25 +73,50 @@ const IDB_SUPERVISOR_KEY = 'supervisorFolderHandle';
 
 // --- DOM ELEMENTS ---
 const statusPill = document.getElementById('statusPill');
+const btnRetryMirror = document.getElementById('btnRetryMirror');
 const workbookPickerWrap = document.getElementById('workbookPickerWrap');
 const workbookSelect = document.getElementById('workbookSelect');
 const btnReconnect = document.getElementById('btnReconnect');
 const btnLinkFile = document.getElementById('btnLinkFile');
+const btnRollover = document.getElementById('btnRollover');
+const btnNewEntry = document.getElementById('btnNewEntry');
+
+// Popover Tools Menu Elements
+const toolsMenuWrap = document.getElementById('toolsMenuWrap');
+const btnToolsMenu = document.getElementById('btnToolsMenu');
+const toolsMenuDropdown = document.getElementById('toolsMenuDropdown');
+const menuSelectAgentFolder = document.getElementById('menuSelectAgentFolder');
 const btnSupervisorDir = document.getElementById('btnSupervisorDir');
 const btnResetSupervisorDir = document.getElementById('btnResetSupervisorDir');
-const btnRollover = document.getElementById('btnRollover');
+const btnNewWorkbook = document.getElementById('btnNewWorkbook');
+const btnRepairSchema = document.getElementById('btnRepairSchema');
+const btnAddBlankTab = document.getElementById('btnAddBlankTab');
+const btnRenameTab = document.getElementById('btnRenameTab');
+const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
-const btnNewEntry = document.getElementById('btnNewEntry');
+
+// Sheet Navigation & Controls
+const btnPrevSheet = document.getElementById('btnPrevSheet');
+const btnNextSheet = document.getElementById('btnNextSheet');
 const sheetSelect = document.getElementById('sheetSelect');
+const sheetTabsBar = document.getElementById('sheetTabsBar');
 const scopeSelect = document.getElementById('scopeSelect');
 const searchInput = document.getElementById('searchInput');
 const searchScopeHint = document.getElementById('searchScopeHint');
 const listBody = document.getElementById('listBody');
+
+// Banners & Modals
+const schemaBanner = document.getElementById('schemaBanner');
+const schemaBannerText = document.getElementById('schemaBannerText');
+const btnBannerBootstrap = document.getElementById('btnBannerBootstrap');
 const filterBanner = document.getElementById('filterBanner');
 const filterKeyText = document.getElementById('filterKeyText');
 const editModal = document.getElementById('editModal');
 const rolloverModal = document.getElementById('rolloverModal');
 const toastContainer = document.getElementById('toastContainer');
+const statusFolderInfo = document.getElementById('statusFolderInfo');
+const statusRowStats = document.getElementById('statusRowStats');
+const statusTimestamp = document.getElementById('statusTimestamp');
 
 // Delete Mode DOM Elements
 const deleteBanner = document.getElementById('deleteBanner');
@@ -70,6 +127,7 @@ const deleteSelectedCountEl = document.getElementById('deleteSelectedCount');
 const btnConfirmDeleteSelected = document.getElementById('btnConfirmDeleteSelected');
 const btnCancelDeleteMode = document.getElementById('btnCancelDeleteMode');
 
+// Form Fields
 const fSubject = document.getElementById('fSubject');
 const fTicket = document.getElementById('fTicket');
 const fBroker = document.getElementById('fBroker');
@@ -106,6 +164,30 @@ function generateTrackingGuid() {
     return v.toString(16);
   });
 }
+
+// --- POPOVER TOOLS MENU LOGIC ---
+function closeToolsMenu() {
+  toolsMenuDropdown.classList.remove('open');
+  btnToolsMenu.classList.remove('open');
+}
+
+btnToolsMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const isOpen = toolsMenuDropdown.classList.toggle('open');
+  btnToolsMenu.classList.toggle('open', isOpen);
+});
+
+document.addEventListener('click', (e) => {
+  if (toolsMenuWrap && !toolsMenuWrap.contains(e.target)) {
+    closeToolsMenu();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeToolsMenu();
+  }
+});
 
 // --- INDEXEDDB DIRECTORY HANDLE PERSISTENCE ---
 function openHandleDB() {
@@ -182,6 +264,7 @@ function updateSupervisorDirUI() {
     btnSupervisorDir.classList.remove('custom-active');
     btnResetSupervisorDir.style.display = 'none';
   }
+  updateStatusBarTelemetry();
 }
 
 async function initCachedDirectoryHandles() {
@@ -203,7 +286,8 @@ async function initCachedDirectoryHandles() {
 initCachedDirectoryHandles();
 
 // --- 1. DIRECTORY SELECTION, SUPERVISOR EXPORT FOLDER & WORKBOOK DISCOVERY ---
-btnLinkFile.addEventListener('click', async () => {
+async function promptSelectAgentFolder() {
+  closeToolsMenu();
   try {
     if (typeof window.showDirectoryPicker !== 'function') {
       return alert('Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost/HTTPS.');
@@ -213,13 +297,18 @@ btnLinkFile.addEventListener('click', async () => {
     cachedDirHandle = dirHandle;
     await saveHandleToIDB(IDB_AGENT_KEY, dirHandle);
     btnReconnect.style.display = 'none';
+    btnLinkFile.style.display = 'none';
+    btnNewWorkbook.disabled = false;
     await scanDirectoryAndLoadWorkbooks();
   } catch (err) {
     if (err.name !== 'AbortError') {
       alert('Could not open agent folder: ' + err.message);
     }
   }
-});
+}
+
+btnLinkFile.addEventListener('click', promptSelectAgentFolder);
+menuSelectAgentFolder.addEventListener('click', promptSelectAgentFolder);
 
 btnReconnect.addEventListener('click', async () => {
   if (!cachedDirHandle) return;
@@ -231,8 +320,9 @@ btnReconnect.addEventListener('click', async () => {
     if (perm === 'granted') {
       parentDirHandle = cachedDirHandle;
       btnReconnect.style.display = 'none';
+      btnLinkFile.style.display = 'none';
+      btnNewWorkbook.disabled = false;
 
-      // Also attempt to reconnect cached Supervisor folder if one was configured
       if (cachedSupervisorDirHandle && !supervisorDirHandle) {
         try {
           let supPerm = await cachedSupervisorDirHandle.queryPermission({ mode: 'readwrite' });
@@ -259,12 +349,12 @@ btnReconnect.addEventListener('click', async () => {
 });
 
 btnSupervisorDir.addEventListener('click', async () => {
+  closeToolsMenu();
   try {
     if (typeof window.showDirectoryPicker !== 'function') {
       return alert('Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost/HTTPS.');
     }
 
-    // If a cached supervisor folder exists but isn't connected yet, try reconnecting it first
     if (cachedSupervisorDirHandle && !supervisorDirHandle) {
       let perm = await cachedSupervisorDirHandle.queryPermission({ mode: 'readwrite' });
       if (perm !== 'granted') {
@@ -275,7 +365,8 @@ btnSupervisorDir.addEventListener('click', async () => {
         updateSupervisorDirUI();
         showToast(`Reconnected Supervisor export folder: "${supervisorDirHandle.name}"`, 'success');
         if (workbook && workingFileHandle) {
-          await writeMirrorOnly();
+          const buf = await workbook.xlsx.writeBuffer();
+          await attemptMirrorWrite(buf, false);
         }
         return;
       }
@@ -288,9 +379,9 @@ btnSupervisorDir.addEventListener('click', async () => {
     updateSupervisorDirUI();
     showToast(`Supervisor (VIEW ONLY) export folder set to "${supDir.name}"`, 'success');
 
-    // If a workbook is already loaded, immediately write a fresh (VIEW ONLY) copy to the selected folder
     if (workbook && workingFileHandle) {
-      await writeMirrorOnly();
+      const buf = await workbook.xlsx.writeBuffer();
+      await attemptMirrorWrite(buf, false);
     }
   } catch (err) {
     if (err.name !== 'AbortError') {
@@ -300,30 +391,13 @@ btnSupervisorDir.addEventListener('click', async () => {
 });
 
 btnResetSupervisorDir.addEventListener('click', async () => {
+  closeToolsMenu();
   supervisorDirHandle = null;
   cachedSupervisorDirHandle = null;
   await deleteHandleFromIDB(IDB_SUPERVISOR_KEY);
   updateSupervisorDirUI();
   showToast('Supervisor (VIEW ONLY) export reset to Agent workbook folder.', 'info');
 });
-
-async function writeMirrorOnly() {
-  const targetMirrorDir = supervisorDirHandle || parentDirHandle;
-  if (!workbook || !workingFileHandle || !targetMirrorDir) return;
-
-  const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
-  try {
-    const buffer = await workbook.xlsx.writeBuffer();
-    const mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: true });
-    const mirrorWritable = await mirrorHandle.createWritable();
-    await mirrorWritable.write(buffer);
-    await mirrorWritable.close();
-    showToast(`Synced "${mirrorFileName}" to "${targetMirrorDir.name}".`, 'success');
-  } catch (err) {
-    console.warn('Immediate mirror export failed:', err);
-    showToast(`⚠️ Could not write "${mirrorFileName}" to "${targetMirrorDir.name}" (file may be open in Excel).`, 'warning');
-  }
-}
 
 function extractMonthYearWeight(fileName, fallbackLastModified) {
   const months = {
@@ -355,6 +429,7 @@ function extractMonthYearWeight(fileName, fallbackLastModified) {
 async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
   if (!parentDirHandle) return;
   setStatus(`Scanning ${parentDirHandle.name}...`, '');
+  btnNewWorkbook.disabled = false;
 
   availableWorkbooks = [];
   for await (const entry of parentDirHandle.values()) {
@@ -362,7 +437,6 @@ async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
     const name = entry.name;
     const lower = name.toLowerCase();
 
-    // Must be .xlsx, NOT end with (VIEW ONLY).xlsx, and NOT start with ~$
     if (
       lower.endsWith('.xlsx') &&
       !lower.endsWith('(view only).xlsx') &&
@@ -386,18 +460,34 @@ async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
   if (availableWorkbooks.length === 0) {
     workbookPickerWrap.style.display = 'none';
     workingFileHandle = null;
-    setStatus(`No working .xlsx in ${parentDirHandle.name}`, 'locked');
-    listBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:var(--text-muted); padding: 30px;">No working <code>.xlsx</code> files found in folder <strong>${escapeHtml(parentDirHandle.name)}</strong> (ignoring <code>~$</code> lock files and <code>(VIEW ONLY).xlsx</code>).</td></tr>`;
+    workbook = null;
+    sheetTabsBar.style.display = 'none';
+    schemaBanner.style.display = 'none';
+    setStatus(`No working .xlsx in ${parentDirHandle.name}`, 'warning');
+    listBody.innerHTML = `
+      <tr>
+        <td colspan="12" style="text-align:center; color:var(--text-muted); padding: 36px;">
+          <div style="margin-bottom:12px;">
+            No working <code>.xlsx</code> files found in folder <strong>${escapeHtml(parentDirHandle.name)}</strong>.
+          </div>
+          <button type="button" id="btnEmptyStateBootstrap" class="btn-primary">
+            ✨ Bootstrap New Tracker Workbook (.xlsx)
+          </button>
+        </td>
+      </tr>
+    `;
+    const emptyBtn = document.getElementById('btnEmptyStateBootstrap');
+    if (emptyBtn) {
+      emptyBtn.addEventListener('click', promptCreateNewWorkbook);
+    }
     return;
   }
 
-  // Sort most recent monthly workbook first
   availableWorkbooks.sort((a, b) => {
     if (b.sortWeight !== a.sortWeight) return b.sortWeight - a.sortWeight;
     return b.lastModified - a.lastModified;
   });
 
-  // Populate top-bar workbook selector dropdown
   workbookSelect.innerHTML = '';
   availableWorkbooks.forEach((wb, idx) => {
     const opt = document.createElement('option');
@@ -426,15 +516,16 @@ workbookSelect.addEventListener('change', async () => {
     workingFileHandle = availableWorkbooks[idx].handle;
     activeKeyFilter = null;
     filterBanner.style.display = 'none';
+    clearMirrorRetryState();
     setDeleteMode(false);
     await loadWorkbookFromDisk();
   }
 });
 
-// --- 2. READ WORKBOOK, PARSE REFERENCE SHEETS & INDEX ALL DAILY TABS ---
+// --- 2. READ WORKBOOK, PARSE REFERENCE SHEETS, CHECK SCHEMA & INDEX ALL DAILY TABS ---
 async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) {
   if (!workingFileHandle) return;
-  if (!options.preserveStatus) {
+  if (!options.preserveStatus && !pendingMirrorBuffer) {
     setStatus('Reading...', '');
   }
 
@@ -450,6 +541,10 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   validationActions = [];
   validationStatuses = [];
 
+  let hasTemplate = false;
+  let hasValidation = false;
+  let hasMasterAccounts = false;
+
   workbook.eachSheet((worksheet) => {
     const rawName = worksheet.name.trim();
     const lowerName = rawName.toLowerCase();
@@ -457,28 +552,56 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     if (DATE_TAB_REGEX.test(rawName)) {
       dateSheets.push(rawName);
       indexWorksheetRows(worksheet, rawName);
+    } else if (lowerName === 'template') {
+      hasTemplate = true;
     } else if (lowerName === 'validation lists' || lowerName === 'validation list') {
+      hasValidation = true;
       parseValidationSheet(worksheet);
     } else if (lowerName === 'master accounts' || lowerName === 'master account') {
+      hasMasterAccounts = true;
       parseMasterAccountsSheet(worksheet);
     }
   });
 
-  // Populate dynamic datalists and status dropdown
   populateReferenceControls();
 
   // Sort date tabs newest first for UI dropdown
   dateSheets.sort((a, b) => parseDateTab(b) - parseDateTab(a));
 
   populateSheetDropdown(preserveSelectedSheet);
-  sheetSelect.disabled = false;
-  scopeSelect.disabled = false;
-  searchInput.disabled = false;
+  renderSheetTabsBar();
+  updateSheetStepperState();
+
+  sheetSelect.disabled = dateSheets.length === 0;
+  scopeSelect.disabled = dateSheets.length === 0;
+  searchInput.disabled = dateSheets.length === 0;
+
   btnNewEntry.style.display = 'inline-block';
   btnRollover.style.display = 'inline-block';
-  btnDeleteMode.style.display = 'inline-block';
+  btnRepairSchema.disabled = false;
+  btnAddBlankTab.disabled = false;
+  btnRenameTab.disabled = dateSheets.length === 0;
+  btnDeleteTab.disabled = dateSheets.length === 0;
+  btnDeleteMode.disabled = allRows.length === 0;
 
-  if (!options.preserveStatus) {
+  // Check if workbook is blank or missing standard schema tabs
+  const missingParts = [];
+  if (dateSheets.length === 0) missingParts.push('Daily MM-DD-YYYY Tab');
+  if (!hasTemplate) missingParts.push('template');
+  if (!hasValidation) missingParts.push('validation lists');
+  if (!hasMasterAccounts) missingParts.push('Master Accounts');
+
+  if (missingParts.length > 0) {
+    schemaBanner.style.display = 'flex';
+    schemaBannerText.innerHTML = `
+      <strong>✨ Workbook Schema Incomplete:</strong> Missing <code>${escapeHtml(missingParts.join(', '))}</code>.
+      Click Bootstrap to initialize all missing standard tabs and headers non-destructively.
+    `;
+  } else {
+    schemaBanner.style.display = 'none';
+  }
+
+  if (!options.preserveStatus && !pendingMirrorBuffer) {
     setStatus(`Synced: ${file.name}`, 'ready');
   }
   renderList();
@@ -511,13 +634,320 @@ function cellText(row, colIndex) {
   return String(val).trim();
 }
 
-// --- 3. DYNAMIC REFERENCE SHEET PARSING (validation lists & Master Accounts) ---
+// --- 3. WORKBOOK BOOTSTRAPPING, SCHEMA REPAIR & TAB MANAGEMENT ---
+function applyStandardSheetFormatting(ws) {
+  const widths = [30, 16, 22, 14, 14, 22, 10, 20, 36, 16, 38];
+  const headerRow = ws.getRow(1);
+  headerRow.height = 22;
+
+  STANDARD_HEADERS.forEach((title, idx) => {
+    const colIdx = idx + 1;
+    ws.getColumn(colIdx).width = widths[idx] || 16;
+    const cell = headerRow.getCell(colIdx);
+    cell.value = title;
+    cell.font = { bold: true, color: { argb: 'FFF8FAFC' }, size: 11 };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E293B' }
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+  });
+
+  headerRow.commit();
+  ws.getColumn(11).hidden = true;
+}
+
+function bootstrapWorkbookSchemaInMemory(wb) {
+  const todayStr = getTodayFormatted();
+  let templateWs = null;
+  let validationWs = null;
+  let masterWs = null;
+  let hasAnyDateTab = false;
+
+  wb.eachSheet((ws) => {
+    const raw = ws.name.trim();
+    const lower = raw.toLowerCase();
+    if (DATE_TAB_REGEX.test(raw)) hasAnyDateTab = true;
+    else if (lower === 'template') templateWs = ws;
+    else if (lower === 'validation lists' || lower === 'validation list') validationWs = ws;
+    else if (lower === 'master accounts' || lower === 'master account') masterWs = ws;
+  });
+
+  // 1. Ensure template sheet exists
+  if (!templateWs) {
+    templateWs = wb.addWorksheet('template');
+    applyStandardSheetFormatting(templateWs);
+  } else {
+    templateWs.getColumn(11).hidden = true;
+  }
+
+  // 2. Ensure validation lists sheet exists
+  if (!validationWs) {
+    validationWs = wb.addWorksheet('validation lists');
+    validationWs.getColumn(1).width = 26;
+    validationWs.getColumn(2).width = 22;
+    const hRow = validationWs.getRow(1);
+    hRow.getCell(1).value = 'Requested Actions';
+    hRow.getCell(2).value = 'Status Options';
+    hRow.font = { bold: true };
+    hRow.commit();
+
+    const maxLen = Math.max(DEFAULT_ACTIONS.length, DEFAULT_STATUSES.length);
+    for (let i = 0; i < maxLen; i++) {
+      const r = validationWs.getRow(i + 2);
+      if (DEFAULT_ACTIONS[i]) r.getCell(1).value = DEFAULT_ACTIONS[i];
+      if (DEFAULT_STATUSES[i]) r.getCell(2).value = DEFAULT_STATUSES[i];
+      r.commit();
+    }
+  }
+
+  // 3. Ensure Master Accounts sheet exists
+  if (!masterWs) {
+    masterWs = wb.addWorksheet('Master Accounts');
+    masterWs.getColumn(1).width = 28;
+    masterWs.getColumn(2).width = 16;
+    masterWs.getColumn(3).width = 18;
+    const hRow = masterWs.getRow(1);
+    hRow.getCell(1).value = 'Broker Name';
+    hRow.getCell(2).value = 'Master#';
+    hRow.getCell(3).value = 'Default Bidder#';
+    hRow.font = { bold: true };
+    hRow.commit();
+  }
+
+  // 4. Ensure at least one MM-DD-YYYY daily tab exists
+  let createdDateTab = null;
+  if (!hasAnyDateTab) {
+    createdDateTab = todayStr;
+    const dailyWs = wb.addWorksheet(todayStr);
+    cloneTemplateStructure(templateWs, dailyWs);
+    placeWorksheetFirstInWorkbook(wb, dailyWs);
+  }
+
+  // 5. Remove default empty "Sheet1" if it is completely blank and other sheets exist
+  const sheet1 = wb.getWorksheet('Sheet1');
+  if (sheet1 && wb.worksheets.length > 1) {
+    let sheet1HasData = false;
+    sheet1.eachRow({ includeEmpty: false }, (row) => {
+      for (let c = 1; c <= 11; c++) {
+        if (cellText(row, c) !== '') sheet1HasData = true;
+      }
+    });
+    if (!sheet1HasData) {
+      wb.removeWorksheet(sheet1.id);
+    }
+  }
+
+  return createdDateTab;
+}
+
+async function promptCreateNewWorkbook() {
+  closeToolsMenu();
+  if (!parentDirHandle) {
+    return alert('Please select an Agent Folder first.');
+  }
+
+  const now = new Date();
+  const monthName = now.toLocaleString('en-US', { month: 'long' });
+  const defaultFileName = `Agent Bidder Support Tracker - ${monthName} ${now.getFullYear()}.xlsx`;
+
+  const rawName = prompt('Enter filename for the new Tracker Workbook (.xlsx):', defaultFileName);
+  if (!rawName) return;
+
+  let fileName = rawName.trim();
+  if (!fileName.toLowerCase().endsWith('.xlsx')) {
+    fileName += '.xlsx';
+  }
+  if (fileName.toLowerCase().endsWith('(view only).xlsx') || fileName.startsWith('~$')) {
+    return alert('Workbook filename cannot start with "~$" or end with "(VIEW ONLY).xlsx".');
+  }
+
+  try {
+    // Check if file already exists
+    let exists = false;
+    try {
+      await parentDirHandle.getFileHandle(fileName, { create: false });
+      exists = true;
+    } catch (_) {
+      exists = false;
+    }
+
+    if (exists) {
+      const overwrite = confirm(`"${fileName}" already exists in ${parentDirHandle.name}. Overwrite it with a fresh workbook?`);
+      if (!overwrite) return;
+    }
+
+    const newWb = new ExcelJS.Workbook();
+    bootstrapWorkbookSchemaInMemory(newWb);
+
+    const newFileHandle = await parentDirHandle.getFileHandle(fileName, { create: true });
+    workingFileHandle = newFileHandle;
+    workbook = newWb;
+
+    const saved = await saveWorkbookToDisk();
+    if (saved) {
+      showToast(`Bootstrapped new workbook: "${fileName}"`, 'success');
+      await scanDirectoryAndLoadWorkbooks(fileName);
+    }
+  } catch (err) {
+    console.error('Error creating new workbook:', err);
+    alert('Could not create workbook: ' + err.message);
+  }
+}
+
+async function handleRepairCurrentWorkbookSchema() {
+  closeToolsMenu();
+  if (!workbook || !workingFileHandle) return;
+
+  await loadWorkbookFromDisk(sheetSelect.value);
+  const createdTab = bootstrapWorkbookSchemaInMemory(workbook);
+
+  // Also ensure any existing MM-DD-YYYY tabs have headers on Row 1 and hidden Column K
+  dateSheets.forEach(tabName => {
+    const ws = workbook.getWorksheet(tabName);
+    if (!ws) return;
+    ws.getColumn(11).hidden = true;
+    const row1 = ws.getRow(1);
+    const hasHeader = [1, 2, 3].some(c => cellText(row1, c) !== '');
+    if (!hasHeader) {
+      applyStandardSheetFormatting(ws);
+    }
+  });
+
+  const targetSelectTab = createdTab || sheetSelect.value;
+  const saved = await saveWorkbookToDisk();
+  if (saved) {
+    await loadWorkbookFromDisk(targetSelectTab, {
+      preserveStatus: saved === 'mirror-locked'
+    });
+    showToast('Workbook schema initialized and verified.', 'success');
+  }
+}
+
+btnNewWorkbook.addEventListener('click', promptCreateNewWorkbook);
+btnRepairSchema.addEventListener('click', handleRepairCurrentWorkbookSchema);
+btnBannerBootstrap.addEventListener('click', handleRepairCurrentWorkbookSchema);
+
+// --- SHEET CREATION, RENAMING & DELETION ---
+btnAddBlankTab.addEventListener('click', async () => {
+  closeToolsMenu();
+  if (!workbook) return;
+
+  const latestSheet = dateSheets.length > 0 ? dateSheets[0] : getTodayFormatted();
+  const suggestedDate = dateSheets.includes(getTodayFormatted())
+    ? addDaysToDateTab(latestSheet, 1)
+    : getTodayFormatted();
+
+  const rawInput = prompt('Enter new blank daily tab name (MM-DD-YYYY):', suggestedDate);
+  if (!rawInput) return;
+  const newTabName = rawInput.trim();
+
+  if (!DATE_TAB_REGEX.test(newTabName)) {
+    return alert('Please use exact MM-DD-YYYY format (e.g., 10-25-2026).');
+  }
+
+  await loadWorkbookFromDisk(sheetSelect.value);
+  if (workbook.getWorksheet(newTabName)) {
+    return alert(`Worksheet tab "${newTabName}" already exists!`);
+  }
+
+  const templateSheet = findTemplateSheet();
+  const newSheet = workbook.addWorksheet(newTabName);
+  placeWorksheetFirst(newSheet);
+
+  if (templateSheet) {
+    cloneTemplateStructure(templateSheet, newSheet);
+  } else {
+    applyStandardSheetFormatting(newSheet);
+  }
+
+  const saved = await saveWorkbookToDisk();
+  if (saved) {
+    await loadWorkbookFromDisk(newTabName, {
+      preserveStatus: saved === 'mirror-locked'
+    });
+    showToast(`Created blank daily tab "${newTabName}".`, 'success');
+  }
+});
+
+btnRenameTab.addEventListener('click', async () => {
+  closeToolsMenu();
+  const currentTab = sheetSelect.value;
+  if (!workbook || !currentTab || !DATE_TAB_REGEX.test(currentTab)) {
+    return alert('Select a valid daily MM-DD-YYYY tab to rename.');
+  }
+
+  const rawNewName = prompt(`Rename daily tab "${currentTab}" to (MM-DD-YYYY):`, currentTab);
+  if (!rawNewName) return;
+  const newTabName = rawNewName.trim();
+
+  if (newTabName === currentTab) return;
+  if (!DATE_TAB_REGEX.test(newTabName)) {
+    return alert('New tab name must use exact MM-DD-YYYY format.');
+  }
+
+  await loadWorkbookFromDisk(currentTab);
+  if (workbook.getWorksheet(newTabName)) {
+    return alert(`A worksheet named "${newTabName}" already exists in this workbook.`);
+  }
+
+  const ws = workbook.getWorksheet(currentTab);
+  if (!ws) return alert(`Worksheet "${currentTab}" not found.`);
+
+  ws.name = newTabName;
+  const saved = await saveWorkbookToDisk();
+  if (saved) {
+    await loadWorkbookFromDisk(newTabName, {
+      preserveStatus: saved === 'mirror-locked'
+    });
+    showToast(`Renamed tab "${currentTab}" → "${newTabName}".`, 'success');
+  }
+});
+
+btnDeleteTab.addEventListener('click', async () => {
+  closeToolsMenu();
+  const currentTab = sheetSelect.value;
+  if (!workbook || !currentTab || !DATE_TAB_REGEX.test(currentTab)) {
+    return alert('Select a valid daily MM-DD-YYYY tab to delete.');
+  }
+
+  const rowsOnTab = allRows.filter(r => r.sheetName === currentTab);
+  const confirmed = confirm(
+    `Are you sure you want to permanently delete worksheet tab "${currentTab}"?\n\n` +
+    `This tab currently contains ${rowsOnTab.length} request(s).\n` +
+    `Reference tabs (template, validation lists, Master Accounts) will not be affected.`
+  );
+  if (!confirmed) return;
+
+  await loadWorkbookFromDisk(currentTab);
+  const ws = workbook.getWorksheet(currentTab);
+  if (!ws) return alert(`Worksheet "${currentTab}" not found.`);
+
+  // Ensure workbook always retains at least 1 sheet so ExcelJS produces a valid .xlsx
+  if (workbook.worksheets.length <= 1) {
+    const fallbackTemplate = workbook.addWorksheet('template');
+    applyStandardSheetFormatting(fallbackTemplate);
+  }
+
+  workbook.removeWorksheet(ws.id);
+
+  const saved = await saveWorkbookToDisk();
+  if (saved) {
+    await loadWorkbookFromDisk(null, {
+      preserveStatus: saved === 'mirror-locked'
+    });
+    showToast(`Deleted worksheet tab "${currentTab}".`, 'success');
+  }
+});
+
+// --- 4. DYNAMIC REFERENCE SHEET PARSING (validation lists & Master Accounts) ---
 function parseValidationSheet(worksheet) {
   const actionsSet = new Set();
   const statusesSet = new Set();
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return; // Skip header row
+    if (rowNumber === 1) return;
     const actionVal = cellText(row, 1);
     const statusVal = cellText(row, 2);
 
@@ -532,7 +962,7 @@ function parseValidationSheet(worksheet) {
 function parseMasterAccountsSheet(worksheet) {
   const seen = new Set();
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return; // Skip header row
+    if (rowNumber === 1) return;
     const broker = cellText(row, 1);
     const master = cellText(row, 2).toUpperCase();
     const bidder = cellText(row, 3).toUpperCase();
@@ -547,15 +977,14 @@ function parseMasterAccountsSheet(worksheet) {
 }
 
 function populateReferenceControls() {
-  // 1. Populate Action Datalist (#actionList)
+  const actionsToUse = validationActions.length > 0 ? validationActions : DEFAULT_ACTIONS;
   actionListEl.innerHTML = '';
-  validationActions.forEach(action => {
+  actionsToUse.forEach(action => {
     const opt = document.createElement('option');
     opt.value = action;
     actionListEl.appendChild(opt);
   });
 
-  // 2. Populate Status Select (#fStatus) with fallback
   const statusesToUse = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
   const currentSelected = fStatus.value;
   fStatus.innerHTML = '';
@@ -569,7 +998,6 @@ function populateReferenceControls() {
     fStatus.value = currentSelected;
   }
 
-  // 3. Populate Broker Datalist (#brokerList)
   brokerListEl.innerHTML = '';
   const uniqueBrokers = Array.from(new Set(masterAccountsMap.map(m => m.broker).filter(Boolean)));
   uniqueBrokers.forEach(broker => {
@@ -579,7 +1007,6 @@ function populateReferenceControls() {
   });
 }
 
-// Auto-Fill Behavior in Modal: Broker <-> Master# (& Default Bidder#)
 function handleBrokerAutoFill() {
   const typedBroker = fBroker.value.trim().toLowerCase();
   if (!typedBroker) return;
@@ -617,11 +1044,10 @@ fMaster.addEventListener('change', handleMasterReverseAutoFill);
 
 // --- INDEX WORKSHEET ROWS & LEGACY GUID BACKFILL ---
 function indexWorksheetRows(worksheet, sheetName) {
-  // Keep Column K hidden
   worksheet.getColumn(11).hidden = true;
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return; // Skip header row
+    if (rowNumber === 1) return;
 
     const subject = cellText(row, 1);
     const ticket = cellText(row, 2);
@@ -634,15 +1060,12 @@ function indexWorksheetRows(worksheet, sheetName) {
     const notes = cellText(row, 9);
     const status = cellText(row, 10);
 
-    // Check if row has any data across Columns A-J (1..10)
     const hasData = [subject, ticket, broker, master, bidder, action, yard, lots, notes, status]
       .some(val => val !== '');
     if (!hasData) return;
 
-    // Pure Immutable GUID in Hidden Column K (Cell 11)
     let key = cellText(row, 11).toLowerCase();
     if (!key) {
-      // Legacy Backfill: generate a UUIDv4 in memory and stage it on Cell 11 for the next save
       const cacheKey = `${workingFileHandle ? workingFileHandle.name : 'wb'}::${sheetName}::${rowNumber}`;
       if (legacyBackfillMap.has(cacheKey)) {
         key = legacyBackfillMap.get(cacheKey);
@@ -672,6 +1095,7 @@ function indexWorksheetRows(worksheet, sheetName) {
   });
 }
 
+// --- SHEET DROPDOWN, PREV/NEXT STEPPER & QUICK TAB BAR ---
 function populateSheetDropdown(preserveSheet) {
   sheetSelect.innerHTML = '';
   if (dateSheets.length === 0) {
@@ -696,7 +1120,96 @@ function populateSheetDropdown(preserveSheet) {
   }
 }
 
-// --- 4. RENDER LIST VIEW, AUTOMATIC GLOBAL SEARCH, & DELETE SELECTION MODE ---
+function updateSheetStepperState() {
+  if (dateSheets.length <= 1) {
+    btnPrevSheet.disabled = true;
+    btnNextSheet.disabled = true;
+    return;
+  }
+  const currentIdx = dateSheets.indexOf(sheetSelect.value);
+  // dateSheets is sorted newest first (0 = newest, length - 1 = oldest)
+  // Prev (◀) steps to older tab (currentIdx + 1); Next (▶) steps to newer tab (currentIdx - 1)
+  btnPrevSheet.disabled = currentIdx === -1 || currentIdx >= dateSheets.length - 1;
+  btnNextSheet.disabled = currentIdx <= 0;
+
+  if (!btnPrevSheet.disabled) {
+    btnPrevSheet.title = `Older Day Tab: ${dateSheets[currentIdx + 1]}`;
+  } else {
+    btnPrevSheet.title = 'Oldest Day Tab reached';
+  }
+
+  if (!btnNextSheet.disabled) {
+    btnNextSheet.title = `Newer Day Tab: ${dateSheets[currentIdx - 1]}`;
+  } else {
+    btnNextSheet.title = 'Newest Day Tab reached';
+  }
+}
+
+function renderSheetTabsBar() {
+  if (dateSheets.length === 0) {
+    sheetTabsBar.style.display = 'none';
+    sheetTabsBar.innerHTML = '';
+    return;
+  }
+
+  sheetTabsBar.style.display = 'flex';
+  sheetTabsBar.innerHTML = '';
+  const currentTab = sheetSelect.value;
+  const todayTime = parseDateTab(getTodayFormatted());
+
+  // Invert tab strip order (oldest on left -> newest on right) so ◀ (Older) moves left and ▶ (Newer) moves right
+  const chronologicalTabs = [...dateSheets].reverse();
+  let activePillEl = null;
+
+  chronologicalTabs.forEach(tabName => {
+    const count = allRows.filter(r => r.sheetName === tabName).length;
+    const isFuture = parseDateTab(tabName) > todayTime;
+    const isActive = tabName === currentTab;
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'sheet-tab-pill' + (isActive ? ' active' : '');
+    pill.innerHTML = `
+      <span>${escapeHtml(tabName)}${isFuture ? ' • Future' : ''}</span>
+      <span class="sheet-tab-count">${count}</span>
+    `;
+    pill.addEventListener('click', () => {
+      sheetSelect.value = tabName;
+      onActiveSheetChanged();
+    });
+    sheetTabsBar.appendChild(pill);
+    if (isActive) activePillEl = pill;
+  });
+
+  if (activePillEl && typeof activePillEl.scrollIntoView === 'function') {
+    activePillEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }
+}
+
+function onActiveSheetChanged() {
+  updateSheetStepperState();
+  renderSheetTabsBar();
+  renderList();
+}
+
+btnPrevSheet.addEventListener('click', () => {
+  const idx = dateSheets.indexOf(sheetSelect.value);
+  if (idx !== -1 && idx < dateSheets.length - 1) {
+    sheetSelect.value = dateSheets[idx + 1];
+    onActiveSheetChanged();
+  }
+});
+
+btnNextSheet.addEventListener('click', () => {
+  const idx = dateSheets.indexOf(sheetSelect.value);
+  if (idx > 0) {
+    sheetSelect.value = dateSheets[idx - 1];
+    onActiveSheetChanged();
+  }
+});
+
+sheetSelect.addEventListener('change', onActiveSheetChanged);
+
+// --- 5. RENDER LIST VIEW, AUTOMATIC GLOBAL SEARCH, & DELETE SELECTION MODE ---
 function getRowCompositeId(sheetName, rowNumber) {
   return `${sheetName}::${rowNumber}`;
 }
@@ -706,17 +1219,14 @@ function renderList() {
   const scope = scopeSelect.value;
   const currentSheet = sheetSelect.value;
 
-  // Show visual indicator when search automatically pulls across all tabs
   if (searchScopeHint) {
     searchScopeHint.style.display = query.length > 0 ? 'inline-block' : 'none';
   }
 
   const filtered = allRows.filter(item => {
-    // 1. If a unique Tracking ID filter is active, show ALL occurrences across all MM-DD-YYYY tabs
     if (activeKeyFilter) {
       return item.key.toLowerCase() === activeKeyFilter.toLowerCase();
     }
-    // 2. When typing a search query, automatically pull matching results across ALL sheets
     if (query.length > 0) {
       const haystack = [
         item.subject, item.ticket, item.broker, item.master,
@@ -724,7 +1234,6 @@ function renderList() {
       ].join(' ').toLowerCase();
       return haystack.includes(query);
     }
-    // 3. When search is empty, respect the View Scope dropdown
     if (scope === 'current' && item.sheetName !== currentSheet) {
       return false;
     }
@@ -738,6 +1247,7 @@ function renderList() {
   if (filtered.length === 0) {
     listBody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center; color:var(--text-muted); padding: 24px;">No matching requests found.</td></tr>`;
     syncSelectAllCheckboxes();
+    updateStatusBarTelemetry();
     return;
   }
 
@@ -795,14 +1305,17 @@ function renderList() {
   });
 
   syncSelectAllCheckboxes();
+  updateStatusBarTelemetry();
 }
 
 // --- DELETE SELECTION MODE & CONFIRMATION ---
 function setDeleteMode(enabled) {
+  closeToolsMenu();
   isDeleteMode = Boolean(enabled);
   selectedForDelete.clear();
-  btnDeleteMode.classList.toggle('active', isDeleteMode);
-  btnDeleteMode.textContent = isDeleteMode ? '✕ Exit Delete Mode' : '🗑️ Delete Requests';
+  btnDeleteMode.innerHTML = isDeleteMode
+    ? '<span>✕ Exit Batch Delete Mode</span>'
+    : '<span>☑️ Batch Delete Requests Mode</span>';
   deleteBanner.style.display = isDeleteMode ? 'flex' : 'none';
   thDeleteSelect.style.display = isDeleteMode ? 'table-cell' : 'none';
   updateDeleteSelectionUI();
@@ -815,6 +1328,7 @@ function updateDeleteSelectionUI() {
   btnConfirmDeleteSelected.textContent = `🗑️ Delete Selected (${count})`;
   btnConfirmDeleteSelected.disabled = count === 0;
   syncSelectAllCheckboxes();
+  updateStatusBarTelemetry();
 }
 
 function syncSelectAllCheckboxes() {
@@ -879,7 +1393,6 @@ listBody.addEventListener('change', (e) => {
 btnConfirmDeleteSelected.addEventListener('click', async () => {
   if (selectedForDelete.size === 0 || !workbook) return;
 
-  // Gather selected items
   const itemsToDelete = allRows.filter(item =>
     selectedForDelete.has(getRowCompositeId(item.sheetName, item.rowNumber))
   );
@@ -901,7 +1414,6 @@ btnConfirmDeleteSelected.addEventListener('click', async () => {
   const currentTab = sheetSelect.value;
   await loadWorkbookFromDisk(currentTab);
 
-  // Group deletions by sheetName and sort rowNumber DESCENDING so spliceRows never shifts earlier row indices
   const bySheet = new Map();
   itemsToDelete.forEach(item => {
     if (!bySheet.has(item.sheetName)) {
@@ -965,14 +1477,13 @@ document.getElementById('btnClearKeyFilter').addEventListener('click', () => {
   renderList();
 });
 
-sheetSelect.addEventListener('change', renderList);
 scopeSelect.addEventListener('change', renderList);
 searchInput.addEventListener('input', renderList);
 
-// --- 5. EDIT & CREATE MODAL + INPUT HYGIENE + CROSS-TAB STATUS PROPAGATION ---
+// --- 6. EDIT & CREATE MODAL + INPUT HYGIENE + CROSS-TAB STATUS PROPAGATION ---
 btnNewEntry.addEventListener('click', () => {
-  if (!sheetSelect.value) {
-    return alert('Create or select a daily tab (MM-DD-YYYY) first using the Rollover / Sync button.');
+  if (!sheetSelect.value || !DATE_TAB_REGEX.test(sheetSelect.value)) {
+    return alert('Create or select a daily tab (MM-DD-YYYY) first using Bootstrap or Rollover / Sync.');
   }
   editingTarget = null;
   document.getElementById('modalTitle').textContent = `New Request (${sheetSelect.value})`;
@@ -1031,12 +1542,10 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const currentSheetName = editingTarget ? editingTarget.sheetName : sheetSelect.value;
 
-  // Reload fresh copy from disk right before mutating to prevent stale overwrites
   await loadWorkbookFromDisk(currentSheetName);
   const worksheet = workbook.getWorksheet(currentSheetName);
   if (!worksheet) return alert('Target worksheet not found!');
 
-  // Input Hygiene: trim all text inputs & normalize Master#, Bidder#, Yard#, and Ticket# to uppercase
   const subjectVal = fSubject.value.trim();
   const ticketVal = fTicket.value.trim().toUpperCase();
   const brokerVal = fBroker.value.trim();
@@ -1052,16 +1561,13 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   let trackingKey;
 
   if (editingTarget) {
-    // Strictly preserve existing Column K UUID even if Ticket number changed or was deleted
     targetRowNum = editingTarget.rowNumber;
     trackingKey = editingTarget.key;
   } else {
-    // Always generate a fresh lowercase UUIDv4 for new entries
     targetRowNum = getNextEmptyRow(worksheet);
     trackingKey = generateTrackingGuid();
   }
 
-  // Ensure Column K stays hidden
   worksheet.getColumn(11).hidden = true;
 
   const row = worksheet.getRow(targetRowNum);
@@ -1075,10 +1581,9 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   row.getCell(8).value = lotsVal;
   row.getCell(9).value = notesVal;
   row.getCell(10).value = statusVal;
-  row.getCell(11).value = trackingKey; // Pure immutable UUIDv4 in hidden Column K
+  row.getCell(11).value = trackingKey;
   row.commit();
 
-  // If editing an older sheet, check if any NEWER sheets have the same Tracking ID with a conflicting status
   if (editingTarget) {
     const editedTime = parseDateTab(currentSheetName);
     const newerInstances = allRows.filter(
@@ -1125,7 +1630,7 @@ function getNextEmptyRow(worksheet) {
   return lastRow + 1;
 }
 
-// --- 6. SMART MULTI-SHEET & IDEMPOTENT ROLLOVER ENGINE WITH FUTURE DATE HANDLING ---
+// --- 7. SMART MULTI-SHEET & IDEMPOTENT ROLLOVER ENGINE WITH FUTURE DATE HANDLING ---
 btnRollover.addEventListener('click', async () => {
   if (!workbook) return;
   await loadWorkbookFromDisk(sheetSelect.value);
@@ -1326,7 +1831,6 @@ function updateRolloverModalPreview() {
     </div>
   `;
 
-  // 1. Unfinished Requests Ready to Roll Over
   html += `<div>
     <div class="preview-section-title">✅ Unfinished Requests to Roll Over (${plan.toRollOver.length})</div>`;
   if (plan.toRollOver.length === 0) {
@@ -1348,7 +1852,6 @@ function updateRolloverModalPreview() {
   }
   html += `</div>`;
 
-  // 2. Already Present on Target Sheet
   if (plan.alreadyOnTarget.length > 0) {
     html += `<div>
       <div class="preview-section-title">📌 Already Present on ${escapeHtml(targetVal)} (${plan.alreadyOnTarget.length})</div>
@@ -1369,7 +1872,6 @@ function updateRolloverModalPreview() {
     html += `</div></div>`;
   }
 
-  // 3. Older Open Requests Superseded by a Later "Complete" Sheet
   if (plan.supersededByComplete.length > 0) {
     html += `<div>
       <div class="preview-section-title" style="color:#fbbf24;">
@@ -1448,7 +1950,7 @@ rolloverForm.addEventListener('submit', async (e) => {
     if (templateSheet) {
       cloneTemplateStructure(templateSheet, targetSheet);
     } else {
-      initializeDefaultSheetHeaders(targetSheet);
+      applyStandardSheetFormatting(targetSheet);
     }
   }
 
@@ -1511,10 +2013,10 @@ function findTemplateSheet() {
   return found;
 }
 
-function placeWorksheetFirst(targetSheet) {
+function placeWorksheetFirstInWorkbook(wb, targetSheet) {
   try {
     let order = 2;
-    workbook.eachSheet((ws) => {
+    wb.eachSheet((ws) => {
       if (ws.id === targetSheet.id) {
         ws.orderNo = 1;
       } else {
@@ -1524,6 +2026,10 @@ function placeWorksheetFirst(targetSheet) {
   } catch (e) {
     console.warn('Could not reorder worksheet tabs:', e);
   }
+}
+
+function placeWorksheetFirst(targetSheet) {
+  if (workbook) placeWorksheetFirstInWorkbook(workbook, targetSheet);
 }
 
 function cloneTemplateStructure(templateSheet, newSheet) {
@@ -1548,21 +2054,6 @@ function cloneTemplateStructure(templateSheet, newSheet) {
   newSheet.getColumn(11).hidden = true;
 }
 
-function initializeDefaultSheetHeaders(newSheet) {
-  const headers = [
-    'Subject', 'Ticket #', 'Broker Name', 'Master #', 'Bidder #',
-    'Requested Action', 'Yard #', 'Lot Numbers', 'Action Notes',
-    'Request Status', 'Tracking ID'
-  ];
-  const headerRow = newSheet.getRow(1);
-  headers.forEach((h, idx) => {
-    headerRow.getCell(idx + 1).value = h;
-    newSheet.getColumn(idx + 1).width = idx === 0 || idx === 8 ? 28 : 16;
-  });
-  headerRow.commit();
-  newSheet.getColumn(11).hidden = true;
-}
-
 function writeItemToWorksheetRow(row, item) {
   row.getCell(1).value = item.subject;
   row.getCell(2).value = item.ticket ? item.ticket.toUpperCase() : '';
@@ -1574,11 +2065,109 @@ function writeItemToWorksheetRow(row, item) {
   row.getCell(8).value = item.lots;
   row.getCell(9).value = item.notes;
   row.getCell(10).value = item.status;
-  row.getCell(11).value = item.key; // Preserves immutable UUIDv4 across days
+  row.getCell(11).value = item.key;
   row.commit();
 }
 
-// --- 7. DUAL-WRITE MIRRORING + CUSTOM SUPERVISOR DIRECTORY + LOCK DETECTION ---
+// --- 8. DUAL-WRITE MIRRORING + AUTO-RETRY & MANUAL RETRY ---
+function clearMirrorRetryState() {
+  pendingMirrorBuffer = null;
+  mirrorRetryCount = 0;
+  mirrorCountdownSec = 0;
+  if (mirrorCountdownInterval) {
+    clearInterval(mirrorCountdownInterval);
+    mirrorCountdownInterval = null;
+  }
+  if (btnRetryMirror) {
+    btnRetryMirror.style.display = 'none';
+  }
+}
+
+function scheduleMirrorAutoRetry() {
+  if (mirrorCountdownInterval) {
+    clearInterval(mirrorCountdownInterval);
+  }
+  btnRetryMirror.style.display = 'inline-block';
+
+  if (mirrorRetryCount >= MIRROR_MAX_AUTO_RETRIES) {
+    btnRetryMirror.textContent = '🔄 Retry Mirror Sync';
+    setStatus('⚠️ Saved Working File (Mirror locked — click Retry when free)', 'warning');
+    return;
+  }
+
+  mirrorCountdownSec = MIRROR_RETRY_INTERVAL_SEC;
+  btnRetryMirror.textContent = `🔄 Retry Mirror (${mirrorCountdownSec}s)`;
+
+  mirrorCountdownInterval = setInterval(async () => {
+    mirrorCountdownSec--;
+    if (mirrorCountdownSec > 0) {
+      btnRetryMirror.textContent = `🔄 Retry Mirror (${mirrorCountdownSec}s)`;
+    } else {
+      clearInterval(mirrorCountdownInterval);
+      mirrorCountdownInterval = null;
+      mirrorRetryCount++;
+      await retryMirrorSyncNow(true);
+    }
+  }, 1000);
+}
+
+async function attemptMirrorWrite(buffer, isRetry = false) {
+  const targetMirrorDir = supervisorDirHandle || parentDirHandle;
+  if (!targetMirrorDir || !workingFileHandle) return true;
+
+  const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
+  try {
+    const mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: true });
+    const mirrorWritable = await mirrorHandle.createWritable();
+    await mirrorWritable.write(buffer);
+    await mirrorWritable.close();
+
+    const wasRetrying = Boolean(pendingMirrorBuffer) || isRetry;
+    clearMirrorRetryState();
+
+    const mirrorLocationNote = supervisorDirHandle ? ` (Mirrored to ${supervisorDirHandle.name})` : '';
+    setStatus(`Saved & Mirrored: ${workingFileHandle.name}${mirrorLocationNote}`, 'ready');
+    if (wasRetrying) {
+      showToast(`✅ Supervisor mirror "${mirrorFileName}" synced!`, 'success');
+    }
+    return true;
+  } catch (mirrorErr) {
+    console.warn(`Supervisor mirror file "${mirrorFileName}" is locked or busy:`, mirrorErr);
+    pendingMirrorBuffer = buffer;
+    setStatus('⚠️ Saved Working File (Mirror in use by Supervisor)', 'warning');
+    scheduleMirrorAutoRetry();
+    if (!isRetry) {
+      showToast('⚠️ Saved Working File (Mirror in use by Supervisor — auto-retrying every 15s)', 'warning');
+    }
+    return false;
+  }
+}
+
+async function retryMirrorSyncNow(isAuto = false) {
+  if (!workingFileHandle || !workbook) return;
+  btnRetryMirror.textContent = '⏳ Retrying Mirror...';
+
+  let bufferToWrite = pendingMirrorBuffer;
+  if (!bufferToWrite) {
+    try {
+      bufferToWrite = await workbook.xlsx.writeBuffer();
+    } catch (e) {
+      console.error('Could not serialize buffer for mirror retry:', e);
+      return;
+    }
+  }
+
+  const ok = await attemptMirrorWrite(bufferToWrite, true);
+  if (!ok && !isAuto) {
+    showToast('⚠️ Supervisor (VIEW ONLY) file is still locked in Excel. Will keep retrying.', 'warning');
+  }
+}
+
+btnRetryMirror.addEventListener('click', () => {
+  mirrorRetryCount = 0; // Reset auto-retry counter on manual click
+  retryMirrorSyncNow(false);
+});
+
 async function saveWorkbookToDisk() {
   if (!workingFileHandle) return false;
 
@@ -1609,26 +2198,9 @@ async function saveWorkbookToDisk() {
     return false;
   }
 
-  // 2. Dual-Write Mirroring to (VIEW ONLY).xlsx in Supervisor Folder (or Agent Folder fallback)
-  const targetMirrorDir = supervisorDirHandle || parentDirHandle;
-  if (targetMirrorDir) {
-    const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
-    try {
-      const mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: true });
-      const mirrorWritable = await mirrorHandle.createWritable();
-      await mirrorWritable.write(buffer);
-      await mirrorWritable.close();
-    } catch (mirrorErr) {
-      console.warn(`Supervisor mirror file "${mirrorFileName}" is locked or busy:`, mirrorErr);
-      setStatus('⚠️ Saved Working File (Mirror in use by Supervisor)', 'warning');
-      showToast('⚠️ Saved Working File (Mirror in use by Supervisor)', 'warning');
-      return 'mirror-locked';
-    }
-  }
-
-  const mirrorLocationNote = supervisorDirHandle ? ` (Mirrored to ${supervisorDirHandle.name})` : '';
-  setStatus(`Saved & Mirrored: ${workingFileHandle.name}${mirrorLocationNote}`, 'ready');
-  return true;
+  // 2. Dual-Write Mirroring to (VIEW ONLY).xlsx with Auto-Retry & Manual Retry fallback
+  const mirrorOk = await attemptMirrorWrite(buffer, false);
+  return mirrorOk ? true : 'mirror-locked';
 }
 
 // --- UTILITIES & TOAST ---
@@ -1643,6 +2215,31 @@ function getTodayFormatted() {
 function setStatus(text, stateClass) {
   statusPill.textContent = text;
   statusPill.className = 'status-pill ' + (stateClass || '');
+  if (statusTimestamp && (stateClass === 'ready' || stateClass === 'warning')) {
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    statusTimestamp.textContent = `Last updated: ${nowTime}`;
+  }
+  updateStatusBarTelemetry();
+}
+
+function updateStatusBarTelemetry() {
+  if (statusFolderInfo) {
+    if (!parentDirHandle) {
+      statusFolderInfo.textContent = '📂 Folder: Not connected';
+    } else {
+      const supName = supervisorDirHandle ? supervisorDirHandle.name : 'Same as Agent';
+      statusFolderInfo.textContent = `📂 Agent: ${parentDirHandle.name} • 👁️ Mirror: ${supName}`;
+    }
+  }
+
+  if (statusRowStats) {
+    if (!workbook) {
+      statusRowStats.textContent = '📊 0 requests';
+    } else {
+      const openTotal = allRows.filter(r => r.status.trim().toLowerCase() !== 'complete').length;
+      statusRowStats.textContent = `📊 Showing ${currentlyVisibleRows.length} of ${allRows.length} requests (${openTotal} open across ${dateSheets.length} tab${dateSheets.length === 1 ? '' : 's'})`;
+    }
+  }
 }
 
 function showToast(message, type = 'info') {
@@ -1667,7 +2264,7 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// --- 8. PWA SERVICE WORKER REGISTRATION ---
+// --- 9. PWA SERVICE WORKER REGISTRATION ---
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')

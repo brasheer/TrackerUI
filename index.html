@@ -24,30 +24,83 @@
   <header>
     <div class="brand">
       <h1>Bidder Support Tracker PWA</h1>
-      <span id="statusPill" class="status-pill">No Folder Linked</span>
     </div>
+
     <div class="header-actions">
       <div id="workbookPickerWrap" class="workbook-picker-wrap">
         <label for="workbookSelect">Workbook:</label>
         <select id="workbookSelect" title="Select active monthly workbook"></select>
       </div>
-      <button id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
-      <button id="btnLinkFile">📂 Select Agent Folder</button>
-      <div class="supervisor-dir-group">
-        <button id="btnSupervisorDir" class="btn-supervisor" title="Select folder where (VIEW ONLY).xlsx copies are saved">👁️ Supervisor Folder: Same as Agent</button>
-        <button id="btnResetSupervisorDir" class="btn-supervisor-reset" style="display:none;" title="Reset Supervisor export back to Agent folder">✕</button>
+
+      <button type="button" id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
+      <button type="button" id="btnLinkFile">📂 Select Agent Folder</button>
+      <button type="button" id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync</button>
+      <button type="button" id="btnNewEntry" class="btn-primary" style="display:none;">+ New Request</button>
+
+      <!-- Clean Popover Workspace & Tools Menu -->
+      <div class="tools-menu-wrap" id="toolsMenuWrap">
+        <button type="button" id="btnToolsMenu" class="btn-tools-menu" title="Workspace folders, sheet tools, and batch actions">
+          ⚙️ Tools &amp; Setup ▾
+        </button>
+        <div id="toolsMenuDropdown" class="tools-menu-dropdown">
+          <div class="menu-section">
+            <div class="menu-section-title">Folders &amp; Mirroring</div>
+            <button type="button" id="menuSelectAgentFolder" class="menu-item">
+              <span>📂 Select / Change Agent Folder...</span>
+            </button>
+            <div class="menu-item-group">
+              <button type="button" id="btnSupervisorDir" class="menu-item" title="Select folder where (VIEW ONLY).xlsx copies are saved">
+                👁️ Supervisor Folder: Same as Agent
+              </button>
+              <button type="button" id="btnResetSupervisorDir" class="menu-item-reset" style="display:none;" title="Reset Supervisor export back to Agent folder">
+                ✕ Reset
+              </button>
+            </div>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-section-title">Workbook &amp; Schema</div>
+            <button type="button" id="btnNewWorkbook" class="menu-item" disabled>
+              <span>✨ Create New Monthly Workbook (.xlsx)...</span>
+            </button>
+            <button type="button" id="btnRepairSchema" class="menu-item" disabled>
+              <span>🛠️ Bootstrap / Repair Workbook Schema</span>
+            </button>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-section-title">Active Day Tab Management</div>
+            <button type="button" id="btnAddBlankTab" class="menu-item" disabled>
+              <span>➕ New Blank Day Tab (MM-DD-YYYY)...</span>
+            </button>
+            <button type="button" id="btnRenameTab" class="menu-item" disabled>
+              <span>✏️ Rename Current Day Tab...</span>
+            </button>
+            <button type="button" id="btnDeleteTab" class="menu-item menu-item-danger" disabled>
+              <span>🗑️ Delete Current Day Tab...</span>
+            </button>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-section-title">Row Management</div>
+            <button type="button" id="btnDeleteMode" class="menu-item menu-item-danger" disabled>
+              <span>☑️ Batch Delete Requests Mode</span>
+            </button>
+          </div>
+        </div>
       </div>
-      <button id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync Unfinished to Today</button>
-      <button id="btnDeleteMode" class="btn-danger-outline" style="display:none;">🗑️ Delete Requests</button>
-      <button id="btnNewEntry" class="btn-primary" style="display:none;">+ New Request</button>
     </div>
   </header>
 
   <div class="controls">
-    <label for="sheetSelect" style="color:var(--text-muted); font-size:12px;">Day Tab:</label>
-    <select id="sheetSelect" disabled>
-      <option>Connect agent folder first...</option>
-    </select>
+    <div class="sheet-nav-group">
+      <label for="sheetSelect" style="color:var(--text-muted); font-size:12px;">Day Tab:</label>
+      <button type="button" id="btnPrevSheet" class="btn-sheet-step" title="Previous (Older) Day Tab" disabled>◀</button>
+      <select id="sheetSelect" disabled>
+        <option>Connect agent folder first...</option>
+      </select>
+      <button type="button" id="btnNextSheet" class="btn-sheet-step" title="Next (Newer) Day Tab" disabled>▶</button>
+    </div>
 
     <label for="scopeSelect" style="color:var(--text-muted); font-size:12px;">View Scope:</label>
     <select id="scopeSelect" disabled>
@@ -57,6 +110,19 @@
 
     <input type="text" id="searchInput" class="search-box" placeholder="Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)..." disabled>
     <span id="searchScopeHint" class="search-scope-pill" style="display:none;">🌐 Searching All Tabs</span>
+  </div>
+
+  <!-- Quick Scrollable Sheet Tab Strip (Ordered Oldest Left -> Newest Right to match ◀ / ▶ arrows) -->
+  <div id="sheetTabsBar" class="sheet-tabs-bar" style="display:none;"></div>
+
+  <!-- Schema / Blank Workbook Bootstrap Banner -->
+  <div id="schemaBanner" class="schema-banner" style="display:none;">
+    <div id="schemaBannerText">
+      <strong>✨ Workbook Schema Incomplete:</strong> This workbook is blank or missing standard tracker tabs.
+    </div>
+    <button type="button" id="btnBannerBootstrap" class="btn-primary" style="padding: 5px 12px; font-size:12.5px;">
+      ✨ Bootstrap Tracker Schema Now
+    </button>
   </div>
 
   <div id="filterBanner">
@@ -208,6 +274,24 @@
 
   <!-- Non-blocking Toast Container -->
   <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Bottom Workspace Status Bar -->
+  <footer id="statusBar" class="status-bar">
+    <div class="status-bar-left">
+      <span id="statusPill" class="status-pill">No Folder Linked</span>
+      <button type="button" id="btnRetryMirror" class="btn-retry-mirror" style="display:none;" title="Supervisor (VIEW ONLY) mirror was in use. Click to retry syncing now.">
+        🔄 Retry Mirror Sync
+      </button>
+    </div>
+    <div class="status-bar-center">
+      <span id="statusFolderInfo" class="status-meta-item">📂 Folder: Not connected</span>
+      <span class="status-divider">•</span>
+      <span id="statusRowStats" class="status-meta-item">📊 0 requests</span>
+    </div>
+    <div class="status-bar-right">
+      <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
+    </div>
+  </footer>
 
   <script src="js/app.js"></script>
 </body>

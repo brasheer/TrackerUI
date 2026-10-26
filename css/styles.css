@@ -122,37 +122,192 @@ button:hover { background: var(--surface-hover); }
   background: rgba(56, 189, 248, 0.25);
 }
 
-/* Supervisor Folder Controls */
-.supervisor-dir-group {
-  display: inline-flex;
+/* Retry Mirror Button */
+.btn-retry-mirror {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.22);
+  border: 1px solid var(--warning);
+  color: #fde68a;
+  font-weight: 600;
+}
+.btn-retry-mirror:hover {
+  background: var(--warning);
+  color: #0f172a;
+}
+
+/* Floating Popover Tools & Setup Menu */
+.tools-menu-wrap {
+  position: relative;
+}
+.btn-tools-menu {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: #475569;
+  color: var(--text);
+}
+.btn-tools-menu.open {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tools-menu-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 310px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.65);
+  padding: 8px;
+  z-index: 40;
+  flex-direction: column;
+  gap: 8px;
+}
+.tools-menu-dropdown.open {
+  display: flex;
+}
+.menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.menu-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.menu-section-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 4px 8px 2px;
+}
+.menu-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: #475569;
+}
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.menu-item.custom-active {
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.1);
+}
+.menu-item-group {
+  display: flex;
+  gap: 4px;
   align-items: center;
 }
-.btn-supervisor {
-  background: rgba(148, 163, 184, 0.12);
-  border-color: #475569;
-  color: #cbd5e1;
-  font-size: 13px;
-}
-.btn-supervisor.custom-active {
-  background: rgba(34, 197, 94, 0.14);
-  border-color: rgba(34, 197, 94, 0.45);
-  color: #4ade80;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.btn-supervisor-reset {
-  background: rgba(34, 197, 94, 0.14);
-  border: 1px solid rgba(34, 197, 94, 0.45);
-  border-left: none;
-  color: #4ade80;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  padding: 7px 9px;
-  font-size: 12px;
-}
-.btn-supervisor-reset:hover {
-  background: rgba(239, 68, 68, 0.25);
+.menu-item-reset {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
   color: #f87171;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  white-space: nowrap;
+  border-radius: 6px;
+}
+.menu-item-reset:hover {
+  background: rgba(239, 68, 68, 0.28);
+}
+.menu-item-danger {
+  color: #f87171;
+}
+.menu-item-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+/* Sheet Navigation Stepper & Tab Strip */
+.sheet-nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-sheet-step {
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+.btn-sheet-step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.sheet-tabs-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 20px;
+  background: rgba(15, 23, 42, 0.65);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.sheet-tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.sheet-tab-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.sheet-tab-pill.active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.sheet-tab-count {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text);
+}
+.sheet-tab-pill.active .sheet-tab-count {
+  background: var(--accent);
+  color: #0f172a;
+}
+
+/* Schema / Blank Workbook Bootstrap Banner */
+.schema-banner {
+  background: rgba(56, 189, 248, 0.12);
+  border-bottom: 1px solid var(--accent);
+  padding: 10px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
 }
 
 /* Danger / Delete Buttons */
@@ -465,7 +620,7 @@ tr:hover td { background: rgba(51, 65, 85, 0.35); }
 /* Toast Notifications */
 .toast-container {
   position: fixed;
-  bottom: 20px;
+  bottom: 52px;
   right: 20px;
   z-index: 100;
   display: flex;
@@ -488,6 +643,42 @@ tr:hover td { background: rgba(51, 65, 85, 0.35); }
 .toast.success { border-left-color: var(--success); }
 .toast.warning { border-left-color: var(--warning); }
 .toast.error { border-left-color: var(--danger); }
+
+/* Bottom Workspace Status Bar */
+.status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 6px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 30;
+  font-size: 12px;
+  color: var(--text-muted);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.25);
+}
+.status-bar-left,
+.status-bar-center,
+.status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.status-meta-item {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.status-divider {
+  color: var(--border);
+}
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
