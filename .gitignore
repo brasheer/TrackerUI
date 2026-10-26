@@ -108,3 +108,9 @@ pnpm-debug.log*
 *.old
 *.orig
 
+# ==========================================
+# Local Templates & Working Data
+# ==========================================
+tracker templates/
+
+

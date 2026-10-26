@@ -34,6 +34,11 @@ let validationStatuses = [];
 // Stable in-memory backfill cache so legacy rows without Col K keep the same UUID before & during save
 const legacyBackfillMap = new Map();
 
+// Original OpenXML archive state preserved on load so ExcelJS does not strip dynamic array metadata, external links, or data validations
+let originalArchiveState = null;
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const DEFAULT_ACTIONS = [
   'Title Inquiry',
   'Gate Pass Reissue',
@@ -52,6 +57,18 @@ const DEFAULT_STATUSES = [
   'Complete'
 ];
 
+const KNOWN_STATUS_VALUES = new Set([
+  'pending',
+  'in progress',
+  'waiting on buyer',
+  'escalated',
+  'complete',
+  'new',
+  'waiting',
+  'overdue',
+  'closed'
+]);
+
 const STANDARD_HEADERS = [
   'Subject',
   'Ticket Number',
@@ -66,7 +83,30 @@ const STANDARD_HEADERS = [
   'Tracking ID'
 ];
 
-const DATE_TAB_REGEX = /^\d{2}-\d{2}-\d{4}$/;
+const DATE_TAB_REGEX = /^\d{1,2}-\d{1,2}-\d{2,4}$/;
+
+function isTemplatePlaceholderTab(sheetName) {
+  const norm = String(sheetName || '').trim().toLowerCase();
+  return (
+    norm === 'rename to current date' ||
+    norm === 'rename to today' ||
+    norm === 'current date'
+  );
+}
+
+function isCompletedStatus(status) {
+  const norm = String(status || '').trim().toLowerCase();
+  return norm === 'complete' || norm === 'closed';
+}
+
+function getDefaultStatus() {
+  if (validationStatuses.length > 0) {
+    const preferred = validationStatuses.find(s => !isCompletedStatus(s));
+    if (preferred) return preferred;
+    return validationStatuses[0];
+  }
+  return 'Pending';
+}
 
 const IDB_NAME = 'TrackerUI_DirectoryDB';
 const IDB_STORE = 'handles';
@@ -537,7 +577,7 @@ btnSupervisorDir.addEventListener('click', async () => {
         updateSupervisorDirUI();
         showToast(`Reconnected Supervisor export folder: "${supervisorDirHandle.name}"`, 'success');
         if (workbook && workingFileHandle) {
-          const buf = await workbook.xlsx.writeBuffer();
+          const buf = await serializeWorkbookBuffer();
           await attemptMirrorWrite(buf, false);
         }
         return;
@@ -552,7 +592,7 @@ btnSupervisorDir.addEventListener('click', async () => {
     showToast(`Supervisor (VIEW ONLY) export folder set to "${supDir.name}"`, 'success');
 
     if (workbook && workingFileHandle) {
-      const buf = await workbook.xlsx.writeBuffer();
+      const buf = await serializeWorkbookBuffer();
       await attemptMirrorWrite(buf, false);
     }
   } catch (err) {
@@ -707,21 +747,633 @@ workbookSelect.addEventListener('change', async () => {
 });
 
 // --- 2. READ WORKBOOK, PARSE REFERENCE SHEETS, CHECK SCHEMA & INDEX ALL DAILY TABS ---
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32Bytes(u8) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) {
+    crc = CRC32_TABLE[(crc ^ u8[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+async function inflateRawBytes(compBytes) {
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  writer.write(compBytes);
+  writer.close();
+  const ab = await new Response(ds.readable).arrayBuffer();
+  return new Uint8Array(ab);
+}
+
+async function deflateRawBytes(rawBytes) {
+  const cs = new CompressionStream('deflate-raw');
+  const writer = cs.writable.getWriter();
+  writer.write(rawBytes);
+  writer.close();
+  const ab = await new Response(cs.readable).arrayBuffer();
+  return new Uint8Array(ab);
+}
+
+async function unpackZipArchive(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const len = bytes.length;
+
+  let eocdOffset = -1;
+  for (let i = len - 22; i >= Math.max(0, len - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error('Invalid XLSX archive: End of Central Directory not found.');
+  }
+
+  const totalEntries = view.getUint16(eocdOffset + 10, true);
+  const cdOffset = view.getUint32(eocdOffset + 16, true);
+  const entries = new Map();
+  const dec = new TextDecoder('utf-8');
+
+  let ptr = cdOffset;
+  for (let e = 0; e < totalEntries; e++) {
+    if (ptr + 46 > len || view.getUint32(ptr, true) !== 0x02014b50) break;
+    const compMethod = view.getUint16(ptr + 10, true);
+    const compSize = view.getUint32(ptr + 20, true);
+    const nameLen = view.getUint16(ptr + 28, true);
+    const extraLen = view.getUint16(ptr + 30, true);
+    const commentLen = view.getUint16(ptr + 32, true);
+    const localHeaderOffset = view.getUint32(ptr + 42, true);
+
+    const name = dec.decode(bytes.subarray(ptr + 46, ptr + 46 + nameLen)).replace(/\\/g, '/');
+    const localNameLen = view.getUint16(localHeaderOffset + 26, true);
+    const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+    const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    const compData = bytes.subarray(dataStart, dataStart + compSize);
+
+    let rawData;
+    if (compMethod === 0) {
+      rawData = compData.slice();
+    } else if (compMethod === 8) {
+      rawData = await inflateRawBytes(compData);
+    } else {
+      rawData = compData.slice();
+    }
+    entries.set(name, rawData);
+    ptr += 46 + nameLen + extraLen + commentLen;
+  }
+
+  return entries;
+}
+
+async function packZipArchive(entriesMap) {
+  const enc = new TextEncoder();
+  const localParts = [];
+  const cdParts = [];
+  let localOffset = 0;
+  let totalCdBytes = 0;
+
+  for (const [name, rawData] of entriesMap.entries()) {
+    const nameBytes = enc.encode(name);
+    const u8Raw = rawData instanceof Uint8Array ? rawData : enc.encode(String(rawData));
+    const crc = crc32Bytes(u8Raw);
+    const compData = await deflateRawBytes(u8Raw);
+    const compSize = compData.length;
+    const uncompSize = u8Raw.length;
+
+    const lfh = new Uint8Array(30 + nameBytes.length);
+    const lfhView = new DataView(lfh.buffer);
+    lfhView.setUint32(0, 0x04034b50, true);
+    lfhView.setUint16(4, 20, true);
+    lfhView.setUint16(6, 0, true);
+    lfhView.setUint16(8, 8, true); // deflate
+    lfhView.setUint16(10, 0, true);
+    lfhView.setUint16(12, 0x21, true);
+    lfhView.setUint32(14, crc, true);
+    lfhView.setUint32(18, compSize, true);
+    lfhView.setUint32(22, uncompSize, true);
+    lfhView.setUint16(26, nameBytes.length, true);
+    lfhView.setUint16(28, 0, true);
+    lfh.set(nameBytes, 30);
+
+    localParts.push(lfh, compData);
+
+    const cdfh = new Uint8Array(46 + nameBytes.length);
+    const cdView = new DataView(cdfh.buffer);
+    cdView.setUint32(0, 0x02014b50, true);
+    cdView.setUint16(4, 20, true);
+    cdView.setUint16(6, 20, true);
+    cdView.setUint16(8, 0, true);
+    cdView.setUint16(10, 8, true);
+    cdView.setUint16(12, 0, true);
+    cdView.setUint16(14, 0x21, true);
+    cdView.setUint32(16, crc, true);
+    cdView.setUint32(20, compSize, true);
+    cdView.setUint32(24, uncompSize, true);
+    cdView.setUint16(28, nameBytes.length, true);
+    cdView.setUint16(30, 0, true);
+    cdView.setUint16(32, 0, true);
+    cdView.setUint16(34, 0, true);
+    cdView.setUint16(36, 0, true);
+    cdView.setUint32(38, 0, true);
+    cdView.setUint32(42, localOffset, true);
+    cdfh.set(nameBytes, 46);
+
+    cdParts.push(cdfh);
+    totalCdBytes += cdfh.length;
+    localOffset += lfh.length + compData.length;
+  }
+
+  const eocd = new Uint8Array(22);
+  const eocdView = new DataView(eocd.buffer);
+  const count = cdParts.length;
+  eocdView.setUint32(0, 0x06054b50, true);
+  eocdView.setUint16(4, 0, true);
+  eocdView.setUint16(6, 0, true);
+  eocdView.setUint16(8, count, true);
+  eocdView.setUint16(10, count, true);
+  eocdView.setUint32(12, totalCdBytes, true);
+  eocdView.setUint32(16, localOffset, true);
+  eocdView.setUint16(20, 0, true);
+
+  const out = new Uint8Array(localOffset + totalCdBytes + 22);
+  let pos = 0;
+  for (const part of localParts) {
+    out.set(part, pos);
+    pos += part.length;
+  }
+  for (const part of cdParts) {
+    out.set(part, pos);
+    pos += part.length;
+  }
+  out.set(eocd, pos);
+  return out.buffer;
+}
+
+const STANDARD_DYNAMIC_ARRAY_METADATA_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray">' +
+  '<metadataTypes count="1"><metadataType name="XLDAPR" minSupportedVersion="120000" copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" clearComments="1" assign="1" coerce="1" cellMeta="1"/></metadataTypes>' +
+  '<futureMetadata name="XLDAPR" count="1"><bk><extLst><ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}"><xda:dynamicArrayProperties fDynamic="1" fCollapsed="0"/></ext></extLst></bk></futureMetadata>' +
+  '<cellMetadata count="1"><bk><rc t="1" v="0"/></bk></cellMetadata></metadata>';
+
+const WORKBOOK_CALC_FEATURES_EXT =
+  '<ext uri="{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}" xmlns:xcalcf="http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures">' +
+  '<xcalcf:calcFeatures>' +
+  '<xcalcf:feature name="microsoft.com:RD"/>' +
+  '<xcalcf:feature name="microsoft.com:Single"/>' +
+  '<xcalcf:feature name="microsoft.com:FV"/>' +
+  '<xcalcf:feature name="microsoft.com:CNMTM"/>' +
+  '<xcalcf:feature name="microsoft.com:LET_WF"/>' +
+  '<xcalcf:feature name="microsoft.com:LAMBDA_WF"/>' +
+  '<xcalcf:feature name="microsoft.com:ARRAYTEXT_WF"/>' +
+  '</xcalcf:calcFeatures></ext>';
+
+const DAILY_SHEET_DATA_VALIDATIONS_EXTLST =
+  '<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">' +
+  '<x14:dataValidations count="2" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">' +
+  '<x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1">' +
+  '<x14:formula1><xm:f>\'Validation List\'!$E$2:$E$100</xm:f></x14:formula1><xm:sqref>I2:I101</xm:sqref>' +
+  '</x14:dataValidation>' +
+  '<x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1">' +
+  '<x14:formula1><xm:f>\'Validation List\'!$A$2:$A$50</xm:f></x14:formula1><xm:sqref>F2:F108</xm:sqref>' +
+  '</x14:dataValidation>' +
+  '</x14:dataValidations></ext></extLst>';
+
+const DEFAULT_EXTERNAL_LINK_RELS_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="LKQ-Bidder%20Support%20shared%20lists.xlsx" TargetMode="External"/>' +
+  '</Relationships>';
+
+function parseWorksheetPathsFromZipEntries(entries) {
+  const dec = new TextDecoder('utf-8');
+  const wbBytes = entries.get('xl/workbook.xml');
+  const relsBytes = entries.get('xl/_rels/workbook.xml.rels');
+  const map = new Map(); // sheetName -> zipPath
+  if (!wbBytes || !relsBytes) return map;
+
+  const wbXml = dec.decode(wbBytes);
+  const relsXml = dec.decode(relsBytes);
+
+  const rIdToTarget = new Map();
+  const relRegex = /<Relationship\b[^>]*>/g;
+  let m;
+  while ((m = relRegex.exec(relsXml)) !== null) {
+    const tag = m[0];
+    const idMatch = tag.match(/\bId="([^"]+)"/);
+    const targetMatch = tag.match(/\bTarget="([^"]+)"/);
+    if (idMatch && targetMatch) {
+      let target = targetMatch[1].replace(/^\/+/, '');
+      if (!target.startsWith('xl/')) target = 'xl/' + target;
+      rIdToTarget.set(idMatch[1], target);
+    }
+  }
+
+  const sheetRegex = /<sheet\b[^>]*>/g;
+  while ((m = sheetRegex.exec(wbXml)) !== null) {
+    const tag = m[0];
+    const nameMatch = tag.match(/\bname="([^"]+)"/);
+    const rIdMatch = tag.match(/\br:id="([^"]+)"/);
+    if (nameMatch && rIdMatch) {
+      const sName = nameMatch[1]
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+      const targetPath = rIdToTarget.get(rIdMatch[1]);
+      if (targetPath && entries.has(targetPath)) {
+        map.set(sName, targetPath);
+      }
+    }
+  }
+  return map;
+}
+
+async function captureOriginalArchiveState(arrayBuffer) {
+  try {
+    const entries = await unpackZipArchive(arrayBuffer);
+    const dec = new TextDecoder('utf-8');
+    const externalLinkFiles = new Map();
+    for (const [k, v] of entries.entries()) {
+      if (k.startsWith('xl/externalLinks/')) {
+        externalLinkFiles.set(k, v);
+      }
+    }
+    const metadataXmlBytes = entries.get('xl/metadata.xml') || null;
+    const sheetPaths = parseWorksheetPathsFromZipEntries(entries);
+    const arrayFormulasBySheet = new Map(); // lowerSheetName -> Map(cellRef -> { fTag, cm, t })
+    let templateExtLstXml = null;
+
+    for (const [sheetName, zipPath] of sheetPaths.entries()) {
+      const lower = sheetName.trim().toLowerCase();
+      const xml = dec.decode(entries.get(zipPath));
+
+      if (lower === 'template' || isTemplatePlaceholderTab(lower) || DATE_TAB_REGEX.test(sheetName.trim())) {
+        const extMatch = xml.match(/<extLst>[\s\S]*?<\/extLst>/);
+        if (extMatch && extMatch[0].includes('dataValidations') && !templateExtLstXml) {
+          templateExtLstXml = extMatch[0].replace(/\s+xr:uid="[^"]*"/g, '');
+        }
+      }
+
+      const cellMap = new Map();
+      const cellRegex = /<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>(<f\b[^>]*>[\s\S]*?<\/f>)(<v[^>]*>[\s\S]*?<\/v>|<v\/>)?<\/c>/g;
+      let cm;
+      while ((cm = cellRegex.exec(xml)) !== null) {
+        const cAttrs = cm[1];
+        const cellRef = cm[2];
+        const fTag = cm[3];
+        if (/\bt="array"/.test(fTag) || /\bcm="/.test(cAttrs) || /_xlfn\._xlws\.FILTER|_xlfn\.LET/.test(fTag)) {
+          const tAttr = (cAttrs.match(/\bt="([^"]+)"/) || [])[1] || null;
+          cellMap.set(cellRef, { fTag, tAttr });
+        }
+      }
+      if (cellMap.size > 0) {
+        arrayFormulasBySheet.set(lower, cellMap);
+      }
+    }
+
+    return {
+      externalLinkFiles,
+      metadataXmlBytes,
+      arrayFormulasBySheet,
+      templateExtLstXml: templateExtLstXml || DAILY_SHEET_DATA_VALIDATIONS_EXTLST
+    };
+  } catch (err) {
+    console.warn('Could not capture original archive metadata:', err);
+    return null;
+  }
+}
+
+function parseSharedStringsFromXml(ssXml) {
+  if (!ssXml) return [];
+  const list = [];
+  const siRegex = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = siRegex.exec(ssXml)) !== null) {
+    const inner = m[1];
+    const tParts = [];
+    const tRegex = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let tm;
+    while ((tm = tRegex.exec(inner)) !== null) {
+      tParts.push(tm[1]);
+    }
+    list.push(tParts.join(''));
+  }
+  return list;
+}
+
+function synthesizeExternalLinkXmlFromSheets(validationXml, masterXml) {
+  const extractRowsForExternalSheet = (sheetXml) => {
+    if (!sheetXml) return '';
+    const rowsOut = [];
+    const rowRegex = /<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
+    let rm;
+    while ((rm = rowRegex.exec(sheetXml)) !== null) {
+      const rNum = rm[1];
+      const rInner = rm[2];
+      const cellsOut = [];
+      const cRegex = /<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>(?:<f\b[^>]*>[\s\S]*?<\/f>)?(?:<v([^>]*)>([\s\S]*?)<\/v>|<v\/>)?<\/c>/g;
+      let cm;
+      while ((cm = cRegex.exec(rInner)) !== null) {
+        const cAttrs = cm[1];
+        const cRef = cm[2];
+        const vAttrs = cm[3] || '';
+        const vVal = cm[4];
+        if (vVal === undefined || vVal === '') continue;
+        const isStr = /\bt="str"/.test(cAttrs);
+        cellsOut.push(`<cell r="${cRef}"${isStr ? ' t="str"' : ''}><v${vAttrs}>${vVal}</v></cell>`);
+      }
+      if (cellsOut.length > 0) {
+        rowsOut.push(`<row r="${rNum}">${cellsOut.join('')}</row>`);
+      }
+    }
+    return rowsOut.join('');
+  };
+
+  const valRows = extractRowsForExternalSheet(validationXml);
+  const masterRows = extractRowsForExternalSheet(masterXml);
+
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+    '<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<externalBook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1">' +
+    '<sheetNames><sheetName val="Validation List"/><sheetName val="Master Account List"/></sheetNames>' +
+    '<sheetDataSet>' +
+    `<sheetData sheetId="0">${valRows}</sheetData>` +
+    `<sheetData sheetId="1">${masterRows}</sheetData>` +
+    '</sheetDataSet>' +
+    '</externalBook></externalLink>'
+  );
+}
+
+/**
+ * Post-processes the XLSX archive produced by ExcelJS so Desktop Excel never flags
+ * the workbook as corrupted or strips formulas:
+ * 1. Restores dynamic array metadata (`xl/metadata.xml` + `cm="1"` on array cells) and
+ *    converts ghost spill cells on `Master Accounts` & `Validation List` from `t="s"` back to `t="str"`.
+ * 2. Restores `xl/externalLinks/*` and `<externalReferences>` when `[1]` external links exist.
+ * 3. Ensures `Column C` XLOOKUP formula cells on `Template` and daily sheets have `t="str"` and `<v/>`.
+ * 4. Restores `<extLst>` cross-sheet Data Validation dropdowns (`Requested Action` & `Status`) on daily sheets.
+ */
+async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
+  try {
+    const entries = await unpackZipArchive(excelJsBuffer);
+    const dec = new TextDecoder('utf-8');
+    const enc = new TextEncoder();
+
+    const ssBytes = entries.get('xl/sharedStrings.xml');
+    const sharedStrings = ssBytes ? parseSharedStringsFromXml(dec.decode(ssBytes)) : [];
+    const sheetPaths = parseWorksheetPathsFromZipEntries(entries);
+
+    let hasAnyDynamicArrayFormula = false;
+    let hasAnyExternalRefFormula = false;
+    let hasValidationSheetInWb = false;
+    let repairedValidationXml = '';
+    let repairedMasterXml = '';
+
+    for (const [sName] of sheetPaths.entries()) {
+      const low = sName.trim().toLowerCase();
+      if (low === 'validation list' || low === 'validation lists') {
+        hasValidationSheetInWb = true;
+      }
+    }
+
+    for (const [sheetName, zipPath] of sheetPaths.entries()) {
+      const lower = sheetName.trim().toLowerCase();
+      let xml = dec.decode(entries.get(zipPath));
+
+      const isDynamicArrayRefSheet =
+        lower === 'master accounts' ||
+        lower === 'master account' ||
+        lower === 'validation list' ||
+        lower === 'validation lists' ||
+        /\bt="array"|_xlfn\._xlws\.FILTER|_xlfn\.LET/.test(xml);
+
+      if (isDynamicArrayRefSheet) {
+        const origCellMap = archiveState && archiveState.arrayFormulasBySheet
+          ? archiveState.arrayFormulasBySheet.get(lower)
+          : null;
+
+        // 1. Restore cm="1" and exact <f t="array" ref="..."> on dynamic array anchor cells
+        xml = xml.replace(
+          /<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>(<f\b[^>]*>[\s\S]*?<\/f>)(<v[^>]*>([\s\S]*?)<\/v>|<v\/>)?<\/c>/g,
+          (full, cAttrs, cellRef, fTag, vFull, vInner) => {
+            const origInfo = origCellMap ? origCellMap.get(cellRef) : null;
+            const isArrayF = Boolean(
+              origInfo ||
+              /\bt="array"/.test(fTag) ||
+              /_xlfn\._xlws\.FILTER|_xlfn\.LET/.test(fTag)
+            );
+            if (!isArrayF) return full;
+
+            hasAnyDynamicArrayFormula = true;
+            const finalFTag = origInfo ? origInfo.fTag : fTag;
+            if (/\[1\]/.test(finalFTag)) {
+              hasAnyExternalRefFormula = true;
+            }
+
+            let attrs = cAttrs;
+            if (!/\bcm="/.test(attrs)) {
+              attrs += ' cm="1"';
+            }
+            const isNumVal = vInner !== undefined && vInner !== '' && !isNaN(Number(vInner));
+            if (origInfo && origInfo.tAttr && !/\bt="/.test(attrs)) {
+              attrs += ` t="${origInfo.tAttr}"`;
+            } else if (!isNumVal && !/\bt="/.test(attrs)) {
+              attrs += ' t="str"';
+            }
+            return `<c${attrs}>${finalFTag}${vFull || '<v/>'}</c>`;
+          }
+        );
+
+        // 2. Convert spilled string cells in rows 2+ from t="s" (shared string) back to t="str" (formula string result)
+        xml = xml.replace(
+          /<row\b([^>]*\br="(\d+)"[^>]*)>([\s\S]*?)<\/row>/g,
+          (rowFull, rowAttrs, rNumStr, rowInner) => {
+            const rNum = parseInt(rNumStr, 10);
+            if (rNum < 2) return rowFull;
+            const fixedInner = rowInner.replace(
+              /<c\b([^>]*?)\bt="s"([^>]*)><v>(\d+)<\/v><\/c>/g,
+              (cFull, a1, a2, idxStr) => {
+                const idx = parseInt(idxStr, 10);
+                const resolved = sharedStrings[idx] !== undefined ? sharedStrings[idx] : '';
+                const needsSpace = resolved.startsWith(' ') || resolved.endsWith(' ');
+                return `<c${a1}t="str"${a2}><v${needsSpace ? ' xml:space="preserve"' : ''}>${resolved}</v></c>`;
+              }
+            );
+            return `<row${rowAttrs}>${fixedInner}</row>`;
+          }
+        );
+
+        if (lower === 'validation list' || lower === 'validation lists') {
+          repairedValidationXml = xml;
+        } else if (lower === 'master accounts' || lower === 'master account') {
+          repairedMasterXml = xml;
+        }
+      }
+
+      // 3. For Template & Daily Sheets: ensure Column C XLOOKUP formulas have t="str" and <v/>, and restore Data Validations <extLst>
+      const isDailyOrTemplate =
+        lower === 'template' ||
+        isTemplatePlaceholderTab(lower) ||
+        DATE_TAB_REGEX.test(sheetName.trim());
+
+      if (isDailyOrTemplate) {
+        xml = xml.replace(
+          /<c\b([^>]*\br="C(\d+)"[^>]*)>(<f\b[^>]*>[\s\S]*?<\/f>)(<v[^>]*>[\s\S]*?<\/v>|<v\/>)?<\/c>/g,
+          (full, cAttrs, rNumStr, fTag, vFull) => {
+            let cleanAttrs = cAttrs.replace(/\s+cm="[^"]*"/g, '');
+            if (/\bt="[^"]*"/.test(cleanAttrs)) {
+              cleanAttrs = cleanAttrs.replace(/\bt="[^"]*"/, 't="str"');
+            } else {
+              cleanAttrs += ' t="str"';
+            }
+            const cleanFTag = fTag.replace(/^<f\b[^>]*>/, '<f>');
+            let cleanV = vFull || '<v/>';
+            if (cleanV === '<v></v>') cleanV = '<v/>';
+            return `<c${cleanAttrs}>${cleanFTag}${cleanV}</c>`;
+          }
+        );
+
+        if (hasValidationSheetInWb && !xml.includes('dataValidations')) {
+          const extLstToInject = (archiveState && archiveState.templateExtLstXml)
+            ? archiveState.templateExtLstXml
+            : DAILY_SHEET_DATA_VALIDATIONS_EXTLST;
+          if (!xml.includes('<extLst>')) {
+            xml = xml.replace(/<\/worksheet>\s*$/, `${extLstToInject}</worksheet>`);
+          }
+        }
+      }
+
+      entries.set(zipPath, enc.encode(xml));
+    }
+
+    // 4. Remove stale calcChain.xml if present so Excel cleanly rebuilds the calculation chain
+    entries.delete('xl/calcChain.xml');
+
+    // 5. Restore or synthesize xl/externalLinks/* and xl/metadata.xml when needed
+    let ctXml = dec.decode(entries.get('[Content_Types].xml'));
+    let relsXml = dec.decode(entries.get('xl/_rels/workbook.xml.rels'));
+    let wbXml = dec.decode(entries.get('xl/workbook.xml'));
+
+    ctXml = ctXml.replace(/<Override[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/g, '');
+    relsXml = relsXml.replace(/<Relationship[^>]*Target="calcChain\.xml"[^>]*\/>/g, '');
+
+    let maxRId = 0;
+    const rIdMatches = relsXml.match(/\bId="rId(\d+)"/g) || [];
+    for (const rm of rIdMatches) {
+      const n = parseInt(rm.replace(/\D+/g, ''), 10);
+      if (n > maxRId) maxRId = n;
+    }
+
+    if (hasAnyExternalRefFormula) {
+      if (archiveState && archiveState.externalLinkFiles && archiveState.externalLinkFiles.size > 0) {
+        for (const [extPath, extBytes] of archiveState.externalLinkFiles.entries()) {
+          entries.set(extPath, extBytes);
+        }
+      } else {
+        entries.set(
+          'xl/externalLinks/externalLink1.xml',
+          enc.encode(synthesizeExternalLinkXmlFromSheets(repairedValidationXml, repairedMasterXml))
+        );
+        entries.set(
+          'xl/externalLinks/_rels/externalLink1.xml.rels',
+          enc.encode(DEFAULT_EXTERNAL_LINK_RELS_XML)
+        );
+      }
+
+      if (!ctXml.includes('/xl/externalLinks/externalLink1.xml')) {
+        ctXml = ctXml.replace(
+          /<\/Types>\s*$/,
+          '<Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/></Types>'
+        );
+      }
+
+      let extRId = null;
+      const existingExtRel = relsXml.match(/<Relationship\b[^>]*\bId="(rId\d+)"[^>]*externalLinks\/externalLink1\.xml[^>]*\/>/);
+      if (existingExtRel) {
+        extRId = existingExtRel[1];
+      } else {
+        extRId = `rId${++maxRId}`;
+        relsXml = relsXml.replace(
+          /<\/Relationships>\s*$/,
+          `<Relationship Id="${extRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/></Relationships>`
+        );
+      }
+
+      if (!wbXml.includes('<externalReferences')) {
+        wbXml = wbXml.replace(
+          /<\/sheets>/,
+          `</sheets><externalReferences><externalReference r:id="${extRId}"/></externalReferences>`
+        );
+      }
+    }
+
+    if (hasAnyDynamicArrayFormula) {
+      const metaBytes = (archiveState && archiveState.metadataXmlBytes)
+        ? archiveState.metadataXmlBytes
+        : enc.encode(STANDARD_DYNAMIC_ARRAY_METADATA_XML);
+      entries.set('xl/metadata.xml', metaBytes);
+
+      if (!ctXml.includes('/xl/metadata.xml')) {
+        ctXml = ctXml.replace(
+          /<\/Types>\s*$/,
+          '<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/></Types>'
+        );
+      }
+
+      if (!relsXml.includes('Target="metadata.xml"')) {
+        const metaRId = `rId${++maxRId}`;
+        relsXml = relsXml.replace(
+          /<\/Relationships>\s*$/,
+          `<Relationship Id="${metaRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/></Relationships>`
+        );
+      }
+    }
+
+    if (!wbXml.includes('xcalcf:calcFeatures')) {
+      if (wbXml.includes('</extLst>')) {
+        wbXml = wbXml.replace(/<\/extLst>/, `${WORKBOOK_CALC_FEATURES_EXT}</extLst>`);
+      } else {
+        wbXml = wbXml.replace(/<\/workbook>\s*$/, `<extLst>${WORKBOOK_CALC_FEATURES_EXT}</extLst></workbook>`);
+      }
+    }
+
+    entries.set('[Content_Types].xml', enc.encode(ctXml));
+    entries.set('xl/_rels/workbook.xml.rels', enc.encode(relsXml));
+    entries.set('xl/workbook.xml', enc.encode(wbXml));
+
+    return await packZipArchive(entries);
+  } catch (err) {
+    console.warn('OpenXML post-processor warning (falling back to ExcelJS buffer):', err);
+    return excelJsBuffer;
+  }
+}
+
 /**
  * Neutralizes docProps/core.xml and docProps/app.xml in the in-memory ZIP headers
  * before passing to ExcelJS. ExcelJS's CoreXform / AppXform parsers throw
  * `Unexpected xml node in parseOpen: {"name":"lastModifiedBy",...}` when reading
  * workbooks whose docProps/core.xml uses a default XML namespace without `cp:` prefixes.
- * Masking the 8-byte `core.xml` -> `skip.xml` (and `app.xml` -> `skp.xml`) inside
- * ZIP Local/Central Directory headers preserves exact byte offsets and payload CRC32s
- * while causing ExcelJS's entry switch to safely ignore those metadata files on load.
  */
 function sanitizeXlsxBufferForExcelJS(arrayBuffer) {
   const bytes = new Uint8Array(arrayBuffer.slice(0));
   const len = bytes.length;
 
   for (let i = 0; i <= len - 30; i++) {
-    // Check for 'PK' (0x50, 0x4b)
     if (bytes[i] !== 0x50 || bytes[i + 1] !== 0x4b) continue;
 
     const b2 = bytes[i + 2];
@@ -730,11 +1382,9 @@ function sanitizeXlsxBufferForExcelJS(arrayBuffer) {
     let nameOffset = 0;
 
     if (b2 === 0x03 && b3 === 0x04) {
-      // Local File Header (PK\x03\x04)
       nameLen = bytes[i + 26] | (bytes[i + 27] << 8);
       nameOffset = i + 30;
     } else if (b2 === 0x01 && b3 === 0x02 && i + 46 <= len) {
-      // Central Directory File Header (PK\x01\x02)
       nameLen = bytes[i + 28] | (bytes[i + 29] << 8);
       nameOffset = i + 46;
     } else {
@@ -775,6 +1425,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
 
   const file = await workingFileHandle.getFile();
   const arrayBuffer = await file.arrayBuffer();
+  originalArchiveState = await captureOriginalArchiveState(arrayBuffer);
   const sanitizedBuffer = sanitizeXlsxBufferForExcelJS(arrayBuffer);
 
   const loadedWorkbook = new ExcelJS.Workbook();
@@ -790,14 +1441,19 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   let hasTemplate = false;
   let hasValidation = false;
   let hasMasterAccounts = false;
+  let placeholderDateSheet = null;
+  const dailySheetObjs = [];
 
+  // Pass 1: Parse Reference Sheets (Validation List & Master Accounts) first so XLOOKUP Broker names can resolve
   workbook.eachSheet((worksheet) => {
     const rawName = worksheet.name.trim();
     const lowerName = rawName.toLowerCase();
 
     if (DATE_TAB_REGEX.test(rawName)) {
       dateSheets.push(rawName);
-      indexWorksheetRows(worksheet, rawName);
+      dailySheetObjs.push({ worksheet, rawName });
+    } else if (isTemplatePlaceholderTab(rawName)) {
+      placeholderDateSheet = worksheet;
     } else if (lowerName === 'template') {
       hasTemplate = true;
     } else if (lowerName === 'validation lists' || lowerName === 'validation list') {
@@ -807,6 +1463,11 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
       hasMasterAccounts = true;
       parseMasterAccountsSheet(worksheet);
     }
+  });
+
+  // Pass 2: Index Daily MM-DD-YYYY Tabs (and if none exist yet but "Rename to Current Date" has entries, index it too)
+  dailySheetObjs.forEach(({ worksheet, rawName }) => {
+    indexWorksheetRows(worksheet, rawName);
   });
 
   populateReferenceControls();
@@ -830,21 +1491,31 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   btnDeleteTab.disabled = dateSheets.length === 0;
   btnDeleteMode.disabled = allRows.length === 0;
 
-  // Check if workbook is blank or missing standard schema tabs
+  // Check if workbook is a fresh template with "Rename to Current Date" or missing reference tabs
   const missingParts = [];
-  if (dateSheets.length === 0) missingParts.push('Daily MM-DD-YYYY Tab');
+  if (dateSheets.length === 0 && !placeholderDateSheet) missingParts.push('Daily MM-DD-YYYY Tab');
   if (!hasTemplate) missingParts.push('template');
   if (!hasValidation) missingParts.push('validation lists');
   if (!hasMasterAccounts) missingParts.push('Master Accounts');
 
-  if (missingParts.length > 0) {
+  if (dateSheets.length === 0 && placeholderDateSheet && missingParts.length === 0) {
+    const todayStr = getTodayFormatted();
+    schemaBanner.style.display = 'flex';
+    schemaBannerText.innerHTML = `
+      <strong>📅 New Tracker Template Ready:</strong> Found initial tab <code>${escapeHtml(placeholderDateSheet.name)}</code>.
+      Click <strong>Set Today's Date (${escapeHtml(todayStr)})</strong> to rename it to today's tab with all formulas &amp; dropdowns intact.
+    `;
+    btnBannerBootstrap.textContent = `📅 Set Today's Date (${todayStr})`;
+  } else if (missingParts.length > 0) {
     schemaBanner.style.display = 'flex';
     schemaBannerText.innerHTML = `
       <strong>✨ Workbook Schema Incomplete:</strong> Missing <code>${escapeHtml(missingParts.join(', '))}</code>.
       Click Bootstrap to initialize all missing standard tabs and headers non-destructively.
     `;
+    btnBannerBootstrap.textContent = '🛠️ Bootstrap Schema';
   } else {
     schemaBanner.style.display = 'none';
+    btnBannerBootstrap.textContent = '🛠️ Bootstrap Schema';
   }
 
   if (!options.preserveStatus && !pendingMirrorBuffer) {
@@ -854,12 +1525,17 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
 }
 
 function parseDateTab(tabName) {
-  const [mm, dd, yyyy] = tabName.split('-').map(Number);
+  const parts = String(tabName || '').trim().split('-').map(Number);
+  if (parts.length !== 3) return 0;
+  let [mm, dd, yyyy] = parts;
+  if (yyyy < 100) yyyy += 2000;
   return new Date(yyyy, mm - 1, dd).getTime();
 }
 
 function addDaysToDateTab(tabName, daysToAdd) {
-  const [mm, dd, yyyy] = tabName.split('-').map(Number);
+  const parts = String(tabName || '').trim().split('-').map(Number);
+  let [mm, dd, yyyy] = parts;
+  if (yyyy < 100) yyyy += 2000;
   const d = new Date(yyyy, mm - 1, dd);
   d.setDate(d.getDate() + daysToAdd);
   const outMm = String(d.getMonth() + 1).padStart(2, '0');
@@ -872,12 +1548,94 @@ function cellText(row, colIndex) {
   const val = row.getCell(colIndex).value;
   if (val === null || val === undefined) return '';
   if (typeof val === 'object') {
-    if (val.result !== undefined && val.result !== null) return String(val.result).trim();
-    if (val.text !== undefined && val.text !== null) return String(val.text).trim();
-    if (Array.isArray(val.richText)) return val.richText.map(t => t.text).join('').trim();
     if (val instanceof Date) return val.toISOString().split('T')[0];
+    if (Array.isArray(val.richText)) return val.richText.map(t => t.text || '').join('').trim();
+    if (val.text !== undefined && val.text !== null && typeof val.text !== 'object') {
+      const s = String(val.text).trim();
+      return s === '[object Object]' ? '' : s;
+    }
+    if (val.formula !== undefined || val.sharedFormula !== undefined) {
+      if (val.result === undefined || val.result === null || typeof val.result === 'object') {
+        return '';
+      }
+      const s = String(val.result).trim();
+      return s === '[object Object]' ? '' : s;
+    }
+    if (val.result !== undefined && val.result !== null && typeof val.result !== 'object') {
+      const s = String(val.result).trim();
+      return s === '[object Object]' ? '' : s;
+    }
+    return '';
   }
-  return String(val).trim();
+  const str = String(val).trim();
+  return str === '[object Object]' ? '' : str;
+}
+
+function getWorksheetColumnMap(worksheet) {
+  const row1 = worksheet.getRow(1);
+  const h9 = cellText(row1, 9).toLowerCase();
+  const h10 = cellText(row1, 10).toLowerCase();
+  const h11 = cellText(row1, 11).toLowerCase();
+
+  const isTemplateLayout =
+    h9.includes('status') ||
+    h10.includes('action taken') ||
+    h11.includes('sent email');
+
+  if (isTemplateLayout) {
+    return {
+      isTemplateLayout: true,
+      statusCol: 9,     // Col I: Status
+      notesCol: 10,     // Col J: Action Taken/Notes
+      emailSubjCol: 11, // Col K: Sent Email Subject (remains visible)
+      trackingCol: 12   // Col L: Hidden Tracking ID (UUIDv4)
+    };
+  }
+
+  return {
+    isTemplateLayout: false,
+    notesCol: 9,        // Col I: Action Notes
+    statusCol: 10,      // Col J: Request Status
+    emailSubjCol: null,
+    trackingCol: 11     // Col K: Hidden Tracking ID (UUIDv4)
+  };
+}
+
+function buildTemplateBrokerFormula(rowNumber, brokerVal, masterVal) {
+  let fallbackLiteral = '""';
+  const cleanBroker = String(brokerVal || '').trim();
+  const cleanMaster = String(masterVal || '').trim();
+
+  if (cleanBroker) {
+    const matchedInMaster = cleanMaster && masterAccountsMap.some(
+      m => m.master.toLowerCase() === cleanMaster.toLowerCase()
+    );
+    if (!matchedInMaster) {
+      fallbackLiteral = `"${cleanBroker.replace(/"/g, '""')}"`;
+    }
+  }
+  return `IF($D${rowNumber}="", ${fallbackLiteral}, IF(_xlfn.XLOOKUP($D${rowNumber}, 'Master Accounts'!A:A, 'Master Accounts'!B:B, "")="", ${fallbackLiteral}, _xlfn.XLOOKUP($D${rowNumber}, 'Master Accounts'!A:A, 'Master Accounts'!B:B, "")))`;
+}
+
+function resolveBrokerFromMaster(masterVal, currentBrokerVal) {
+  const cleanBroker = String(currentBrokerVal || '').trim();
+  if (cleanBroker) return cleanBroker;
+  const cleanMaster = String(masterVal || '').trim().toLowerCase();
+  if (!cleanMaster) return '';
+  const match = masterAccountsMap.find(m => m.master.toLowerCase() === cleanMaster);
+  return match ? match.broker : '';
+}
+
+function setBrokerCellWithFormula(row, rowNumber, brokerVal, masterVal, colMap) {
+  const resolvedBroker = resolveBrokerFromMaster(masterVal, brokerVal);
+  if (colMap && colMap.isTemplateLayout) {
+    row.getCell(3).value = {
+      formula: buildTemplateBrokerFormula(rowNumber, resolvedBroker, masterVal),
+      result: resolvedBroker || ''
+    };
+  } else {
+    row.getCell(3).value = resolvedBroker;
+  }
 }
 
 // --- 3. WORKBOOK BOOTSTRAPPING, SCHEMA REPAIR & TAB MANAGEMENT ---
@@ -909,23 +1667,29 @@ function bootstrapWorkbookSchemaInMemory(wb) {
   let templateWs = null;
   let validationWs = null;
   let masterWs = null;
+  let placeholderDateWs = null;
   let hasAnyDateTab = false;
 
   wb.eachSheet((ws) => {
     const raw = ws.name.trim();
     const lower = raw.toLowerCase();
     if (DATE_TAB_REGEX.test(raw)) hasAnyDateTab = true;
+    else if (isTemplatePlaceholderTab(raw)) placeholderDateWs = ws;
     else if (lower === 'template') templateWs = ws;
     else if (lower === 'validation lists' || lower === 'validation list') validationWs = ws;
     else if (lower === 'master accounts' || lower === 'master account') masterWs = ws;
   });
 
-  // 1. Ensure template sheet exists
+  // 1. Ensure template sheet exists (preserve existing Template columns if already present)
   if (!templateWs) {
     templateWs = wb.addWorksheet('template');
     applyStandardSheetFormatting(templateWs);
   } else {
-    templateWs.getColumn(11).hidden = true;
+    const tplMap = getWorksheetColumnMap(templateWs);
+    templateWs.getColumn(tplMap.trackingCol).hidden = true;
+    if (tplMap.emailSubjCol) {
+      templateWs.getColumn(tplMap.emailSubjCol).hidden = false;
+    }
   }
 
   // 2. Ensure validation lists sheet exists
@@ -962,13 +1726,23 @@ function bootstrapWorkbookSchemaInMemory(wb) {
     hRow.commit();
   }
 
-  // 4. Ensure at least one MM-DD-YYYY daily tab exists
+  // 4. Ensure at least one MM-DD-YYYY daily tab exists:
+  //    If the workbook has "Rename to Current Date", rename it in-place to today's date so all 74 template rows & formulas stay intact!
   let createdDateTab = null;
   if (!hasAnyDateTab) {
     createdDateTab = todayStr;
-    const dailyWs = wb.addWorksheet(todayStr);
-    cloneTemplateStructure(templateWs, dailyWs);
-    placeWorksheetFirstInWorkbook(wb, dailyWs);
+    if (placeholderDateWs) {
+      placeholderDateWs.name = todayStr;
+      const colMap = getWorksheetColumnMap(placeholderDateWs);
+      placeholderDateWs.getColumn(colMap.trackingCol).hidden = true;
+      if (colMap.emailSubjCol) {
+        placeholderDateWs.getColumn(colMap.emailSubjCol).hidden = false;
+      }
+    } else {
+      const dailyWs = wb.addWorksheet(todayStr);
+      cloneTemplateStructure(templateWs, dailyWs);
+      placeWorksheetFirstInWorkbook(wb, dailyWs);
+    }
   }
 
   // 5. Remove default empty "Sheet1" if it is completely blank and other sheets exist
@@ -1025,7 +1799,6 @@ async function promptCreateNewWorkbook() {
   }
 
   try {
-    // Check if file already exists
     let exists = false;
     try {
       await parentDirHandle.getFileHandle(fileName, { create: false });
@@ -1045,6 +1818,7 @@ async function promptCreateNewWorkbook() {
       if (!overwrite) return;
     }
 
+    originalArchiveState = null;
     const newWb = new ExcelJS.Workbook();
     bootstrapWorkbookSchemaInMemory(newWb);
 
@@ -1073,15 +1847,25 @@ async function handleRepairCurrentWorkbookSchema() {
   await loadWorkbookFromDisk(sheetSelect.value);
   const createdTab = bootstrapWorkbookSchemaInMemory(workbook);
 
-  // Also ensure any existing MM-DD-YYYY tabs have headers on Row 1 and hidden Column K
+  // Ensure any existing MM-DD-YYYY tabs have headers on Row 1 and proper tracking column visibility
   dateSheets.forEach(tabName => {
     const ws = workbook.getWorksheet(tabName);
     if (!ws) return;
-    ws.getColumn(11).hidden = true;
     const row1 = ws.getRow(1);
     const hasHeader = [1, 2, 3].some(c => cellText(row1, c) !== '');
     if (!hasHeader) {
-      applyStandardSheetFormatting(ws);
+      const templateSheet = findTemplateSheet();
+      if (templateSheet) {
+        cloneTemplateStructure(templateSheet, ws);
+      } else {
+        applyStandardSheetFormatting(ws);
+      }
+    } else {
+      const colMap = getWorksheetColumnMap(ws);
+      ws.getColumn(colMap.trackingCol).hidden = true;
+      if (colMap.emailSubjCol) {
+        ws.getColumn(colMap.emailSubjCol).hidden = false;
+      }
     }
   });
 
@@ -1091,7 +1875,12 @@ async function handleRepairCurrentWorkbookSchema() {
     await loadWorkbookFromDisk(targetSelectTab, {
       preserveStatus: saved === 'mirror-locked'
     });
-    showToast('Workbook schema initialized and verified.', 'success');
+    showToast(
+      createdTab
+        ? `Initialized daily tab "${createdTab}" with all formulas & validations intact.`
+        : 'Workbook schema verified.',
+      'success'
+    );
   }
 }
 
@@ -1138,14 +1927,23 @@ btnAddBlankTab.addEventListener('click', async () => {
     });
   }
 
-  const templateSheet = findTemplateSheet();
-  const newSheet = workbook.addWorksheet(newTabName);
-  placeWorksheetFirst(newSheet);
+  let placeholderWs = null;
+  workbook.eachSheet(ws => {
+    if (isTemplatePlaceholderTab(ws.name)) placeholderWs = ws;
+  });
 
-  if (templateSheet) {
-    cloneTemplateStructure(templateSheet, newSheet);
+  if (placeholderWs && dateSheets.length === 0) {
+    placeholderWs.name = newTabName;
   } else {
-    applyStandardSheetFormatting(newSheet);
+    const templateSheet = findTemplateSheet();
+    const newSheet = workbook.addWorksheet(newTabName);
+    placeWorksheetFirst(newSheet);
+
+    if (templateSheet) {
+      cloneTemplateStructure(templateSheet, newSheet);
+    } else {
+      applyStandardSheetFormatting(newSheet);
+    }
   }
 
   const saved = await saveWorkbookToDisk();
@@ -1248,7 +2046,6 @@ btnDeleteTab.addEventListener('click', async () => {
     });
   }
 
-  // Ensure workbook always retains at least 1 sheet so ExcelJS produces a valid .xlsx
   if (workbook.worksheets.length <= 1) {
     const fallbackTemplate = workbook.addWorksheet('template');
     applyStandardSheetFormatting(fallbackTemplate);
@@ -1268,28 +2065,55 @@ btnDeleteTab.addEventListener('click', async () => {
 // --- 4. DYNAMIC REFERENCE SHEET PARSING (validation lists & Master Accounts) ---
 function parseValidationSheet(worksheet) {
   const actionsSet = new Set();
-  const statusesSet = new Set();
+  const statusesColB = new Set();
+  const statusesColE = new Set();
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
     const actionVal = cellText(row, 1);
-    const statusVal = cellText(row, 2);
+    const statusValB = cellText(row, 2);
+    const statusValE = cellText(row, 5);
 
     if (actionVal) actionsSet.add(actionVal);
-    if (statusVal) statusesSet.add(statusVal);
+    if (statusValB) statusesColB.add(statusValB);
+    if (statusValE) statusesColE.add(statusValE);
   });
 
   validationActions = Array.from(actionsSet);
-  validationStatuses = Array.from(statusesSet);
+  validationStatuses = statusesColE.size > 0
+    ? Array.from(statusesColE)
+    : Array.from(statusesColB);
 }
 
 function parseMasterAccountsSheet(worksheet) {
   const seen = new Set();
+  const row1 = worksheet.getRow(1);
+  const h1 = cellText(row1, 1).toLowerCase();
+  const h2 = cellText(row1, 2).toLowerCase();
+  const h3 = cellText(row1, 3).toLowerCase();
+
+  // In "Tracker Template - Make a Copy.xlsx", Col A is "Master Account" and Col B is "Account Name"
+  const isMasterFirst =
+    h1.includes('master') ||
+    h2.includes('account name') ||
+    (h2.includes('broker') && !h1.includes('broker'));
+  const hasBidderInCol3 = h3.includes('bidder');
+
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
-    const broker = cellText(row, 1);
-    const master = cellText(row, 2).toUpperCase();
-    const bidder = cellText(row, 3).toUpperCase();
+    let broker = '';
+    let master = '';
+    let bidder = '';
+
+    if (isMasterFirst) {
+      master = cellText(row, 1).toUpperCase();
+      broker = cellText(row, 2);
+      bidder = hasBidderInCol3 ? cellText(row, 3).toUpperCase() : '';
+    } else {
+      broker = cellText(row, 1);
+      master = cellText(row, 2).toUpperCase();
+      bidder = cellText(row, 3).toUpperCase();
+    }
 
     if (!broker && !master) return;
     const dedupeKey = `${broker.toLowerCase()}::${master.toLowerCase()}`;
@@ -1368,27 +2192,77 @@ fMaster.addEventListener('change', handleMasterReverseAutoFill);
 
 // --- INDEX WORKSHEET ROWS & LEGACY GUID BACKFILL ---
 function indexWorksheetRows(worksheet, sheetName) {
-  worksheet.getColumn(11).hidden = true;
+  const colMap = getWorksheetColumnMap(worksheet);
+  worksheet.getColumn(colMap.trackingCol).hidden = true;
+  if (colMap.emailSubjCol) {
+    worksheet.getColumn(colMap.emailSubjCol).hidden = false;
+  }
+
+  const defaultStatusVal = getDefaultStatus();
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
 
     const subject = cellText(row, 1);
     const ticket = cellText(row, 2);
-    const broker = cellText(row, 3);
     const master = cellText(row, 4);
+    const rawBroker = cellText(row, 3);
+    const broker = resolveBrokerFromMaster(master, rawBroker);
     const bidder = cellText(row, 5);
     const action = cellText(row, 6);
     const yard = cellText(row, 7);
     const lots = cellText(row, 8);
-    const notes = cellText(row, 9);
-    const status = cellText(row, 10);
+
+    let status = cellText(row, colMap.statusCol);
+    let notes = cellText(row, colMap.notesCol);
+
+    // Auto-heal rows on a Template-layout sheet that were previously saved with Status in Col 10 and Notes in Col 9
+    if (
+      colMap.isTemplateLayout &&
+      notes &&
+      KNOWN_STATUS_VALUES.has(notes.toLowerCase()) &&
+      (!status || !KNOWN_STATUS_VALUES.has(status.toLowerCase()))
+    ) {
+      const tmp = status;
+      status = notes;
+      notes = tmp;
+    }
 
     const hasData = [subject, ticket, broker, master, bidder, action, yard, lots, notes, status]
       .some(val => val !== '');
-    if (!hasData) return;
 
-    let key = cellText(row, 11).toLowerCase();
+    if (!hasData) {
+      // Clean up any blank template row that was previously polluted by the old [object Object] bug
+      const rawCell3 = row.getCell(3).value;
+      if (rawCell3 === '[object Object]' && colMap.isTemplateLayout) {
+        setBrokerCellWithFormula(row, rowNumber, '', '', colMap);
+      }
+      if (colMap.isTemplateLayout) {
+        const strayCol11 = cellText(row, 11);
+        if (UUID_REGEX.test(strayCol11)) {
+          row.getCell(11).value = null;
+        }
+      }
+      return;
+    }
+
+    // Keep Column C formula result synced with resolved broker
+    if (colMap.isTemplateLayout) {
+      setBrokerCellWithFormula(row, rowNumber, broker, master, colMap);
+    }
+
+    let key = cellText(row, colMap.trackingCol).toLowerCase();
+    // Migrate UUID from Col 11 -> Col 12 if an earlier version wrote a UUID into "Sent Email Subject"
+    if (!key && colMap.isTemplateLayout) {
+      const col11Text = cellText(row, 11);
+      if (UUID_REGEX.test(col11Text)) {
+        key = col11Text.toLowerCase();
+        row.getCell(11).value = null;
+        row.getCell(colMap.trackingCol).value = key;
+        row.commit();
+      }
+    }
+
     if (!key) {
       const cacheKey = `${workingFileHandle ? workingFileHandle.name : 'wb'}::${sheetName}::${rowNumber}`;
       if (legacyBackfillMap.has(cacheKey)) {
@@ -1397,7 +2271,7 @@ function indexWorksheetRows(worksheet, sheetName) {
         key = generateTrackingGuid();
         legacyBackfillMap.set(cacheKey, key);
       }
-      row.getCell(11).value = key;
+      row.getCell(colMap.trackingCol).value = key;
       row.commit();
     }
 
@@ -1413,7 +2287,7 @@ function indexWorksheetRows(worksheet, sheetName) {
       yard,
       lots,
       notes,
-      status: status || 'Pending',
+      status: status || defaultStatusVal,
       key
     });
   });
@@ -1835,7 +2709,7 @@ function renderList() {
       tr.classList.add('selected-for-delete');
     }
 
-    const isComplete = item.status.toLowerCase() === 'complete';
+    const isComplete = isCompletedStatus(item.status);
     const noteText = item.notes || '—';
     const isLongNote = noteText.length > 45 || noteText.includes('\n');
     const shortGuid = item.key.length > 8 ? `${item.key.slice(0, 8)}...` : item.key;
@@ -2165,20 +3039,32 @@ searchInput.addEventListener('input', renderList);
 // --- 6. EDIT & CREATE MODAL + INPUT HYGIENE + CROSS-TAB STATUS PROPAGATION ---
 async function openNewRequestModal() {
   if (!sheetSelect.value || !DATE_TAB_REGEX.test(sheetSelect.value)) {
-    return showModalAlert({
-      title: 'No Daily Tab Active',
-      message: 'Create or select a daily tab (MM-DD-YYYY) first using Bootstrap or Rollover / Sync.'
-    });
+    let hasPlaceholder = false;
+    if (workbook) {
+      workbook.eachSheet(ws => {
+        if (isTemplatePlaceholderTab(ws.name)) hasPlaceholder = true;
+      });
+    }
+    if (hasPlaceholder) {
+      await handleRepairCurrentWorkbookSchema();
+    }
+    if (!sheetSelect.value || !DATE_TAB_REGEX.test(sheetSelect.value)) {
+      return showModalAlert({
+        title: 'No Daily Tab Active',
+        message: 'Create or select a daily tab (MM-DD-YYYY) first using Bootstrap or Rollover / Sync.'
+      });
+    }
   }
   editingTarget = null;
   document.getElementById('modalTitle').textContent = `New Request (${sheetSelect.value})`;
   const modalKeyEl = document.getElementById('modalKeyDisplay');
   modalKeyEl.textContent = 'New UUIDv4 on Save';
-  modalKeyEl.title = 'A unique 36-character GUID will be generated in hidden Column K';
+  modalKeyEl.title = 'A unique 36-character GUID will be generated on save';
 
   document.getElementById('entryForm').reset();
-  ensureStatusOptionExists('Pending');
-  fStatus.value = 'Pending';
+  const defaultSt = getDefaultStatus();
+  ensureStatusOptionExists(defaultSt);
+  fStatus.value = defaultSt;
   editModal.classList.add('open');
   setTimeout(() => fSubject.focus(), 20);
 }
@@ -2261,20 +3147,24 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     trackingKey = generateTrackingGuid();
   }
 
-  worksheet.getColumn(11).hidden = true;
+  const colMap = getWorksheetColumnMap(worksheet);
+  worksheet.getColumn(colMap.trackingCol).hidden = true;
+  if (colMap.emailSubjCol) {
+    worksheet.getColumn(colMap.emailSubjCol).hidden = false;
+  }
 
   const row = worksheet.getRow(targetRowNum);
   row.getCell(1).value = subjectVal;
   row.getCell(2).value = ticketVal;
-  row.getCell(3).value = brokerVal;
+  setBrokerCellWithFormula(row, targetRowNum, brokerVal, masterVal, colMap);
   row.getCell(4).value = masterVal;
   row.getCell(5).value = bidderVal;
   row.getCell(6).value = actionVal;
   row.getCell(7).value = yardVal;
   row.getCell(8).value = lotsVal;
-  row.getCell(9).value = notesVal;
-  row.getCell(10).value = statusVal;
-  row.getCell(11).value = trackingKey;
+  row.getCell(colMap.notesCol).value = notesVal;
+  row.getCell(colMap.statusCol).value = statusVal;
+  row.getCell(colMap.trackingCol).value = trackingKey;
   row.commit();
 
   if (editingTarget) {
@@ -2300,8 +3190,9 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
         newerInstances.forEach(inst => {
           const newerWs = workbook.getWorksheet(inst.sheetName);
           if (newerWs) {
+            const newerColMap = getWorksheetColumnMap(newerWs);
             const nr = newerWs.getRow(inst.rowNumber);
-            nr.getCell(10).value = statusVal;
+            nr.getCell(newerColMap.statusCol).value = statusVal;
             nr.commit();
           }
         });
@@ -2319,10 +3210,22 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
 });
 
 function getNextEmptyRow(worksheet) {
+  const colMap = getWorksheetColumnMap(worksheet);
   let lastRow = 1;
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
-    const hasData = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].some(col => cellText(row, col) !== '');
+    const subject = cellText(row, 1);
+    const ticket = cellText(row, 2);
+    const master = cellText(row, 4);
+    const broker = resolveBrokerFromMaster(master, cellText(row, 3));
+    const bidder = cellText(row, 5);
+    const action = cellText(row, 6);
+    const yard = cellText(row, 7);
+    const lots = cellText(row, 8);
+    const status = cellText(row, colMap.statusCol);
+    const notes = cellText(row, colMap.notesCol);
+    const hasData = [subject, ticket, broker, master, bidder, action, yard, lots, notes, status]
+      .some(val => val !== '');
     if (hasData && rowNumber > lastRow) lastRow = rowNumber;
   });
   return lastRow + 1;
@@ -2442,7 +3345,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     sheetRows.forEach(row => {
       const normKey = row.key.toLowerCase();
       latestByKey.set(normKey, row);
-      if (row.status.trim().toLowerCase() !== 'complete') {
+      if (!isCompletedStatus(row.status)) {
         lastOpenByKey.set(normKey, row);
       }
     });
@@ -2459,11 +3362,11 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
   const supersededByComplete = [];
 
   latestByKey.forEach((latestRow, normKey) => {
-    const isLatestComplete = latestRow.status.trim().toLowerCase() === 'complete';
+    const isLatestComplete = isCompletedStatus(latestRow.status);
 
     if (existingOnTargetByKey.has(normKey)) {
       const targetRow = existingOnTargetByKey.get(normKey);
-      const isTargetComplete = targetRow.status.trim().toLowerCase() === 'complete';
+      const isTargetComplete = isCompletedStatus(targetRow.status);
       alreadyOnTarget.push({
         latestRow,
         targetRow,
@@ -2570,7 +3473,7 @@ function updateRolloverModalPreview() {
             <strong>${escapeHtml(targetRow.subject)}</strong>
             <span class="preview-item-sub">${escapeHtml(targetRow.broker)} • Row ${targetRow.rowNumber} on ${escapeHtml(targetVal)}</span>
           </div>
-          <span class="badge ${targetRow.status.toLowerCase() === 'complete' ? 'badge-complete' : 'badge-pending'}">
+          <span class="badge ${isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending'}">
             ${escapeHtml(targetRow.status)}${reopenedOnSource ? ` → Reopen (${escapeHtml(latestRow.status)})` : ''}
           </span>
         </div>
@@ -2582,10 +3485,10 @@ function updateRolloverModalPreview() {
   if (plan.supersededByComplete.length > 0) {
     html += `<div>
       <div class="preview-section-title" style="color:#fbbf24;">
-        ⚠️ Open on Older Tab, but Marked "Complete" on Later Tab (${plan.supersededByComplete.length})
+        ⚠️ Open on Older Tab, but Marked "Closed / Complete" on Later Tab (${plan.supersededByComplete.length})
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
-        These requests had an open status on an earlier sheet, but were marked <strong>Complete</strong> on a newer sheet. Check any item below to reopen and carry it over into <code>${escapeHtml(targetVal)}</code>:
+        These requests had an open status on an earlier sheet, but were marked <strong>${escapeHtml(plan.supersededByComplete[0].completedRow.status)}</strong> on a newer sheet. Check any item below to reopen and carry it over into <code>${escapeHtml(targetVal)}</code>:
       </div>
       <div class="preview-list">`;
     plan.supersededByComplete.forEach(({ openRow, completedRow }) => {
@@ -2596,7 +3499,7 @@ function updateRolloverModalPreview() {
             <div class="preview-item-main">
               <strong>${escapeHtml(openRow.subject)}</strong>
               <span class="preview-item-sub">
-                ${escapeHtml(openRow.broker)} • Was <strong>${escapeHtml(openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>Complete</strong> on ${escapeHtml(completedRow.sheetName)}
+                ${escapeHtml(openRow.broker)} • Was <strong>${escapeHtml(openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>${escapeHtml(completedRow.status)}</strong> on ${escapeHtml(completedRow.sheetName)}
               </span>
             </div>
           </div>
@@ -2641,8 +3544,9 @@ rolloverForm.addEventListener('submit', async (e) => {
         itemsToCarry.push(openRow);
         const completedWs = workbook.getWorksheet(completedRow.sheetName);
         if (completedWs) {
+          const compColMap = getWorksheetColumnMap(completedWs);
           const cr = completedWs.getRow(completedRow.rowNumber);
-          cr.getCell(10).value = openRow.status;
+          cr.getCell(compColMap.statusCol).value = openRow.status;
           cr.commit();
         }
       }
@@ -2653,19 +3557,32 @@ rolloverForm.addEventListener('submit', async (e) => {
 
     if (!targetSheet) {
       createdNewSheet = true;
-      const templateSheet = findTemplateSheet();
-      targetSheet = workbook.addWorksheet(targetTabName);
+      let placeholderWs = null;
+      workbook.eachSheet(ws => {
+        if (isTemplatePlaceholderTab(ws.name)) placeholderWs = ws;
+      });
 
-      placeWorksheetFirst(targetSheet);
-
-      if (templateSheet) {
-        cloneTemplateStructure(templateSheet, targetSheet);
+      if (placeholderWs && dateSheets.length === 0) {
+        placeholderWs.name = targetTabName;
+        targetSheet = placeholderWs;
       } else {
-        applyStandardSheetFormatting(targetSheet);
+        const templateSheet = findTemplateSheet();
+        targetSheet = workbook.addWorksheet(targetTabName);
+        placeWorksheetFirst(targetSheet);
+
+        if (templateSheet) {
+          cloneTemplateStructure(templateSheet, targetSheet);
+        } else {
+          applyStandardSheetFormatting(targetSheet);
+        }
       }
     }
 
-    targetSheet.getColumn(11).hidden = true;
+    const targetColMap = getWorksheetColumnMap(targetSheet);
+    targetSheet.getColumn(targetColMap.trackingCol).hidden = true;
+    if (targetColMap.emailSubjCol) {
+      targetSheet.getColumn(targetColMap.emailSubjCol).hidden = false;
+    }
 
     const existingTargetRows = allRows.filter(r => r.sheetName === targetTabName);
     const existingOnTargetByKey = new Map();
@@ -2681,8 +3598,9 @@ rolloverForm.addEventListener('submit', async (e) => {
     for (const item of itemsToCarry) {
       const normKey = item.key.toLowerCase();
       if (!existingOnTargetByKey.has(normKey)) {
-        const r = targetSheet.getRow(writeRowIdx++);
-        writeItemToWorksheetRow(r, item);
+        const rNum = writeRowIdx++;
+        const r = targetSheet.getRow(rNum);
+        writeItemToWorksheetRow(r, rNum, item, targetColMap);
         existingOnTargetByKey.set(normKey, item);
         addedCount++;
       }
@@ -2691,7 +3609,7 @@ rolloverForm.addEventListener('submit', async (e) => {
     for (const entry of plan.alreadyOnTarget) {
       if (entry.reopenedOnSource) {
         const excelRow = targetSheet.getRow(entry.targetRow.rowNumber);
-        excelRow.getCell(10).value = entry.latestRow.status;
+        excelRow.getCell(targetColMap.statusCol).value = entry.latestRow.status;
         excelRow.commit();
         reopenedCount++;
       }
@@ -2751,12 +3669,22 @@ function placeWorksheetFirst(targetSheet) {
 }
 
 function cloneTemplateStructure(templateSheet, newSheet) {
+  if (Array.isArray(templateSheet.views) && templateSheet.views.length > 0) {
+    newSheet.views = JSON.parse(JSON.stringify(templateSheet.views));
+  }
+  if (templateSheet.pageSetup) {
+    newSheet.pageSetup = JSON.parse(JSON.stringify(templateSheet.pageSetup));
+  }
+
   if (Array.isArray(templateSheet.columns)) {
     templateSheet.columns.forEach((col, idx) => {
       if (!col) return;
       const targetCol = newSheet.getColumn(idx + 1);
       targetCol.width = col.width || 15;
       targetCol.hidden = col.hidden || false;
+      if (col.style) {
+        targetCol.style = JSON.parse(JSON.stringify(col.style));
+      }
     });
   }
 
@@ -2772,22 +3700,80 @@ function cloneTemplateStructure(templateSheet, newSheet) {
     }
   });
   newHeader.commit();
-  newSheet.getColumn(11).hidden = true;
+
+  const colMap = getWorksheetColumnMap(newSheet);
+  newSheet.getColumn(colMap.trackingCol).hidden = true;
+  if (colMap.emailSubjCol) {
+    newSheet.getColumn(colMap.emailSubjCol).hidden = false;
+  }
+
+  // If cloning from the full 74-row Tracker Template, preserve rows 2..74 cell styles and Column C XLOOKUP formulas
+  if (colMap.isTemplateLayout) {
+    const maxTemplateRow = Math.max(templateSheet.rowCount || 74, 74);
+    for (let r = 2; r <= maxTemplateRow; r++) {
+      const srcRow = templateSheet.getRow(r);
+      const dstRow = newSheet.getRow(r);
+      if (srcRow.height) dstRow.height = srcRow.height;
+      srcRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        if (colNumber <= 12 && cell.style) {
+          dstRow.getCell(colNumber).style = JSON.parse(JSON.stringify(cell.style));
+        }
+      });
+      setBrokerCellWithFormula(dstRow, r, '', '', colMap);
+      dstRow.commit();
+    }
+  }
 }
 
-function writeItemToWorksheetRow(row, item) {
+function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
+  const masterUpper = item.master ? item.master.toUpperCase() : '';
   row.getCell(1).value = item.subject;
   row.getCell(2).value = item.ticket ? item.ticket.toUpperCase() : '';
-  row.getCell(3).value = item.broker;
-  row.getCell(4).value = item.master ? item.master.toUpperCase() : '';
+  setBrokerCellWithFormula(row, rowNumber, item.broker, masterUpper, colMap);
+  row.getCell(4).value = masterUpper;
   row.getCell(5).value = item.bidder ? item.bidder.toUpperCase() : '';
   row.getCell(6).value = item.action;
   row.getCell(7).value = item.yard ? item.yard.toUpperCase() : '';
   row.getCell(8).value = item.lots;
-  row.getCell(9).value = item.notes;
-  row.getCell(10).value = item.status;
-  row.getCell(11).value = item.key;
+  row.getCell(colMap.notesCol).value = item.notes;
+  row.getCell(colMap.statusCol).value = item.status;
+  row.getCell(colMap.trackingCol).value = item.key;
   row.commit();
+}
+
+function prepareWorkbookFormulasBeforeSave(wb) {
+  if (!wb) return;
+  wb.eachSheet((ws) => {
+    const rawName = ws.name.trim();
+    const lower = rawName.toLowerCase();
+    const isDailyOrTemplate =
+      lower === 'template' ||
+      isTemplatePlaceholderTab(rawName) ||
+      DATE_TAB_REGEX.test(rawName);
+    if (!isDailyOrTemplate) return;
+
+    const colMap = getWorksheetColumnMap(ws);
+    ws.getColumn(colMap.trackingCol).hidden = true;
+    if (colMap.emailSubjCol) {
+      ws.getColumn(colMap.emailSubjCol).hidden = false;
+    }
+
+    if (!colMap.isTemplateLayout) return;
+
+    const maxR = Math.max(ws.rowCount || 74, 74);
+    for (let r = 2; r <= maxR; r++) {
+      const row = ws.getRow(r);
+      const masterVal = cellText(row, 4).toUpperCase();
+      const brokerVal = cellText(row, 3);
+      setBrokerCellWithFormula(row, r, brokerVal, masterVal, colMap);
+    }
+  });
+}
+
+async function serializeWorkbookBuffer() {
+  prepareWorkbookFormulasBeforeSave(workbook);
+  const rawBuffer = await workbook.xlsx.writeBuffer();
+  return await repairSavedXlsxArchive(rawBuffer, originalArchiveState);
 }
 
 // --- 8. DUAL-WRITE MIRRORING + AUTO-RETRY & MANUAL RETRY ---
@@ -2871,7 +3857,7 @@ async function retryMirrorSyncNow(isAuto = false) {
   let bufferToWrite = pendingMirrorBuffer;
   if (!bufferToWrite) {
     try {
-      bufferToWrite = await workbook.xlsx.writeBuffer();
+      bufferToWrite = await serializeWorkbookBuffer();
     } catch (e) {
       console.error('Could not serialize buffer for mirror retry:', e);
       return;
@@ -2895,7 +3881,7 @@ async function saveWorkbookToDisk() {
   setStatus('Saving to Excel...', '');
   let buffer;
   try {
-    buffer = await workbook.xlsx.writeBuffer();
+    buffer = await serializeWorkbookBuffer();
   } catch (err) {
     console.error('Failed to serialize workbook buffer:', err);
     setStatus('Serialization Error', 'locked');
@@ -2964,7 +3950,7 @@ function updateStatusBarTelemetry() {
     if (!workbook) {
       statusRowStats.textContent = '📊 0 requests';
     } else {
-      const openTotal = allRows.filter(r => r.status.trim().toLowerCase() !== 'complete').length;
+      const openTotal = allRows.filter(r => !isCompletedStatus(r.status)).length;
       statusRowStats.textContent = `📊 Showing ${currentlyVisibleRows.length} of ${allRows.length} requests (${openTotal} open across ${dateSheets.length} tab${dateSheets.length === 1 ? '' : 's'})`;
     }
   }
