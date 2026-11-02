@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.10.0</title>
+  <title>TrackerUI v1.11.0</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" content="#0f172a">
@@ -24,7 +24,7 @@
   <header>
     <div class="brand">
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.10.0)">v1.10.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.11.0)">v1.11.0</span>
     </div>
 
     <div class="header-actions">
@@ -35,6 +35,9 @@
 
       <button type="button" id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
       <button type="button" id="btnLinkFile">📂 Select Agent Folder</button>
+      <button type="button" id="btnOpenViewOnly" class="btn-view-only" style="display:none;" title="Inspect the Supervisor (VIEW ONLY).xlsx mirror workbook">
+        👁️ Open View-Only
+      </button>
       <button type="button" id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync</button>
 
       <!-- Clean Popover Workspace & Tools Menu -->
@@ -44,10 +47,15 @@
         </button>
         <div id="toolsMenuDropdown" class="tools-menu-dropdown">
           <div class="menu-section">
-            <div class="menu-section-title">Folders &amp; Mirroring</div>
-            <button type="button" id="menuSelectAgentFolder" class="menu-item">
-              <span>📂 Select / Change Agent Folder...</span>
-            </button>
+            <div class="menu-section-title">Directories &amp; Mirroring</div>
+            <div class="menu-item-group">
+              <button type="button" id="menuSelectAgentFolder" class="menu-item" title="Select folder containing current monthly tracker workbooks">
+                <span>📂 Tracker Workbooks Folder...</span>
+              </button>
+              <button type="button" id="btnResetAgentDir" class="menu-item-reset" style="display:none;" title="Clear saved Agent folder handle">
+                ✕ Clear
+              </button>
+            </div>
             <div class="menu-item-group">
               <button type="button" id="btnSupervisorDir" class="menu-item" title="Select folder where (VIEW ONLY).xlsx copies are saved">
                 👁️ Supervisor Folder: Same as Agent
@@ -56,6 +64,21 @@
                 ✕ Reset
               </button>
             </div>
+            <div class="menu-item-group">
+              <button type="button" id="btnTemplatesDir" class="menu-item" title="Select folder containing master .xlsx templates for new monthly workbooks">
+                📋 Templates Folder: Built-in Default
+              </button>
+              <button type="button" id="btnResetTemplatesDir" class="menu-item-reset" style="display:none;" title="Clear custom Templates folder">
+                ✕ Reset
+              </button>
+            </div>
+            <button type="button" id="menuOpenViewOnly" class="menu-item" disabled>
+              <span>👁️ Open View-Only Tracker...</span>
+            </button>
+            <label class="menu-checkbox-item" title="Automatically reconnect saved directories when opening TrackerUI">
+              <input type="checkbox" id="chkAutoReconnect" checked>
+              <span>⚡ Auto-Reconnect Folders on Startup</span>
+            </label>
           </div>
 
           <div class="menu-section">
@@ -92,8 +115,31 @@
     </div>
   </header>
 
+  <!-- Persistent File Paths & Auto-Reconnect Status Strip -->
+  <div id="filePathsBar" class="file-paths-bar">
+    <div class="file-paths-list">
+      <span class="file-path-item" id="pathTrackerItem" title="Active working tracker workbook path">
+        <strong>📂 Tracker:</strong> <code id="pathTrackerText">Not connected</code>
+      </span>
+      <span class="file-path-sep">•</span>
+      <span class="file-path-item" id="pathViewOnlyItem" title="Supervisor (VIEW ONLY) mirror workbook path">
+        <strong>👁️ View-Only:</strong> <code id="pathViewOnlyText">Not connected</code>
+      </span>
+      <span class="file-path-sep" id="pathTemplatesSep" style="display:none;">•</span>
+      <span class="file-path-item" id="pathTemplatesItem" style="display:none;" title="Custom templates directory">
+        <strong>📋 Templates:</strong> <code id="pathTemplatesText">Built-in</code>
+      </span>
+    </div>
+    <div class="file-paths-actions">
+      <label class="auto-reconnect-pill" title="When checked, TrackerUI automatically reconnects your saved directories on startup">
+        <input type="checkbox" id="chkAutoReconnectBar" checked>
+        <span>Auto-Reconnect</span>
+      </label>
+    </div>
+  </div>
+
   <div class="controls">
-    <button type="button" id="btnNewEntry" class="btn-primary btn-new-request-bar" style="display:none;" title="Add a new support request to the active Day Tab">
+    <button type="button" id="btnNewEntry" class="btn-primary btn-new-request-bar" style="display:none;" title="Prepare a new support request in the bottom editor (or double-click for popup)">
       <span class="plus-icon">＋</span> New Request
     </button>
 
@@ -197,7 +243,7 @@
           <th class="sortable-th" data-sort="status" title="Click to sort by Status">
             <span>Status</span><span class="sort-indicator" data-ind="status">↕</span>
           </th>
-          <th>Edit</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="listBody">
@@ -206,7 +252,93 @@
     </table>
   </div>
 
-  <!-- Edit / Create Modal -->
+  <!-- Docked Bottom Request Editor Panel (Click any row above to auto-populate & edit; Unique Key excluded from inputs) -->
+  <section id="bottomEditorDock" class="bottom-editor-dock" style="display:none;">
+    <div class="bottom-editor-header">
+      <div class="bottom-editor-title-group">
+        <span id="dockModeBadge" class="dock-mode-badge new-mode">➕ New Request</span>
+        <span id="dockTargetLabel" class="dock-target-label">Select a row above to edit, or enter a new request below</span>
+        <span id="dockKeyBadge" class="key-chip" style="display:none; cursor:default;" title="Immutable Tracking ID (Excluded from editable inputs)"></span>
+      </div>
+      <div class="bottom-editor-header-actions">
+        <button type="button" id="btnDockTicketDetails" class="btn-dock-secondary" style="display:none;" title="View aggregated notes history with date-time stamps for this request">
+          📋 Ticket Details &amp; Notes History
+        </button>
+        <button type="button" id="btnDockOpenModal" class="btn-dock-secondary" title="Open current request in popup modal">
+          🗔 Popup Editor
+        </button>
+        <button type="button" id="btnDockNewClear" class="btn-dock-secondary" title="Clear form and switch to New Request mode">
+          ＋ New / Clear Form
+        </button>
+      </div>
+    </div>
+
+    <form id="dockEntryForm" class="dock-form">
+      <div class="dock-form-grid">
+        <div class="form-group dock-col-subject">
+          <label for="dockSubject">Subject (Col A) *</label>
+          <input type="text" id="dockSubject" placeholder="Request subject..." required>
+        </div>
+        <div class="form-group">
+          <label for="dockTicket">Ticket Number (Col B)</label>
+          <input type="text" id="dockTicket" placeholder="Optional Ticket #">
+        </div>
+        <div class="form-group">
+          <label for="dockBroker">Broker Name (Col C) *</label>
+          <input type="text" id="dockBroker" list="brokerList" placeholder="Select or type broker..." required>
+        </div>
+        <div class="form-group">
+          <label for="dockMaster">Master # (Col D)</label>
+          <input type="text" id="dockMaster" placeholder="Master #">
+        </div>
+        <div class="form-group">
+          <label for="dockBidder">Bidder # (Col E)</label>
+          <input type="text" id="dockBidder" placeholder="Bidder #">
+        </div>
+        <div class="form-group">
+          <label for="dockAction">Requested Action (Col F)</label>
+          <input type="text" id="dockAction" list="actionList" placeholder="Select or type action...">
+        </div>
+        <div class="form-group">
+          <label for="dockYard">Yard # (Col G)</label>
+          <input type="text" id="dockYard" placeholder="Yard #">
+        </div>
+        <div class="form-group">
+          <label for="dockLots">Lot Numbers (Col H)</label>
+          <input type="text" id="dockLots" placeholder="Lot #s">
+        </div>
+        <div class="form-group">
+          <label for="dockStatus">Request Status (Col J)</label>
+          <select id="dockStatus">
+            <option value="Pending">Pending</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Waiting on Buyer">Waiting on Buyer</option>
+            <option value="Escalated">Escalated</option>
+            <option value="Complete">Complete</option>
+          </select>
+        </div>
+        <div class="form-group dock-col-notes">
+          <div class="dock-notes-label-row">
+            <label for="dockNotes">Action Notes (Col I)</label>
+            <button type="button" id="btnDockInsertTimestamp" class="btn-timestamp-chip" title="Insert current date &amp; time stamp into Action Notes">
+              🕒 + Insert Timestamp
+            </button>
+          </div>
+          <textarea id="dockNotes" rows="2" placeholder="Enter action notes (click '+ Insert Timestamp' to prefix with date/time)..."></textarea>
+        </div>
+      </div>
+
+      <div class="dock-form-actions">
+        <span id="dockHintText" class="dock-hint-text">💡 Tip: Click any request row in the table above to load it here for instant editing.</span>
+        <div class="dock-submit-group">
+          <button type="button" id="btnDockCancelEdit" style="display:none;">Cancel Edit</button>
+          <button type="submit" id="btnDockSave" class="btn-primary">💾 Save to Workbook</button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <!-- Edit / Create Modal (Secondary Popup Editor) -->
   <div id="editModal" class="modal-backdrop">
     <div class="modal">
       <div class="modal-header">
@@ -260,7 +392,12 @@
             <input type="text" id="fLots">
           </div>
           <div class="form-group full">
-            <label>Action Notes (Col I)</label>
+            <div class="dock-notes-label-row">
+              <label>Action Notes (Col I)</label>
+              <button type="button" id="btnModalInsertTimestamp" class="btn-timestamp-chip" title="Insert current date &amp; time stamp into Action Notes">
+                🕒 + Insert Timestamp
+              </button>
+            </div>
             <textarea id="fNotes" rows="4"></textarea>
           </div>
         </div>
@@ -269,6 +406,90 @@
           <button type="submit" class="btn-primary">💾 Save to Workbook</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Ticket Details & Aggregated Timestamped Notes Modal -->
+  <div id="ticketDetailsModal" class="modal-backdrop">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <div>
+          <h3 id="ticketDetailsTitle">📋 Ticket Details &amp; Aggregated Notes</h3>
+          <div id="ticketDetailsSubtitle" style="font-size:12px; color:var(--text-muted); margin-top:2px;"></div>
+        </div>
+        <span id="ticketDetailsKeyBadge" class="key-chip" style="cursor:default;"></span>
+      </div>
+
+      <div id="ticketDetailsMetaGrid" class="ticket-meta-grid"></div>
+
+      <div class="ticket-timeline-section">
+        <div class="preview-section-title" id="ticketTimelineHeader">🕒 Aggregated Notes &amp; Daily Timeline</div>
+        <div id="ticketTimelineList" class="ticket-timeline-list"></div>
+      </div>
+
+      <form id="ticketQuickNoteForm" class="ticket-quick-note-form">
+        <div class="dock-notes-label-row">
+          <label for="ticketQuickNoteInput">➕ Append New Timestamped Note to Latest Entry</label>
+          <span id="ticketQuickNoteTargetBadge" class="badge badge-pending"></span>
+        </div>
+        <div class="ticket-quick-note-row">
+          <textarea id="ticketQuickNoteInput" rows="2" placeholder="Type a new note update (a [MM/DD/YYYY HH:MM AM/PM] timestamp will be added automatically)..." required></textarea>
+          <button type="submit" class="btn-primary">➕ Add Timestamped Note</button>
+        </div>
+      </form>
+
+      <div class="modal-actions">
+        <button type="button" id="btnCloseTicketDetails">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- View-Only Mirror Tracker Inspector Modal -->
+  <div id="viewOnlyModal" class="modal-backdrop">
+    <div class="modal modal-xl">
+      <div class="modal-header">
+        <div>
+          <h3 id="viewOnlyTitle">👁️ Supervisor View-Only Tracker Inspector</h3>
+          <div id="viewOnlyPathSubtitle" style="font-size:12px; color:var(--text-muted); margin-top:2px;"></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span id="viewOnlySyncBadge" class="badge badge-complete">Read-Only ArrayBuffer</span>
+          <button type="button" id="btnDownloadViewOnly" class="btn-dock-secondary" title="Download/open a standalone copy of the View-Only .xlsx file">
+            📥 Download / Open .xlsx
+          </button>
+        </div>
+      </div>
+
+      <div class="view-only-controls">
+        <label for="viewOnlySheetSelect" style="font-size:12px; color:var(--text-muted);">Day Tab:</label>
+        <select id="viewOnlySheetSelect"></select>
+        <input type="text" id="viewOnlySearchInput" class="search-box" placeholder="Filter View-Only rows...">
+        <span id="viewOnlyStatsText" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+
+      <div class="view-only-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date Tab</th>
+              <th>Subject</th>
+              <th>Ticket #</th>
+              <th>Broker</th>
+              <th>Master / Bidder</th>
+              <th>Action</th>
+              <th>Yard / Lots</th>
+              <th>Action Notes</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="viewOnlyBody"></tbody>
+        </table>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="btnRefreshViewOnly" class="btn-dock-secondary">🔄 Refresh View-Only</button>
+        <button type="button" id="btnCloseViewOnly" class="btn-primary">Close</button>
+      </div>
     </div>
   </div>
 
@@ -316,6 +537,10 @@
       </div>
       <form id="dialogForm">
         <div id="dialogMessage" class="dialog-message"></div>
+        <div id="dialogSelectWrap" class="form-group" style="display:none; margin-top: 12px;">
+          <label id="dialogSelectLabel" for="dialogSelect">Template Source</label>
+          <select id="dialogSelect"></select>
+        </div>
         <div id="dialogInputWrap" class="form-group" style="display:none; margin-top: 14px;">
           <label id="dialogInputLabel" for="dialogInput">Value</label>
           <input type="text" id="dialogInput" autocomplete="off">
@@ -348,7 +573,7 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.10.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.11.0</span>
     </div>
   </footer>
 

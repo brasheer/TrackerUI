@@ -22,7 +22,7 @@ These rules apply to all AI models and coding assistants working in the `Tracker
 - **Workbook Filtering**: When scanning the agent folder for working `.xlsx` files, always exclude:
   - Excel temporary lock files starting with `~$`
   - Mirror files ending with `(VIEW ONLY).xlsx` (case-insensitive)
-- **IndexedDB Handle Persistence**: Persist both `agentFolderHandle` and `supervisorFolderHandle` in `IndexedDB` (`TrackerUI_DirectoryDB` -> `handles`) so the user can reconnect with 1 click on reload.
+- **IndexedDB Handle Persistence**: Persist `agentFolderHandle`, `supervisorFolderHandle`, `templatesFolderHandle`, and `lastActiveWorkbookName` in `IndexedDB` (`TrackerUI_DirectoryDB` -> `handles`) so the app can auto-reconnect on reload (when `TrackerUI_AutoReconnect` is enabled) or reconnect with 1 click.
 - **Dual-Write Mirroring & Retry (`saveWorkbookToDisk` / `attemptMirrorWrite`)**:
   1. Write the serialized `workbook.xlsx.writeBuffer()` to the primary working `.xlsx` file inside a `try/catch` that alerts if Desktop Excel has the working file locked.
   2. Write the identical buffer to `<Workbook Name> (VIEW ONLY).xlsx` in `supervisorDirHandle || parentDirHandle` inside a **separate, non-blocking `try/catch`**.
@@ -45,11 +45,11 @@ Daily tabs must use `MM-DD-YYYY` naming and follow this exact 11-column schema:
 - **Col K (11)**: `Tracking ID` (**Hidden column**: `worksheet.getColumn(11).hidden = true`)
 
 ### Schema Bootstrapping (`bootstrapWorkbookSchemaInMemory`)
-- Support creating a brand-new monthly `.xlsx` file in the Agent Folder as well as non-destructively initializing/repairing blank or incomplete workbooks with:
+- Support creating a brand-new monthly `.xlsx` file in the Agent Folder (either cloned from a `.xlsx` file in the configured **Templates Folder** or bootstrapped in memory) as well as non-destructively initializing/repairing blank or incomplete workbooks with:
   - `template` sheet (11 styled headers, column widths, hidden Column K)
   - `validation lists` sheet (default `Requested Actions` in Col A and `Status Options` in Col B)
-  - `Master Accounts` sheet (`Broker Name`, `Master#`, `Default Bidder#`)
   - Today's `MM-DD-YYYY` daily tab cloned from `template`.
+  - *(Note: `Master Accounts` is excluded when bootstrapping new monthly workbooks per `newfeatures.txt` L15, though optional `Master Accounts` sheets are still parsed if present).*
 
 ### Primary Key Rules (Column K)
 - **Pure UUIDv4 Only**: New rows must always generate a lowercase 36-character UUIDv4 via `crypto.randomUUID()` (`generateTrackingGuid()`). Never use Ticket Number (Col B) or composite broker hashes as a primary key for new rows.
@@ -81,3 +81,12 @@ Daily tabs must use `MM-DD-YYYY` naming and follow this exact 11-column schema:
   - Scans all prior `MM-DD-YYYY` sheets chronologically (oldest to newest) to resolve the latest state of each Tracking ID.
   - Detects future-dated tabs and provides preset targets (`Latest Tab`, `Next Day`, `Today`) plus an option to include unfinished items from future-dated tabs.
   - Surfaces older open requests that were marked `Complete` on a later sheet so the user can optionally reopen and carry them over.
+
+---
+
+## 6. Automatic Changelog & Feature Tracking (`CHANGELOG.md` & `newfeatures.txt`)
+- **Always Sync [`CHANGELOG.md`](CHANGELOG.md)**: Whenever a feature, bug fix, or suggestion (whether from [`newfeatures.txt`](newfeatures.txt) or a direct user request) is implemented, partially implemented, or decided against:
+  1. Update the **Feature & Suggestion Status Matrix** in [`CHANGELOG.md`](CHANGELOG.md) (`✅ Implemented`, `⏳ Partially Implemented`, `📋 Planned / Backlog`, or `🚫 Decided Against / Superseded` with the rationale).
+  2. When bumping the app version (e.g., in `index.html`, `js/app.js`, and `sw.js`), add a new release entry under **Version Release History** in [`CHANGELOG.md`](CHANGELOG.md).
+- **Status Reporting**: When the user asks for feature status or after completing a feature from [`newfeatures.txt`](newfeatures.txt), automatically list which items are newly implemented, remaining in progress/backlog, or decided against.
+

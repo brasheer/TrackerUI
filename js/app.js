@@ -3,6 +3,13 @@ let parentDirHandle = null;
 let cachedDirHandle = null;
 let supervisorDirHandle = null;
 let cachedSupervisorDirHandle = null;
+let templatesDirHandle = null;
+let cachedTemplatesDirHandle = null;
+let availableTemplates = []; // [{ name, handle, lastModified }]
+let lastSavedWorkbookName = null;
+let autoReconnectEnabled = localStorage.getItem('trackerui_auto_reconnect') !== 'false';
+let autoReconnectGesturePending = false;
+
 let availableWorkbooks = []; // [{ name, handle, lastModified, sortWeight }]
 let workingFileHandle = null;
 let workbook = null;
@@ -11,7 +18,10 @@ let dateSheets = []; // Ordered list of MM-DD-YYYY sheet names (newest first)
 let activeKeyFilter = null;
 let activeFieldFilter = null; // { field, label, value } for Like-Item filtering across tabs
 let sortState = { column: null, direction: 'asc' }; // Column sort state
-let editingTarget = null; // { sheetName, rowNumber, key } or null for new
+let editingTarget = null; // { sheetName, rowNumber, key } or null for new (Modal)
+let dockEditingTarget = null; // { sheetName, rowNumber, key } or null for new (Bottom Dock)
+let activeTicketDetailsTarget = null; // { key, ticket, sheetName, rowNumber }
+let viewOnlyState = { fileName: '', fullPath: '', lastModified: 0, buffer: null, sheets: [], rows: [] };
 
 // Mirror Retry State
 let pendingMirrorBuffer = null;
@@ -112,6 +122,9 @@ const IDB_NAME = 'TrackerUI_DirectoryDB';
 const IDB_STORE = 'handles';
 const IDB_AGENT_KEY = 'agentFolderHandle';
 const IDB_SUPERVISOR_KEY = 'supervisorFolderHandle';
+const IDB_TEMPLATES_KEY = 'templatesFolderHandle';
+const IDB_LAST_WORKBOOK_KEY = 'lastActiveWorkbookName';
+const AUTO_RECONNECT_STORAGE_KEY = 'trackerui_auto_reconnect';
 
 // --- DOM ELEMENTS ---
 const statusPill = document.getElementById('statusPill');
@@ -120,6 +133,7 @@ const workbookPickerWrap = document.getElementById('workbookPickerWrap');
 const workbookSelect = document.getElementById('workbookSelect');
 const btnReconnect = document.getElementById('btnReconnect');
 const btnLinkFile = document.getElementById('btnLinkFile');
+const btnOpenViewOnly = document.getElementById('btnOpenViewOnly');
 const btnRollover = document.getElementById('btnRollover');
 const btnNewEntry = document.getElementById('btnNewEntry');
 
@@ -128,14 +142,27 @@ const toolsMenuWrap = document.getElementById('toolsMenuWrap');
 const btnToolsMenu = document.getElementById('btnToolsMenu');
 const toolsMenuDropdown = document.getElementById('toolsMenuDropdown');
 const menuSelectAgentFolder = document.getElementById('menuSelectAgentFolder');
+const btnResetAgentDir = document.getElementById('btnResetAgentDir');
 const btnSupervisorDir = document.getElementById('btnSupervisorDir');
 const btnResetSupervisorDir = document.getElementById('btnResetSupervisorDir');
+const btnTemplatesDir = document.getElementById('btnTemplatesDir');
+const btnResetTemplatesDir = document.getElementById('btnResetTemplatesDir');
+const menuOpenViewOnly = document.getElementById('menuOpenViewOnly');
+const chkAutoReconnect = document.getElementById('chkAutoReconnect');
+const chkAutoReconnectBar = document.getElementById('chkAutoReconnectBar');
 const btnNewWorkbook = document.getElementById('btnNewWorkbook');
 const btnRepairSchema = document.getElementById('btnRepairSchema');
 const btnAddBlankTab = document.getElementById('btnAddBlankTab');
 const btnRenameTab = document.getElementById('btnRenameTab');
 const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
+
+// File Paths Bar Elements
+const pathTrackerText = document.getElementById('pathTrackerText');
+const pathViewOnlyText = document.getElementById('pathViewOnlyText');
+const pathTemplatesSep = document.getElementById('pathTemplatesSep');
+const pathTemplatesItem = document.getElementById('pathTemplatesItem');
+const pathTemplatesText = document.getElementById('pathTemplatesText');
 
 // Sheet Navigation & Controls
 const btnPrevSheet = document.getElementById('btnPrevSheet');
@@ -159,6 +186,8 @@ const filterBannerDesc = document.getElementById('filterBannerDesc');
 const filterKeyText = document.getElementById('filterKeyText');
 const editModal = document.getElementById('editModal');
 const rolloverModal = document.getElementById('rolloverModal');
+const ticketDetailsModal = document.getElementById('ticketDetailsModal');
+const viewOnlyModal = document.getElementById('viewOnlyModal');
 const toastContainer = document.getElementById('toastContainer');
 const statusFolderInfo = document.getElementById('statusFolderInfo');
 const statusRowStats = document.getElementById('statusRowStats');
@@ -173,7 +202,7 @@ const deleteSelectedCountEl = document.getElementById('deleteSelectedCount');
 const btnConfirmDeleteSelected = document.getElementById('btnConfirmDeleteSelected');
 const btnCancelDeleteMode = document.getElementById('btnCancelDeleteMode');
 
-// Form Fields
+// Modal Form Fields
 const fSubject = document.getElementById('fSubject');
 const fTicket = document.getElementById('fTicket');
 const fBroker = document.getElementById('fBroker');
@@ -184,8 +213,57 @@ const fStatus = document.getElementById('fStatus');
 const fYard = document.getElementById('fYard');
 const fLots = document.getElementById('fLots');
 const fNotes = document.getElementById('fNotes');
+const btnModalInsertTimestamp = document.getElementById('btnModalInsertTimestamp');
 const brokerListEl = document.getElementById('brokerList');
 const actionListEl = document.getElementById('actionList');
+
+// Bottom Dock Editor DOM Elements
+const bottomEditorDock = document.getElementById('bottomEditorDock');
+const dockModeBadge = document.getElementById('dockModeBadge');
+const dockTargetLabel = document.getElementById('dockTargetLabel');
+const dockKeyBadge = document.getElementById('dockKeyBadge');
+const btnDockTicketDetails = document.getElementById('btnDockTicketDetails');
+const btnDockOpenModal = document.getElementById('btnDockOpenModal');
+const btnDockNewClear = document.getElementById('btnDockNewClear');
+const dockEntryForm = document.getElementById('dockEntryForm');
+const dockSubject = document.getElementById('dockSubject');
+const dockTicket = document.getElementById('dockTicket');
+const dockBroker = document.getElementById('dockBroker');
+const dockMaster = document.getElementById('dockMaster');
+const dockBidder = document.getElementById('dockBidder');
+const dockAction = document.getElementById('dockAction');
+const dockYard = document.getElementById('dockYard');
+const dockLots = document.getElementById('dockLots');
+const dockStatus = document.getElementById('dockStatus');
+const dockNotes = document.getElementById('dockNotes');
+const btnDockInsertTimestamp = document.getElementById('btnDockInsertTimestamp');
+const dockHintText = document.getElementById('dockHintText');
+const btnDockCancelEdit = document.getElementById('btnDockCancelEdit');
+const btnDockSave = document.getElementById('dockSave') || document.getElementById('btnDockSave');
+
+// Ticket Details Modal DOM Elements
+const ticketDetailsTitle = document.getElementById('ticketDetailsTitle');
+const ticketDetailsSubtitle = document.getElementById('ticketDetailsSubtitle');
+const ticketDetailsKeyBadge = document.getElementById('ticketDetailsKeyBadge');
+const ticketDetailsMetaGrid = document.getElementById('ticketDetailsMetaGrid');
+const ticketTimelineHeader = document.getElementById('ticketTimelineHeader');
+const ticketTimelineList = document.getElementById('ticketTimelineList');
+const ticketQuickNoteForm = document.getElementById('ticketQuickNoteForm');
+const ticketQuickNoteTargetBadge = document.getElementById('ticketQuickNoteTargetBadge');
+const ticketQuickNoteInput = document.getElementById('ticketQuickNoteInput');
+const btnCloseTicketDetails = document.getElementById('btnCloseTicketDetails');
+
+// View-Only Inspector Modal DOM Elements
+const viewOnlyTitle = document.getElementById('viewOnlyTitle');
+const viewOnlyPathSubtitle = document.getElementById('viewOnlyPathSubtitle');
+const viewOnlySyncBadge = document.getElementById('viewOnlySyncBadge');
+const btnDownloadViewOnly = document.getElementById('btnDownloadViewOnly');
+const viewOnlySheetSelect = document.getElementById('viewOnlySheetSelect');
+const viewOnlySearchInput = document.getElementById('viewOnlySearchInput');
+const viewOnlyStatsText = document.getElementById('viewOnlyStatsText');
+const viewOnlyBody = document.getElementById('viewOnlyBody');
+const btnRefreshViewOnly = document.getElementById('btnRefreshViewOnly');
+const btnCloseViewOnly = document.getElementById('btnCloseViewOnly');
 
 // Rollover Modal DOM Elements
 const rolloverForm = document.getElementById('rolloverForm');
@@ -205,6 +283,9 @@ const dialogForm = document.getElementById('dialogForm');
 const dialogTitle = document.getElementById('dialogTitle');
 const dialogBadge = document.getElementById('dialogBadge');
 const dialogMessage = document.getElementById('dialogMessage');
+const dialogSelectWrap = document.getElementById('dialogSelectWrap');
+const dialogSelectLabel = document.getElementById('dialogSelectLabel');
+const dialogSelect = document.getElementById('dialogSelect');
 const dialogInputWrap = document.getElementById('dialogInputWrap');
 const dialogInputLabel = document.getElementById('dialogInputLabel');
 const dialogInput = document.getElementById('dialogInput');
@@ -216,15 +297,18 @@ const btnDialogConfirm = document.getElementById('btnDialogConfirm');
 let activeDialogResolver = null;
 let activeDialogMode = 'alert'; // 'alert' | 'confirm' | 'prompt'
 let activeDialogValidator = null;
+let activeDialogHasSelect = false;
 
 function closeDialogModal(resultValue) {
   if (!dialogModal) return;
   dialogModal.classList.remove('open');
   dialogInputError.style.display = 'none';
   dialogInputError.textContent = '';
+  if (dialogSelectWrap) dialogSelectWrap.style.display = 'none';
   const resolver = activeDialogResolver;
   activeDialogResolver = null;
   activeDialogValidator = null;
+  activeDialogHasSelect = false;
   if (resolver) {
     resolver(resultValue);
   }
@@ -241,6 +325,9 @@ function openDialogBase({
   inputLabel = 'Value',
   defaultValue = '',
   placeholder = '',
+  selectLabel = '',
+  selectOptions = null, // [{ value, label }]
+  defaultSelectValue = '',
   validate = null
 }) {
   if (activeDialogResolver) {
@@ -251,6 +338,7 @@ function openDialogBase({
     activeDialogResolver = resolve;
     activeDialogMode = mode;
     activeDialogValidator = typeof validate === 'function' ? validate : null;
+    activeDialogHasSelect = Boolean(Array.isArray(selectOptions) && selectOptions.length > 0 && dialogSelect);
 
     dialogTitle.textContent = title;
     if (badge) {
@@ -263,6 +351,23 @@ function openDialogBase({
     dialogMessage.textContent = message;
     dialogInputError.style.display = 'none';
     dialogInputError.textContent = '';
+
+    if (activeDialogHasSelect) {
+      dialogSelectWrap.style.display = 'flex';
+      dialogSelectLabel.textContent = selectLabel || 'Select Option';
+      dialogSelect.innerHTML = '';
+      selectOptions.forEach(optObj => {
+        const opt = document.createElement('option');
+        opt.value = optObj.value;
+        opt.textContent = optObj.label;
+        dialogSelect.appendChild(opt);
+      });
+      if (defaultSelectValue) {
+        dialogSelect.value = defaultSelectValue;
+      }
+    } else if (dialogSelectWrap) {
+      dialogSelectWrap.style.display = 'none';
+    }
 
     if (mode === 'prompt') {
       dialogInputWrap.style.display = 'flex';
@@ -340,7 +445,11 @@ dialogForm.addEventListener('submit', (e) => {
         return;
       }
     }
-    closeDialogModal(val);
+    if (activeDialogHasSelect) {
+      closeDialogModal({ value: val, selectValue: dialogSelect.value });
+    } else {
+      closeDialogModal(val);
+    }
   } else {
     closeDialogModal(true);
   }
@@ -382,11 +491,19 @@ document.addEventListener('keydown', (e) => {
       closeDialogModal(activeDialogMode === 'prompt' ? null : false);
       return;
     }
+    if (ticketDetailsModal && ticketDetailsModal.classList.contains('open')) {
+      ticketDetailsModal.classList.remove('open');
+      return;
+    }
+    if (viewOnlyModal && viewOnlyModal.classList.contains('open')) {
+      viewOnlyModal.classList.remove('open');
+      return;
+    }
     closeToolsMenu();
   }
 });
 
-// --- INDEXEDDB DIRECTORY HANDLE PERSISTENCE ---
+// --- INDEXEDDB DIRECTORY HANDLE & SETTINGS PERSISTENCE ---
 function openHandleDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(IDB_NAME, 1);
@@ -401,17 +518,17 @@ function openHandleDB() {
   });
 }
 
-async function saveHandleToIDB(key, dirHandle) {
+async function saveHandleToIDB(key, value) {
   try {
     const db = await openHandleDB();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readwrite');
-      tx.objectStore(IDB_STORE).put(dirHandle, key);
+      tx.objectStore(IDB_STORE).put(value, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
-    console.warn(`Could not persist handle (${key}) in IndexedDB:`, err);
+    console.warn(`Could not persist (${key}) in IndexedDB:`, err);
   }
 }
 
@@ -425,7 +542,7 @@ async function getHandleFromIDB(key) {
       req.onerror = () => reject(req.error);
     });
   } catch (err) {
-    console.warn(`Could not read handle (${key}) from IndexedDB:`, err);
+    console.warn(`Could not read (${key}) from IndexedDB:`, err);
     return null;
   }
 }
@@ -440,8 +557,59 @@ async function deleteHandleFromIDB(key) {
       tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
-    console.warn(`Could not delete handle (${key}) from IndexedDB:`, err);
+    console.warn(`Could not delete (${key}) from IndexedDB:`, err);
   }
+}
+
+function setAutoReconnectPreference(enabled) {
+  autoReconnectEnabled = Boolean(enabled);
+  localStorage.setItem(AUTO_RECONNECT_STORAGE_KEY, autoReconnectEnabled ? 'true' : 'false');
+  if (chkAutoReconnect) chkAutoReconnect.checked = autoReconnectEnabled;
+  if (chkAutoReconnectBar) chkAutoReconnectBar.checked = autoReconnectEnabled;
+}
+
+if (chkAutoReconnect) {
+  chkAutoReconnect.checked = autoReconnectEnabled;
+  chkAutoReconnect.addEventListener('change', (e) => {
+    setAutoReconnectPreference(e.target.checked);
+    showToast(
+      autoReconnectEnabled
+        ? '⚡ Auto-Reconnect on Startup enabled.'
+        : 'Auto-Reconnect on Startup disabled.',
+      'info'
+    );
+  });
+}
+
+if (chkAutoReconnectBar) {
+  chkAutoReconnectBar.checked = autoReconnectEnabled;
+  chkAutoReconnectBar.addEventListener('change', (e) => {
+    setAutoReconnectPreference(e.target.checked);
+    showToast(
+      autoReconnectEnabled
+        ? '⚡ Auto-Reconnect on Startup enabled.'
+        : 'Auto-Reconnect on Startup disabled.',
+      'info'
+    );
+  });
+}
+
+function updateAgentDirUI() {
+  if (parentDirHandle) {
+    menuSelectAgentFolder.innerHTML = `<span>📂 Tracker Folder: ${escapeHtml(parentDirHandle.name)}</span>`;
+    menuSelectAgentFolder.classList.add('custom-active');
+    if (btnResetAgentDir) btnResetAgentDir.style.display = 'inline-block';
+  } else if (cachedDirHandle) {
+    menuSelectAgentFolder.innerHTML = `<span>📂 Reconnect Tracker: ${escapeHtml(cachedDirHandle.name)}</span>`;
+    menuSelectAgentFolder.classList.add('custom-active');
+    if (btnResetAgentDir) btnResetAgentDir.style.display = 'inline-block';
+  } else {
+    menuSelectAgentFolder.innerHTML = '<span>📂 Tracker Workbooks Folder...</span>';
+    menuSelectAgentFolder.classList.remove('custom-active');
+    if (btnResetAgentDir) btnResetAgentDir.style.display = 'none';
+  }
+  updateFilePathsBarUI();
+  updateStatusBarTelemetry();
 }
 
 function updateSupervisorDirUI() {
@@ -461,28 +629,253 @@ function updateSupervisorDirUI() {
     btnSupervisorDir.classList.remove('custom-active');
     btnResetSupervisorDir.style.display = 'none';
   }
+  updateFilePathsBarUI();
   updateStatusBarTelemetry();
+}
+
+function updateTemplatesDirUI() {
+  if (templatesDirHandle) {
+    const countSuffix = availableTemplates.length > 0 ? ` (${availableTemplates.length})` : '';
+    btnTemplatesDir.textContent = `📋 Templates Folder: ${templatesDirHandle.name}${countSuffix}`;
+    btnTemplatesDir.title = `Using templates from "${templatesDirHandle.name}". Click to change folder.`;
+    btnTemplatesDir.classList.add('custom-active');
+    btnResetTemplatesDir.style.display = 'inline-block';
+  } else if (cachedTemplatesDirHandle) {
+    btnTemplatesDir.textContent = `📋 Reconnect Templates: ${cachedTemplatesDirHandle.name}`;
+    btnTemplatesDir.title = `Click to reconnect saved Templates folder "${cachedTemplatesDirHandle.name}"`;
+    btnTemplatesDir.classList.add('custom-active');
+    btnResetTemplatesDir.style.display = 'inline-block';
+  } else {
+    btnTemplatesDir.textContent = '📋 Templates Folder: Built-in Default';
+    btnTemplatesDir.title = 'Select folder containing master .xlsx templates for new monthly workbooks';
+    btnTemplatesDir.classList.remove('custom-active');
+    btnResetTemplatesDir.style.display = 'none';
+  }
+  updateFilePathsBarUI();
+  updateStatusBarTelemetry();
+}
+
+function updateFilePathsBarUI() {
+  const agentFolderName = parentDirHandle
+    ? parentDirHandle.name
+    : (cachedDirHandle ? `${cachedDirHandle.name} (cached)` : null);
+
+  const supFolderName = supervisorDirHandle
+    ? supervisorDirHandle.name
+    : (cachedSupervisorDirHandle
+        ? `${cachedSupervisorDirHandle.name} (cached)`
+        : (parentDirHandle ? parentDirHandle.name : (cachedDirHandle ? `${cachedDirHandle.name} (cached)` : null)));
+
+  const wbName = workingFileHandle
+    ? workingFileHandle.name
+    : (lastSavedWorkbookName || null);
+
+  if (pathTrackerText) {
+    if (parentDirHandle && workingFileHandle) {
+      pathTrackerText.textContent = `${parentDirHandle.name}\\${workingFileHandle.name}`;
+    } else if (parentDirHandle) {
+      pathTrackerText.textContent = `${parentDirHandle.name}\\(No workbook selected)`;
+    } else if (agentFolderName && wbName) {
+      pathTrackerText.textContent = `${agentFolderName}\\${wbName}`;
+    } else if (agentFolderName) {
+      pathTrackerText.textContent = `${agentFolderName}\\`;
+    } else {
+      pathTrackerText.textContent = 'Not connected';
+    }
+  }
+
+  if (pathViewOnlyText) {
+    if ((supervisorDirHandle || parentDirHandle) && workingFileHandle) {
+      const mirrorDir = supervisorDirHandle ? supervisorDirHandle.name : parentDirHandle.name;
+      const mirrorFile = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
+      pathViewOnlyText.textContent = `${mirrorDir}\\${mirrorFile}`;
+    } else if (supFolderName && wbName) {
+      const mirrorFile = wbName.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
+      pathViewOnlyText.textContent = `${supFolderName}\\${mirrorFile}`;
+    } else if (supFolderName) {
+      pathViewOnlyText.textContent = `${supFolderName}\\*(VIEW ONLY).xlsx`;
+    } else {
+      pathViewOnlyText.textContent = 'Not connected';
+    }
+  }
+
+  const tplName = templatesDirHandle
+    ? `${templatesDirHandle.name}\\ (${availableTemplates.length} template${availableTemplates.length === 1 ? '' : 's'})`
+    : (cachedTemplatesDirHandle ? `${cachedTemplatesDirHandle.name}\\ (cached)` : null);
+
+  if (pathTemplatesItem && pathTemplatesSep && pathTemplatesText) {
+    if (tplName) {
+      pathTemplatesSep.style.display = 'inline';
+      pathTemplatesItem.style.display = 'inline-flex';
+      pathTemplatesText.textContent = tplName;
+    } else {
+      pathTemplatesSep.style.display = 'none';
+      pathTemplatesItem.style.display = 'none';
+    }
+  }
+
+  const canOpenViewOnly = Boolean((parentDirHandle || supervisorDirHandle) && workingFileHandle);
+  if (btnOpenViewOnly) {
+    btnOpenViewOnly.style.display = canOpenViewOnly ? 'inline-block' : 'none';
+  }
+  if (menuOpenViewOnly) {
+    menuOpenViewOnly.disabled = !canOpenViewOnly;
+  }
+}
+
+async function scanTemplatesDirectory() {
+  availableTemplates = [];
+  if (!templatesDirHandle) {
+    updateTemplatesDirUI();
+    return;
+  }
+  try {
+    for await (const entry of templatesDirHandle.values()) {
+      if (entry.kind !== 'file') continue;
+      const name = entry.name;
+      const lower = name.toLowerCase();
+      if (lower.endsWith('.xlsx') && !name.startsWith('~$') && !lower.endsWith('(view only).xlsx')) {
+        const f = await entry.getFile();
+        availableTemplates.push({
+          name,
+          handle: entry,
+          lastModified: f.lastModified
+        });
+      }
+    }
+    availableTemplates.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    console.warn('Could not scan templates directory:', err);
+  }
+  updateTemplatesDirUI();
+}
+
+async function attemptReconnectFolders({ requestPermissionIfNeeded = true, silent = false } = {}) {
+  if (!cachedDirHandle) return false;
+  try {
+    let perm = await cachedDirHandle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted' && requestPermissionIfNeeded) {
+      perm = await cachedDirHandle.requestPermission({ mode: 'readwrite' });
+    }
+    if (perm !== 'granted') {
+      return false;
+    }
+
+    parentDirHandle = cachedDirHandle;
+    autoReconnectGesturePending = false;
+    btnReconnect.style.display = 'none';
+    btnLinkFile.style.display = 'none';
+    btnNewWorkbook.disabled = false;
+
+    if (cachedSupervisorDirHandle && !supervisorDirHandle) {
+      try {
+        let supPerm = await cachedSupervisorDirHandle.queryPermission({ mode: 'readwrite' });
+        if (supPerm !== 'granted' && requestPermissionIfNeeded) {
+          supPerm = await cachedSupervisorDirHandle.requestPermission({ mode: 'readwrite' });
+        }
+        if (supPerm === 'granted') {
+          supervisorDirHandle = cachedSupervisorDirHandle;
+        }
+      } catch (supErr) {
+        console.warn('Could not reconnect supervisor folder:', supErr);
+      }
+    }
+
+    if (cachedTemplatesDirHandle && !templatesDirHandle) {
+      try {
+        let tplPerm = await cachedTemplatesDirHandle.queryPermission({ mode: 'read' });
+        if (tplPerm !== 'granted' && requestPermissionIfNeeded) {
+          tplPerm = await cachedTemplatesDirHandle.requestPermission({ mode: 'read' });
+        }
+        if (tplPerm === 'granted') {
+          templatesDirHandle = cachedTemplatesDirHandle;
+          await scanTemplatesDirectory();
+        }
+      } catch (tplErr) {
+        console.warn('Could not reconnect templates folder:', tplErr);
+      }
+    }
+
+    updateAgentDirUI();
+    updateSupervisorDirUI();
+    updateTemplatesDirUI();
+
+    await scanDirectoryAndLoadWorkbooks(lastSavedWorkbookName);
+    return true;
+  } catch (err) {
+    if (!silent) {
+      console.error('Reconnect folder error:', err);
+      await showModalAlert({
+        title: 'Could Not Reconnect Folder',
+        message: err.message
+      });
+    }
+    return false;
+  }
 }
 
 async function initCachedDirectoryHandles() {
   if (!('indexedDB' in window)) return;
-  const savedAgentHandle = await getHandleFromIDB(IDB_AGENT_KEY);
+  const [savedAgentHandle, savedSupHandle, savedTplHandle, savedWbName] = await Promise.all([
+    getHandleFromIDB(IDB_AGENT_KEY),
+    getHandleFromIDB(IDB_SUPERVISOR_KEY),
+    getHandleFromIDB(IDB_TEMPLATES_KEY),
+    getHandleFromIDB(IDB_LAST_WORKBOOK_KEY)
+  ]);
+
+  if (savedWbName && typeof savedWbName === 'string') {
+    lastSavedWorkbookName = savedWbName;
+  }
+  if (savedSupHandle) {
+    cachedSupervisorDirHandle = savedSupHandle;
+  }
+  if (savedTplHandle) {
+    cachedTemplatesDirHandle = savedTplHandle;
+  }
   if (savedAgentHandle) {
     cachedDirHandle = savedAgentHandle;
     btnReconnect.textContent = `🔄 Reconnect Folder (${savedAgentHandle.name})`;
     btnReconnect.style.display = 'inline-block';
   }
 
-  const savedSupHandle = await getHandleFromIDB(IDB_SUPERVISOR_KEY);
-  if (savedSupHandle) {
-    cachedSupervisorDirHandle = savedSupHandle;
-  }
+  updateAgentDirUI();
   updateSupervisorDirUI();
+  updateTemplatesDirUI();
+
+  if (savedAgentHandle && autoReconnectEnabled) {
+    const connectedImmediately = await attemptReconnectFolders({
+      requestPermissionIfNeeded: false,
+      silent: true
+    });
+    if (!connectedImmediately) {
+      // Browser requires a user gesture after full restart before requestPermission() can fire.
+      autoReconnectGesturePending = true;
+      btnReconnect.textContent = `⚡ Auto-Reconnect (${savedAgentHandle.name})`;
+      setStatus('Click anywhere to auto-reconnect folder', 'warning');
+
+      const onFirstUserGesture = async (evt) => {
+        if (!autoReconnectGesturePending || !autoReconnectEnabled || parentDirHandle) return;
+        // Ignore if user is explicitly unchecking the auto-reconnect toggle or picking a new folder
+        if (
+          evt.target.closest('#chkAutoReconnect') ||
+          evt.target.closest('#chkAutoReconnectBar') ||
+          evt.target.closest('#btnLinkFile') ||
+          evt.target.closest('#menuSelectAgentFolder') ||
+          evt.target.closest('#btnResetAgentDir')
+        ) {
+          return;
+        }
+        autoReconnectGesturePending = false;
+        await attemptReconnectFolders({ requestPermissionIfNeeded: true, silent: true });
+      };
+      document.addEventListener('click', onFirstUserGesture, { once: true });
+    }
+  }
 }
 
 initCachedDirectoryHandles();
 
-// --- 1. DIRECTORY SELECTION, SUPERVISOR EXPORT FOLDER & WORKBOOK DISCOVERY ---
+// --- 1. DIRECTORY SELECTION, SUPERVISOR EXPORT FOLDER, TEMPLATES FOLDER & WORKBOOK DISCOVERY ---
 async function promptSelectAgentFolder() {
   closeToolsMenu();
   try {
@@ -495,10 +888,12 @@ async function promptSelectAgentFolder() {
     const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
     parentDirHandle = dirHandle;
     cachedDirHandle = dirHandle;
+    autoReconnectGesturePending = false;
     await saveHandleToIDB(IDB_AGENT_KEY, dirHandle);
     btnReconnect.style.display = 'none';
     btnLinkFile.style.display = 'none';
     btnNewWorkbook.disabled = false;
+    updateAgentDirUI();
     await scanDirectoryAndLoadWorkbooks();
   } catch (err) {
     if (err.name !== 'AbortError') {
@@ -513,46 +908,40 @@ async function promptSelectAgentFolder() {
 btnLinkFile.addEventListener('click', promptSelectAgentFolder);
 menuSelectAgentFolder.addEventListener('click', promptSelectAgentFolder);
 
+if (btnResetAgentDir) {
+  btnResetAgentDir.addEventListener('click', async () => {
+    closeToolsMenu();
+    parentDirHandle = null;
+    cachedDirHandle = null;
+    workingFileHandle = null;
+    workbook = null;
+    availableWorkbooks = [];
+    lastSavedWorkbookName = null;
+    autoReconnectGesturePending = false;
+    await deleteHandleFromIDB(IDB_AGENT_KEY);
+    await deleteHandleFromIDB(IDB_LAST_WORKBOOK_KEY);
+    workbookPickerWrap.style.display = 'none';
+    btnReconnect.style.display = 'none';
+    btnLinkFile.style.display = 'inline-block';
+    btnNewEntry.style.display = 'none';
+    btnRollover.style.display = 'none';
+    if (bottomEditorDock) bottomEditorDock.style.display = 'none';
+    sheetTabsBar.style.display = 'none';
+    schemaBanner.style.display = 'none';
+    setStatus('No Folder Linked', '');
+    updateAgentDirUI();
+    listBody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Select Agent Folder" to connect your tracker directory.</td></tr>';
+    showToast('Cleared saved Tracker Workbooks folder.', 'info');
+  });
+}
+
 btnReconnect.addEventListener('click', async () => {
   if (!cachedDirHandle) return;
-  try {
-    let perm = await cachedDirHandle.queryPermission({ mode: 'readwrite' });
-    if (perm !== 'granted') {
-      perm = await cachedDirHandle.requestPermission({ mode: 'readwrite' });
-    }
-    if (perm === 'granted') {
-      parentDirHandle = cachedDirHandle;
-      btnReconnect.style.display = 'none';
-      btnLinkFile.style.display = 'none';
-      btnNewWorkbook.disabled = false;
-
-      if (cachedSupervisorDirHandle && !supervisorDirHandle) {
-        try {
-          let supPerm = await cachedSupervisorDirHandle.queryPermission({ mode: 'readwrite' });
-          if (supPerm !== 'granted') {
-            supPerm = await cachedSupervisorDirHandle.requestPermission({ mode: 'readwrite' });
-          }
-          if (supPerm === 'granted') {
-            supervisorDirHandle = cachedSupervisorDirHandle;
-          }
-        } catch (supErr) {
-          console.warn('Could not auto-reconnect supervisor folder:', supErr);
-        }
-        updateSupervisorDirUI();
-      }
-
-      await scanDirectoryAndLoadWorkbooks();
-    } else {
-      await showModalAlert({
-        title: 'Permission Required',
-        message: 'Read/Write permission was not granted for the folder.'
-      });
-    }
-  } catch (err) {
-    console.error('Reconnect folder error:', err);
+  const ok = await attemptReconnectFolders({ requestPermissionIfNeeded: true, silent: false });
+  if (!ok) {
     await showModalAlert({
-      title: 'Could Not Reconnect Folder',
-      message: err.message
+      title: 'Permission Required',
+      message: 'Read/Write permission was not granted for the folder.'
     });
   }
 });
@@ -613,6 +1002,59 @@ btnResetSupervisorDir.addEventListener('click', async () => {
   updateSupervisorDirUI();
   showToast('Supervisor (VIEW ONLY) export reset to Agent workbook folder.', 'info');
 });
+
+if (btnTemplatesDir) {
+  btnTemplatesDir.addEventListener('click', async () => {
+    closeToolsMenu();
+    try {
+      if (typeof window.showDirectoryPicker !== 'function') {
+        return showModalAlert({
+          title: 'Browser Not Supported',
+          message: 'Your browser does not support showDirectoryPicker. Please use Chrome or Edge over localhost or HTTPS.'
+        });
+      }
+
+      if (cachedTemplatesDirHandle && !templatesDirHandle) {
+        let perm = await cachedTemplatesDirHandle.queryPermission({ mode: 'read' });
+        if (perm !== 'granted') {
+          perm = await cachedTemplatesDirHandle.requestPermission({ mode: 'read' });
+        }
+        if (perm === 'granted') {
+          templatesDirHandle = cachedTemplatesDirHandle;
+          await scanTemplatesDirectory();
+          showToast(`Reconnected Templates folder: "${templatesDirHandle.name}" (${availableTemplates.length} template(s))`, 'success');
+          return;
+        }
+      }
+
+      const tplDir = await window.showDirectoryPicker({ mode: 'read' });
+      templatesDirHandle = tplDir;
+      cachedTemplatesDirHandle = tplDir;
+      await saveHandleToIDB(IDB_TEMPLATES_KEY, tplDir);
+      await scanTemplatesDirectory();
+      showToast(`Templates folder set to "${tplDir.name}" (${availableTemplates.length} .xlsx template(s) found)`, 'success');
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        await showModalAlert({
+          title: 'Templates Folder Error',
+          message: 'Could not select Templates folder: ' + err.message
+        });
+      }
+    }
+  });
+}
+
+if (btnResetTemplatesDir) {
+  btnResetTemplatesDir.addEventListener('click', async () => {
+    closeToolsMenu();
+    templatesDirHandle = null;
+    cachedTemplatesDirHandle = null;
+    availableTemplates = [];
+    await deleteHandleFromIDB(IDB_TEMPLATES_KEY);
+    updateTemplatesDirUI();
+    showToast('Templates folder reset to built-in default schema.', 'info');
+  });
+}
 
 function extractMonthYearWeight(fileName, fallbackLastModified) {
   const months = {
@@ -721,6 +1163,9 @@ async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
 
   workbookSelect.value = String(selectedIdx);
   workingFileHandle = availableWorkbooks[selectedIdx].handle;
+  lastSavedWorkbookName = workingFileHandle.name;
+  await saveHandleToIDB(IDB_LAST_WORKBOOK_KEY, workingFileHandle.name);
+  updateFilePathsBarUI();
 
   await loadWorkbookFromDisk();
 }
@@ -729,11 +1174,13 @@ workbookSelect.addEventListener('change', async () => {
   const idx = Number(workbookSelect.value);
   if (availableWorkbooks[idx]) {
     workingFileHandle = availableWorkbooks[idx].handle;
-    activeKeyFilter = null;
-    activeFieldFilter = null;
-    filterBanner.style.display = 'none';
+    lastSavedWorkbookName = workingFileHandle.name;
+    await saveHandleToIDB(IDB_LAST_WORKBOOK_KEY, workingFileHandle.name);
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
+    dockEditingTarget = null;
     clearMirrorRetryState();
     setDeleteMode(false);
+    updateFilePathsBarUI();
     try {
       await loadWorkbookFromDisk();
     } catch (err) {
@@ -1470,6 +1917,23 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     indexWorksheetRows(worksheet, rawName);
   });
 
+  // Also enrich masterAccountsMap from existing daily rows so Broker <-> Master # auto-fill works even without a Master Accounts tab
+  const seenAccountKeys = new Set(
+    masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
+  );
+  allRows.forEach(r => {
+    if (!r.broker && !r.master) return;
+    const k = `${r.broker.toLowerCase()}::${r.master.toLowerCase()}`;
+    if (!seenAccountKeys.has(k)) {
+      seenAccountKeys.add(k);
+      masterAccountsMap.push({
+        broker: r.broker,
+        master: r.master.toUpperCase(),
+        bidder: r.bidder ? r.bidder.toUpperCase() : ''
+      });
+    }
+  });
+
   populateReferenceControls();
 
   // Sort date tabs newest first for UI dropdown
@@ -1490,13 +1954,17 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   btnRenameTab.disabled = dateSheets.length === 0;
   btnDeleteTab.disabled = dateSheets.length === 0;
   btnDeleteMode.disabled = allRows.length === 0;
+  if (bottomEditorDock) {
+    bottomEditorDock.style.display = 'block';
+    syncBottomDockStateAfterLoad();
+  }
+  updateFilePathsBarUI();
 
-  // Check if workbook is a fresh template with "Rename to Current Date" or missing reference tabs
+  // Check if workbook is a fresh template with "Rename to Current Date" or missing reference tabs (Master Accounts is optional)
   const missingParts = [];
   if (dateSheets.length === 0 && !placeholderDateSheet) missingParts.push('Daily MM-DD-YYYY Tab');
   if (!hasTemplate) missingParts.push('template');
   if (!hasValidation) missingParts.push('validation lists');
-  if (!hasMasterAccounts) missingParts.push('Master Accounts');
 
   if (dateSheets.length === 0 && placeholderDateSheet && missingParts.length === 0) {
     const todayStr = getTodayFormatted();
@@ -1666,7 +2134,6 @@ function bootstrapWorkbookSchemaInMemory(wb) {
   const todayStr = getTodayFormatted();
   let templateWs = null;
   let validationWs = null;
-  let masterWs = null;
   let placeholderDateWs = null;
   let hasAnyDateTab = false;
 
@@ -1677,7 +2144,6 @@ function bootstrapWorkbookSchemaInMemory(wb) {
     else if (isTemplatePlaceholderTab(raw)) placeholderDateWs = ws;
     else if (lower === 'template') templateWs = ws;
     else if (lower === 'validation lists' || lower === 'validation list') validationWs = ws;
-    else if (lower === 'master accounts' || lower === 'master account') masterWs = ws;
   });
 
   // 1. Ensure template sheet exists (preserve existing Template columns if already present)
@@ -1712,21 +2178,9 @@ function bootstrapWorkbookSchemaInMemory(wb) {
     }
   }
 
-  // 3. Ensure Master Accounts sheet exists
-  if (!masterWs) {
-    masterWs = wb.addWorksheet('Master Accounts');
-    masterWs.getColumn(1).width = 28;
-    masterWs.getColumn(2).width = 16;
-    masterWs.getColumn(3).width = 18;
-    const hRow = masterWs.getRow(1);
-    hRow.getCell(1).value = 'Broker Name';
-    hRow.getCell(2).value = 'Master#';
-    hRow.getCell(3).value = 'Default Bidder#';
-    hRow.font = { bold: true };
-    hRow.commit();
-  }
+  // Note: Master Accounts sheet is intentionally excluded when creating/bootstrapping monthly workbooks.
 
-  // 4. Ensure at least one MM-DD-YYYY daily tab exists:
+  // 3. Ensure at least one MM-DD-YYYY daily tab exists:
   //    If the workbook has "Rename to Current Date", rename it in-place to today's date so all 74 template rows & formulas stay intact!
   let createdDateTab = null;
   if (!hasAnyDateTab) {
@@ -1745,7 +2199,7 @@ function bootstrapWorkbookSchemaInMemory(wb) {
     }
   }
 
-  // 5. Remove default empty "Sheet1" if it is completely blank and other sheets exist
+  // 4. Remove default empty "Sheet1" if it is completely blank and other sheets exist
   const sheet1 = wb.getWorksheet('Sheet1');
   if (sheet1 && wb.worksheets.length > 1) {
     let sheet1HasData = false;
@@ -1771,14 +2225,36 @@ async function promptCreateNewWorkbook() {
     });
   }
 
+  if (templatesDirHandle) {
+    await scanTemplatesDirectory();
+  }
+
   const now = new Date();
   const monthName = now.toLocaleString('en-US', { month: 'long' });
   const defaultFileName = `Agent Bidder Support Tracker - ${monthName} ${now.getFullYear()}.xlsx`;
 
-  const rawName = await showModalPrompt({
+  let selectOptions = null;
+  if (availableTemplates.length > 0) {
+    selectOptions = [
+      ...availableTemplates.map((t, idx) => ({
+        value: `tpl::${idx}`,
+        label: `📋 From Templates Folder: ${t.name}`
+      })),
+      {
+        value: 'builtin',
+        label: '✨ Built-in Standard Schema (template, validation lists & today\'s tab — no Master Accounts)'
+      }
+    ];
+  }
+
+  const promptResult = await showModalPrompt({
     title: '✨ Create New Monthly Workbook',
     badge: parentDirHandle.name,
-    message: 'Enter a filename for the new Excel tracker workbook (.xlsx). It will be initialized with template, validation lists, Master Accounts, and today\'s daily tab.',
+    message: availableTemplates.length > 0
+      ? `Choose a template from "${templatesDirHandle.name}" or the built-in schema, and enter a filename for the new monthly tracker (.xlsx):`
+      : 'Enter a filename for the new Excel tracker workbook (.xlsx). It will be initialized with template, validation lists, and today\'s daily tab (Master Accounts excluded).',
+    selectLabel: 'Workbook Blueprint / Template Source',
+    selectOptions,
     inputLabel: 'Workbook Filename (.xlsx)',
     defaultValue: defaultFileName,
     confirmText: '✨ Create Workbook',
@@ -1791,7 +2267,10 @@ async function promptCreateNewWorkbook() {
       return null;
     }
   });
-  if (!rawName) return;
+  if (!promptResult) return;
+
+  const rawName = typeof promptResult === 'object' ? promptResult.value : promptResult;
+  const chosenSource = typeof promptResult === 'object' ? promptResult.selectValue : 'builtin';
 
   let fileName = rawName.trim();
   if (!fileName.toLowerCase().endsWith('.xlsx')) {
@@ -1818,8 +2297,23 @@ async function promptCreateNewWorkbook() {
       if (!overwrite) return;
     }
 
-    originalArchiveState = null;
     const newWb = new ExcelJS.Workbook();
+    if (chosenSource && chosenSource.startsWith('tpl::')) {
+      const tplIdx = parseInt(chosenSource.replace('tpl::', ''), 10);
+      const tplEntry = availableTemplates[tplIdx];
+      if (tplEntry && tplEntry.handle) {
+        const tplFile = await tplEntry.handle.getFile();
+        const tplBuffer = await tplFile.arrayBuffer();
+        originalArchiveState = await captureOriginalArchiveState(tplBuffer);
+        const sanitizedTpl = sanitizeXlsxBufferForExcelJS(tplBuffer);
+        await newWb.xlsx.load(sanitizedTpl);
+      } else {
+        originalArchiveState = null;
+      }
+    } else {
+      originalArchiveState = null;
+    }
+
     bootstrapWorkbookSchemaInMemory(newWb);
 
     const newFileHandle = await parentDirHandle.getFileHandle(fileName, { create: true });
@@ -1828,7 +2322,7 @@ async function promptCreateNewWorkbook() {
 
     const saved = await saveWorkbookToDisk();
     if (saved) {
-      showToast(`Bootstrapped new workbook: "${fileName}"`, 'success');
+      showToast(`Created new monthly workbook: "${fileName}"`, 'success');
       await scanDirectoryAndLoadWorkbooks(fileName);
     }
   } catch (err) {
@@ -1917,7 +2411,7 @@ btnAddBlankTab.addEventListener('click', async () => {
     }
   });
   if (!rawInput) return;
-  const newTabName = rawInput.trim();
+  const newTabName = (typeof rawInput === 'object' ? rawInput.value : rawInput).trim();
 
   await loadWorkbookFromDisk(sheetSelect.value);
   if (workbook.getWorksheet(newTabName)) {
@@ -1948,6 +2442,7 @@ btnAddBlankTab.addEventListener('click', async () => {
 
   const saved = await saveWorkbookToDisk();
   if (saved) {
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     await loadWorkbookFromDisk(newTabName, {
       preserveStatus: saved === 'mirror-locked'
     });
@@ -1984,7 +2479,7 @@ btnRenameTab.addEventListener('click', async () => {
     }
   });
   if (!rawNewName) return;
-  const newTabName = rawNewName.trim();
+  const newTabName = (typeof rawNewName === 'object' ? rawNewName.value : rawNewName).trim();
 
   if (newTabName === currentTab) return;
 
@@ -2007,6 +2502,7 @@ btnRenameTab.addEventListener('click', async () => {
   ws.name = newTabName;
   const saved = await saveWorkbookToDisk();
   if (saved) {
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     await loadWorkbookFromDisk(newTabName, {
       preserveStatus: saved === 'mirror-locked'
     });
@@ -2031,7 +2527,7 @@ btnDeleteTab.addEventListener('click', async () => {
     message:
       `Are you sure you want to permanently delete worksheet tab "${currentTab}"?\n\n` +
       `This tab currently contains ${rowsOnTab.length} request(s).\n` +
-      `Reference tabs (template, validation lists, Master Accounts) will not be affected.`,
+      `Reference tabs (template, validation lists) will not be affected.`,
     confirmText: '🗑️ Delete Tab',
     variant: 'danger'
   });
@@ -2055,6 +2551,7 @@ btnDeleteTab.addEventListener('click', async () => {
 
   const saved = await saveWorkbookToDisk();
   if (saved) {
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     await loadWorkbookFromDisk(null, {
       preserveStatus: saved === 'mirror-locked'
     });
@@ -2124,6 +2621,22 @@ function parseMasterAccountsSheet(worksheet) {
   });
 }
 
+function populateSelectWithStatuses(selectEl) {
+  if (!selectEl) return;
+  const statusesToUse = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
+  const currentSelected = selectEl.value;
+  selectEl.innerHTML = '';
+  statusesToUse.forEach(st => {
+    const opt = document.createElement('option');
+    opt.value = st;
+    opt.textContent = st;
+    selectEl.appendChild(opt);
+  });
+  if (currentSelected && statusesToUse.includes(currentSelected)) {
+    selectEl.value = currentSelected;
+  }
+}
+
 function populateReferenceControls() {
   const actionsToUse = validationActions.length > 0 ? validationActions : DEFAULT_ACTIONS;
   actionListEl.innerHTML = '';
@@ -2133,18 +2646,8 @@ function populateReferenceControls() {
     actionListEl.appendChild(opt);
   });
 
-  const statusesToUse = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
-  const currentSelected = fStatus.value;
-  fStatus.innerHTML = '';
-  statusesToUse.forEach(st => {
-    const opt = document.createElement('option');
-    opt.value = st;
-    opt.textContent = st;
-    fStatus.appendChild(opt);
-  });
-  if (currentSelected && statusesToUse.includes(currentSelected)) {
-    fStatus.value = currentSelected;
-  }
+  populateSelectWithStatuses(fStatus);
+  populateSelectWithStatuses(dockStatus);
 
   brokerListEl.innerHTML = '';
   const uniqueBrokers = Array.from(new Set(masterAccountsMap.map(m => m.broker).filter(Boolean)));
@@ -2155,40 +2658,47 @@ function populateReferenceControls() {
   });
 }
 
-function handleBrokerAutoFill() {
-  const typedBroker = fBroker.value.trim().toLowerCase();
+function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl, bidderInputEl) {
+  const typedBroker = brokerInputEl.value.trim().toLowerCase();
   if (!typedBroker) return;
 
   const match = masterAccountsMap.find(m => m.broker.toLowerCase() === typedBroker);
   if (match) {
-    if (!fMaster.value.trim() && match.master) {
-      fMaster.value = match.master;
+    if (!masterInputEl.value.trim() && match.master) {
+      masterInputEl.value = match.master;
     }
-    if (!fBidder.value.trim() && match.bidder) {
-      fBidder.value = match.bidder;
+    if (!bidderInputEl.value.trim() && match.bidder) {
+      bidderInputEl.value = match.bidder;
     }
   }
 }
 
-function handleMasterReverseAutoFill() {
-  const typedMaster = fMaster.value.trim().toLowerCase();
+function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl, bidderInputEl) {
+  const typedMaster = masterInputEl.value.trim().toLowerCase();
   if (!typedMaster) return;
 
   const match = masterAccountsMap.find(m => m.master.toLowerCase() === typedMaster);
   if (match) {
-    if (!fBroker.value.trim() && match.broker) {
-      fBroker.value = match.broker;
+    if (!brokerInputEl.value.trim() && match.broker) {
+      brokerInputEl.value = match.broker;
     }
-    if (!fBidder.value.trim() && match.bidder) {
-      fBidder.value = match.bidder;
+    if (!bidderInputEl.value.trim() && match.bidder) {
+      bidderInputEl.value = match.bidder;
     }
   }
 }
 
-fBroker.addEventListener('input', handleBrokerAutoFill);
-fBroker.addEventListener('change', handleBrokerAutoFill);
-fMaster.addEventListener('input', handleMasterReverseAutoFill);
-fMaster.addEventListener('change', handleMasterReverseAutoFill);
+fBroker.addEventListener('input', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder));
+fBroker.addEventListener('change', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder));
+fMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder));
+fMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder));
+
+if (dockBroker && dockMaster && dockBidder) {
+  dockBroker.addEventListener('input', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder));
+  dockBroker.addEventListener('change', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder));
+  dockMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder));
+  dockMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder));
+}
 
 // --- INDEX WORKSHEET ROWS & LEGACY GUID BACKFILL ---
 function indexWorksheetRows(worksheet, sheetName) {
@@ -2343,6 +2853,18 @@ function updateSheetStepperState() {
   }
 }
 
+// Natural Filter Auto-Clearing when navigating tabs, steppers, scope, or workbooks
+function clearTransientFiltersOnNavigation({ resetScopeToCurrent = true } = {}) {
+  activeKeyFilter = null;
+  activeFieldFilter = null;
+  if (searchInput && searchInput.value) {
+    searchInput.value = '';
+  }
+  if (resetScopeToCurrent && scopeSelect && scopeSelect.value !== 'current') {
+    scopeSelect.value = 'current';
+  }
+}
+
 function renderSheetTabsBar() {
   if (dateSheets.length === 0) {
     sheetTabsBar.style.display = 'none';
@@ -2371,6 +2893,7 @@ function renderSheetTabsBar() {
       <span class="sheet-tab-count">${count}</span>
     `;
     pill.addEventListener('click', () => {
+      clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
       sheetSelect.value = tabName;
       onActiveSheetChanged();
     });
@@ -2386,12 +2909,16 @@ function renderSheetTabsBar() {
 function onActiveSheetChanged() {
   updateSheetStepperState();
   renderSheetTabsBar();
+  if (!dockEditingTarget) {
+    setBottomDockNewMode();
+  }
   renderList();
 }
 
 btnPrevSheet.addEventListener('click', () => {
   const idx = dateSheets.indexOf(sheetSelect.value);
   if (idx !== -1 && idx < dateSheets.length - 1) {
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     sheetSelect.value = dateSheets[idx + 1];
     onActiveSheetChanged();
   }
@@ -2400,12 +2927,16 @@ btnPrevSheet.addEventListener('click', () => {
 btnNextSheet.addEventListener('click', () => {
   const idx = dateSheets.indexOf(sheetSelect.value);
   if (idx > 0) {
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     sheetSelect.value = dateSheets[idx - 1];
     onActiveSheetChanged();
   }
 });
 
-sheetSelect.addEventListener('change', onActiveSheetChanged);
+sheetSelect.addEventListener('change', () => {
+  clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
+  onActiveSheetChanged();
+});
 
 // --- 5. RENDER LIST VIEW, AUTOMATIC GLOBAL SEARCH, & DELETE SELECTION MODE ---
 function getRowCompositeId(sheetName, rowNumber) {
@@ -2526,6 +3057,11 @@ function toggleFieldFilter(field, label, rawValue) {
   const val = String(rawValue || '').trim();
   if (!val || val === '—') return;
 
+  // Naturally clear search box when clicking a Like-Item or Key filter chip
+  if (searchInput && searchInput.value) {
+    searchInput.value = '';
+  }
+
   if (
     activeFieldFilter &&
     activeFieldFilter.field === field &&
@@ -2610,7 +3146,6 @@ function updateSortAndFilterUI(matchCount) {
   // 3. Update Filter / Sort Banner above Table
   if (activeFilter || hasSort) {
     filterBanner.style.display = 'flex';
-    const parts = [];
     if (activeFilter) {
       filterBannerTitle.textContent = activeFilter.field === 'key' ? 'History Trace Active:' : 'Like-Item Filter Active:';
       filterBannerDesc.textContent = `Showing all daily entries matching ${activeFilter.label}`;
@@ -2703,10 +3238,20 @@ function renderList() {
 
   sorted.forEach((item, idx) => {
     const tr = document.createElement('tr');
+    tr.dataset.sheet = item.sheetName;
+    tr.dataset.row = String(item.rowNumber);
+
     const compId = getRowCompositeId(item.sheetName, item.rowNumber);
     const isCheckedForDelete = isDeleteMode && selectedForDelete.has(compId);
     if (isCheckedForDelete) {
       tr.classList.add('selected-for-delete');
+    }
+    if (
+      dockEditingTarget &&
+      dockEditingTarget.sheetName === item.sheetName &&
+      dockEditingTarget.rowNumber === item.rowNumber
+    ) {
+      tr.classList.add('active-editing-row');
     }
 
     const isComplete = isCompletedStatus(item.status);
@@ -2792,7 +3337,10 @@ function renderList() {
         </span>
       </td>
       <td>
-        <button class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}">Edit</button>
+        <div class="row-actions-wrap">
+          <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Ticket Details &amp; Aggregated Timestamped Notes">📋 Details</button>
+          <button type="button" class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="Load into Bottom Editor (Double-click for Modal)">Edit</button>
+        </div>
       </td>
     `;
     listBody.appendChild(tr);
@@ -2971,11 +3519,15 @@ if (tableHead) {
   });
 }
 
-// Delegate clicks for Shadow New Request Row, Date Tab jump, Key Chip, Like-Item chips, Collapsible Notes, and Edit button
+// Delegate clicks for Shadow New Request Row, Date Tab jump, Key Chip, Like-Item chips, Collapsible Notes, Details button, Edit button, and Row Selection
 listBody.addEventListener('click', (e) => {
   const shadowRow = e.target.closest('.shadow-new-row');
   if (shadowRow) {
-    openNewRequestModal();
+    if (bottomEditorDock && bottomEditorDock.style.display !== 'none') {
+      setBottomDockNewMode(true);
+    } else {
+      openNewRequestModal();
+    }
     return;
   }
 
@@ -2983,13 +3535,8 @@ listBody.addEventListener('click', (e) => {
   if (dateTabBtn && dateTabBtn.dataset.dateTab) {
     const targetTab = dateTabBtn.dataset.dateTab;
     if (dateSheets.includes(targetTab)) {
+      clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
       sheetSelect.value = targetTab;
-      scopeSelect.value = 'current';
-      activeKeyFilter = null;
-      activeFieldFilter = null;
-      if (searchInput.value) {
-        searchInput.value = '';
-      }
       onActiveSheetChanged();
       showToast(`Switched to daily tab "${targetTab}".`, 'info');
     }
@@ -3022,6 +3569,32 @@ listBody.addEventListener('click', (e) => {
     return;
   }
 
+  const detailsBtn = e.target.closest('.btn-details');
+  if (detailsBtn) {
+    openTicketDetailsModal(detailsBtn.dataset.sheet, Number(detailsBtn.dataset.row));
+    return;
+  }
+
+  const editBtn = e.target.closest('.btn-edit');
+  if (editBtn) {
+    if (bottomEditorDock && bottomEditorDock.style.display !== 'none') {
+      loadRowIntoBottomDock(editBtn.dataset.sheet, Number(editBtn.dataset.row), true);
+    } else {
+      openEditModal(editBtn.dataset.sheet, Number(editBtn.dataset.row));
+    }
+    return;
+  }
+
+  // Clicking anywhere else on a data row populates the Bottom Editor Dock
+  if (!isDeleteMode && !e.target.closest('.chk-delete-row')) {
+    const rowTr = e.target.closest('tr[data-sheet][data-row]');
+    if (rowTr && bottomEditorDock && bottomEditorDock.style.display !== 'none') {
+      loadRowIntoBottomDock(rowTr.dataset.sheet, Number(rowTr.dataset.row), false);
+    }
+  }
+});
+
+listBody.addEventListener('dblclick', (e) => {
   const editBtn = e.target.closest('.btn-edit');
   if (editBtn) {
     openEditModal(editBtn.dataset.sheet, Number(editBtn.dataset.row));
@@ -3033,10 +3606,219 @@ if (btnClearSortFilter) {
   btnClearSortFilter.addEventListener('click', clearAllSortAndFilters);
 }
 
-scopeSelect.addEventListener('change', renderList);
-searchInput.addEventListener('input', renderList);
+scopeSelect.addEventListener('change', () => {
+  clearTransientFiltersOnNavigation({ resetScopeToCurrent: false });
+  renderList();
+});
 
-// --- 6. EDIT & CREATE MODAL + INPUT HYGIENE + CROSS-TAB STATUS PROPAGATION ---
+searchInput.addEventListener('input', () => {
+  if (searchInput.value.trim().length > 0) {
+    activeKeyFilter = null;
+    activeFieldFilter = null;
+  }
+  renderList();
+});
+
+// --- 6. BOTTOM EDITOR DOCK + MODAL EDITOR + CROSS-TAB STATUS PROPAGATION ---
+function ensureSelectOptionExists(selectEl, statusValue) {
+  if (!selectEl || !statusValue) return;
+  const exists = Array.from(selectEl.options).some(opt => opt.value === statusValue);
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = statusValue;
+    opt.textContent = statusValue;
+    selectEl.appendChild(opt);
+  }
+}
+
+function ensureStatusOptionExists(statusValue) {
+  ensureSelectOptionExists(fStatus, statusValue);
+  ensureSelectOptionExists(dockStatus, statusValue);
+}
+
+function formatCurrentTimestampPrefix() {
+  const now = new Date();
+  const datePart = now.toLocaleDateString('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric'
+  });
+  const timePart = now.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  return `[${datePart} ${timePart}]`;
+}
+
+function insertTimestampIntoTextarea(textareaEl) {
+  if (!textareaEl) return;
+  const stamp = `${formatCurrentTimestampPrefix()} `;
+  const current = textareaEl.value.trim();
+  if (!current) {
+    textareaEl.value = stamp;
+  } else {
+    textareaEl.value = `${textareaEl.value.replace(/\s+$/, '')}\n${stamp}`;
+  }
+  textareaEl.focus();
+  textareaEl.setSelectionRange(textareaEl.value.length, textareaEl.value.length);
+}
+
+if (btnDockInsertTimestamp) {
+  btnDockInsertTimestamp.addEventListener('click', () => {
+    insertTimestampIntoTextarea(dockNotes);
+  });
+}
+
+function syncBottomDockStateAfterLoad() {
+  if (!bottomEditorDock) return;
+  if (!workbook || dateSheets.length === 0) {
+    bottomEditorDock.style.display = 'none';
+    dockEditingTarget = null;
+    return;
+  }
+  bottomEditorDock.style.display = 'block';
+
+  if (dockEditingTarget) {
+    const updatedMatch = allRows.find(
+      r =>
+        r.sheetName === dockEditingTarget.sheetName &&
+        (r.rowNumber === dockEditingTarget.rowNumber || r.key === dockEditingTarget.key)
+    );
+    if (updatedMatch) {
+      loadRowIntoBottomDock(updatedMatch.sheetName, updatedMatch.rowNumber, false);
+      return;
+    }
+  }
+  setBottomDockNewMode(false);
+}
+
+function setBottomDockNewMode(focusInput = false) {
+  dockEditingTarget = null;
+  if (!bottomEditorDock) return;
+
+  const activeTab = sheetSelect.value || 'Daily Tab';
+  if (dockModeBadge) {
+    dockModeBadge.textContent = '＋ New Request Mode';
+    dockModeBadge.classList.remove('editing-mode');
+  }
+  if (dockTitleText) {
+    dockTitleText.textContent = `Creating New Support Request on ${activeTab}`;
+  }
+  if (dockTargetMeta) {
+    dockTargetMeta.textContent = '(Click any request row above to populate & edit here)';
+  }
+  if (btnDockTicketDetails) {
+    btnDockTicketDetails.style.display = 'none';
+  }
+  if (btnDockCancelEdit) {
+    btnDockCancelEdit.style.display = 'none';
+  }
+  if (btnDockSave) {
+    btnDockSave.textContent = `💾 Save New Request to ${activeTab}`;
+  }
+
+  if (dockEntryForm) {
+    dockEntryForm.reset();
+  }
+  const defaultSt = getDefaultStatus();
+  ensureStatusOptionExists(defaultSt);
+  if (dockStatus) {
+    dockStatus.value = defaultSt;
+  }
+
+  if (listBody) {
+    listBody.querySelectorAll('tr.active-editing-row').forEach(tr => tr.classList.remove('active-editing-row'));
+  }
+
+  if (focusInput && dockSubject) {
+    bottomEditorDock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setTimeout(() => dockSubject.focus(), 30);
+  }
+}
+
+function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false) {
+  const item = allRows.find(r => r.sheetName === sheetName && r.rowNumber === rowNumber);
+  if (!item || !bottomEditorDock) return;
+
+  bottomEditorDock.style.display = 'block';
+  dockEditingTarget = { sheetName, rowNumber, key: item.key };
+
+  if (dockModeBadge) {
+    dockModeBadge.textContent = '✏️ Editing Selected Row';
+    dockModeBadge.classList.add('editing-mode');
+  }
+  if (dockTitleText) {
+    dockTitleText.textContent = `${item.subject || 'Untitled Request'} (${sheetName} • Row ${rowNumber})`;
+  }
+  if (dockTargetMeta) {
+    dockTargetMeta.textContent = item.ticket ? `Ticket: ${item.ticket}` : `Broker: ${item.broker || '—'}`;
+  }
+  if (btnDockTicketDetails) {
+    btnDockTicketDetails.style.display = 'inline-block';
+  }
+  if (btnDockCancelEdit) {
+    btnDockCancelEdit.style.display = 'inline-block';
+  }
+  if (btnDockSave) {
+    btnDockSave.textContent = `💾 Save Changes (${sheetName} • Row ${rowNumber})`;
+  }
+
+  if (dockSubject) dockSubject.value = item.subject;
+  if (dockTicket) dockTicket.value = item.ticket;
+  if (dockBroker) dockBroker.value = item.broker;
+  if (dockMaster) dockMaster.value = item.master;
+  if (dockBidder) dockBidder.value = item.bidder;
+  if (dockAction) dockAction.value = item.action;
+  if (dockYard) dockYard.value = item.yard;
+  if (dockLots) dockLots.value = item.lots;
+  if (dockNotes) dockNotes.value = item.notes;
+
+  ensureStatusOptionExists(item.status);
+  if (dockStatus) dockStatus.value = item.status;
+
+  if (listBody) {
+    listBody.querySelectorAll('tr').forEach(tr => {
+      const isMatch = tr.dataset.sheet === sheetName && Number(tr.dataset.row) === rowNumber;
+      tr.classList.toggle('active-editing-row', isMatch);
+    });
+  }
+
+  if (focusInput && dockSubject) {
+    bottomEditorDock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setTimeout(() => dockSubject.focus(), 30);
+  }
+}
+
+if (btnDockNewClear) {
+  btnDockNewClear.addEventListener('click', () => {
+    setBottomDockNewMode(true);
+  });
+}
+
+if (btnDockCancelEdit) {
+  btnDockCancelEdit.addEventListener('click', () => {
+    setBottomDockNewMode(false);
+  });
+}
+
+if (btnDockOpenModal) {
+  btnDockOpenModal.addEventListener('click', () => {
+    if (dockEditingTarget) {
+      openEditModal(dockEditingTarget.sheetName, dockEditingTarget.rowNumber);
+    } else {
+      openNewRequestModal();
+    }
+  });
+}
+
+if (btnDockTicketDetails) {
+  btnDockTicketDetails.addEventListener('click', () => {
+    if (dockEditingTarget) {
+      openTicketDetailsModal(dockEditingTarget.sheetName, dockEditingTarget.rowNumber);
+    }
+  });
+}
+
 async function openNewRequestModal() {
   if (!sheetSelect.value || !DATE_TAB_REGEX.test(sheetSelect.value)) {
     let hasPlaceholder = false;
@@ -3069,18 +3851,13 @@ async function openNewRequestModal() {
   setTimeout(() => fSubject.focus(), 20);
 }
 
-btnNewEntry.addEventListener('click', openNewRequestModal);
-
-function ensureStatusOptionExists(statusValue) {
-  if (!statusValue) return;
-  const exists = Array.from(fStatus.options).some(opt => opt.value === statusValue);
-  if (!exists) {
-    const opt = document.createElement('option');
-    opt.value = statusValue;
-    opt.textContent = statusValue;
-    fStatus.appendChild(opt);
+btnNewEntry.addEventListener('click', () => {
+  if (bottomEditorDock && bottomEditorDock.style.display !== 'none') {
+    setBottomDockNewMode(true);
+  } else {
+    openNewRequestModal();
   }
-}
+});
 
 function openEditModal(sheetName, rowNumber) {
   const item = allRows.find(r => r.sheetName === sheetName && r.rowNumber === rowNumber);
@@ -3112,36 +3889,36 @@ document.getElementById('btnCancelModal').addEventListener('click', () => {
   editModal.classList.remove('open');
 });
 
-document.getElementById('entryForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const currentSheetName = editingTarget ? editingTarget.sheetName : sheetSelect.value;
+async function saveRequestToWorkbook(targetInfo, formValues) {
+  const currentSheetName = targetInfo ? targetInfo.sheetName : sheetSelect.value;
 
   await loadWorkbookFromDisk(currentSheetName);
   const worksheet = workbook.getWorksheet(currentSheetName);
   if (!worksheet) {
-    return showModalAlert({
+    await showModalAlert({
       title: 'Worksheet Not Found',
       message: `Target worksheet "${currentSheetName}" was not found in the workbook.`
     });
+    return false;
   }
 
-  const subjectVal = fSubject.value.trim();
-  const ticketVal = fTicket.value.trim().toUpperCase();
-  const brokerVal = fBroker.value.trim();
-  const masterVal = fMaster.value.trim().toUpperCase();
-  const bidderVal = fBidder.value.trim().toUpperCase();
-  const actionVal = fAction.value.trim();
-  const yardVal = fYard.value.trim().toUpperCase();
-  const lotsVal = fLots.value.trim();
-  const notesVal = fNotes.value.trim();
-  const statusVal = fStatus.value.trim();
+  const subjectVal = formValues.subject.trim();
+  const ticketVal = formValues.ticket.trim().toUpperCase();
+  const brokerVal = formValues.broker.trim();
+  const masterVal = formValues.master.trim().toUpperCase();
+  const bidderVal = formValues.bidder.trim().toUpperCase();
+  const actionVal = formValues.action.trim();
+  const yardVal = formValues.yard.trim().toUpperCase();
+  const lotsVal = formValues.lots.trim();
+  const notesVal = formValues.notes.trim();
+  const statusVal = formValues.status.trim();
 
   let targetRowNum;
   let trackingKey;
 
-  if (editingTarget) {
-    targetRowNum = editingTarget.rowNumber;
-    trackingKey = editingTarget.key;
+  if (targetInfo) {
+    targetRowNum = targetInfo.rowNumber;
+    trackingKey = targetInfo.key;
   } else {
     targetRowNum = getNextEmptyRow(worksheet);
     trackingKey = generateTrackingGuid();
@@ -3167,7 +3944,7 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   row.getCell(colMap.trackingCol).value = trackingKey;
   row.commit();
 
-  if (editingTarget) {
+  if (targetInfo) {
     const editedTime = parseDateTab(currentSheetName);
     const newerInstances = allRows.filter(
       r =>
@@ -3202,12 +3979,490 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
 
   const saveResult = await saveWorkbookToDisk();
   if (saveResult) {
-    editModal.classList.remove('open');
     await loadWorkbookFromDisk(currentSheetName, {
       preserveStatus: saveResult === 'mirror-locked'
     });
+    return true;
+  }
+  return false;
+}
+
+document.getElementById('entryForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const ok = await saveRequestToWorkbook(editingTarget, {
+    subject: fSubject.value,
+    ticket: fTicket.value,
+    broker: fBroker.value,
+    master: fMaster.value,
+    bidder: fBidder.value,
+    action: fAction.value,
+    yard: fYard.value,
+    lots: fLots.value,
+    notes: fNotes.value,
+    status: fStatus.value
+  });
+  if (ok) {
+    editModal.classList.remove('open');
   }
 });
+
+if (dockEntryForm) {
+  dockEntryForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const wasEditing = Boolean(dockEditingTarget);
+    const ok = await saveRequestToWorkbook(dockEditingTarget, {
+      subject: dockSubject.value,
+      ticket: dockTicket.value,
+      broker: dockBroker.value,
+      master: dockMaster.value,
+      bidder: dockBidder.value,
+      action: dockAction.value,
+      yard: dockYard.value,
+      lots: dockLots.value,
+      notes: dockNotes.value,
+      status: dockStatus.value
+    });
+    if (ok) {
+      if (!wasEditing) {
+        setBottomDockNewMode(false);
+        showToast('New support request added and saved.', 'success');
+      } else {
+        showToast('Request changes saved to workbook.', 'success');
+      }
+    }
+  });
+}
+
+// --- 6B. TICKET DETAILS & AGGREGATED TIMESTAMPED NOTES MODAL ---
+function findTicketHistoryEntries(seedItem) {
+  if (!seedItem) return [];
+  const normKey = seedItem.key ? seedItem.key.trim().toLowerCase() : '';
+  const normTicket = seedItem.ticket ? seedItem.ticket.trim().toLowerCase() : '';
+
+  const matches = allRows.filter(r => {
+    if (normKey && r.key.trim().toLowerCase() === normKey) return true;
+    if (normTicket && r.ticket && r.ticket.trim().toLowerCase() === normTicket) return true;
+    return false;
+  });
+
+  // Sort chronologically oldest to newest
+  return matches.sort((a, b) => {
+    const diff = parseDateTab(a.sheetName) - parseDateTab(b.sheetName);
+    return diff !== 0 ? diff : a.rowNumber - b.rowNumber;
+  });
+}
+
+function formatNoteHtmlWithTimestamps(rawNote) {
+  if (!rawNote || !rawNote.trim()) {
+    return `<span style="color:var(--text-muted); font-style:italic;">No action notes recorded on this tab.</span>`;
+  }
+  const escaped = escapeHtml(rawNote);
+  return escaped.replace(
+    /\[(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}[^\]]*)\]/g,
+    '<span class="timeline-timestamp-tag">🕒 $1</span>'
+  );
+}
+
+function openTicketDetailsModal(sheetName, rowNumber) {
+  const seedItem = allRows.find(r => r.sheetName === sheetName && r.rowNumber === rowNumber);
+  if (!seedItem || !ticketDetailsModal) return;
+
+  activeTicketDetailsTarget = { sheetName, rowNumber, key: seedItem.key };
+  renderTicketDetailsModal(seedItem);
+  if (ticketQuickNoteInput) {
+    ticketQuickNoteInput.value = '';
+  }
+  ticketDetailsModal.classList.add('open');
+}
+
+function renderTicketDetailsModal(seedItem) {
+  const history = findTicketHistoryEntries(seedItem);
+  if (history.length === 0) return;
+
+  const oldest = history[0];
+  const latest = history[history.length - 1];
+
+  const oldestTime = parseDateTab(oldest.sheetName);
+  const latestTime = parseDateTab(latest.sheetName);
+  const spanDays = oldestTime && latestTime
+    ? Math.max(1, Math.round((latestTime - oldestTime) / (1000 * 60 * 60 * 24)) + 1)
+    : history.length;
+
+  if (ticketDetailsTitle) {
+    ticketDetailsTitle.textContent = `📋 ${latest.subject || 'Ticket Details'}`;
+  }
+  if (ticketDetailsBadge) {
+    ticketDetailsBadge.textContent = latest.ticket ? `Ticket #${latest.ticket}` : `ID: ${latest.key.slice(0, 8)}...`;
+  }
+  if (ticketTimelineCountBadge) {
+    ticketTimelineCountBadge.textContent = `${history.length} Daily Tab${history.length === 1 ? '' : 's'} • ${spanDays} Day Span`;
+  }
+
+  if (ticketMetaGrid) {
+    const isDone = isCompletedStatus(latest.status);
+    ticketMetaGrid.innerHTML = `
+      <div class="ticket-meta-card">
+        <span class="ticket-meta-label">Ticket Number</span>
+        <span class="ticket-meta-value">${escapeHtml(latest.ticket || '—')}</span>
+      </div>
+      <div class="ticket-meta-card">
+        <span class="ticket-meta-label">Current Status (${escapeHtml(latest.sheetName)})</span>
+        <span class="ticket-meta-value">
+          <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(latest.status)}</span>
+        </span>
+      </div>
+      <div class="ticket-meta-card">
+        <span class="ticket-meta-label">Original Creation Tab</span>
+        <span class="ticket-meta-value">📅 ${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</span>
+      </div>
+      <div class="ticket-meta-card">
+        <span class="ticket-meta-label">Broker &amp; Accounts</span>
+        <span class="ticket-meta-value">${escapeHtml(latest.broker || '—')} (M: ${escapeHtml(latest.master || '—')} / B: ${escapeHtml(latest.bidder || '—')})</span>
+      </div>
+      <div class="ticket-meta-card">
+        <span class="ticket-meta-label">Requested Action</span>
+        <span class="ticket-meta-value">${escapeHtml(latest.action || '—')}</span>
+      </div>
+      <div class="ticket-meta-card">
+        <span class="ticket-meta-label">Yard # &amp; Lot Numbers</span>
+        <span class="ticket-meta-value">Y: ${escapeHtml(latest.yard || '—')} • Lots: ${escapeHtml(latest.lots || '—')}</span>
+      </div>
+    `;
+  }
+
+  if (ticketTimelineList) {
+    ticketTimelineList.innerHTML = '';
+    // Show chronological history (newest at top or oldest to newest with clear labels)
+    history.forEach((entry, idx) => {
+      const isOrigin = idx === 0;
+      const isLatest = idx === history.length - 1;
+      const isDone = isCompletedStatus(entry.status);
+      const stepLabel = isOrigin
+        ? (isLatest ? 'Created & Current Tab' : 'Originally Created')
+        : (isLatest ? 'Latest Daily Tab' : `Day ${idx + 1} Rollover`);
+
+      const div = document.createElement('div');
+      div.className = 'ticket-timeline-item';
+      div.innerHTML = `
+        <div class="ticket-timeline-item-header">
+          <div class="ticket-timeline-date">
+            <span>📅 ${escapeHtml(entry.sheetName)}</span>
+            <span style="font-size:11px; color:var(--text-muted); font-weight:500;">(Row ${entry.rowNumber} • ${stepLabel})</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(entry.status)}</span>
+            <button type="button" class="btn-edit btn-timeline-load-dock" data-sheet="${escapeHtml(entry.sheetName)}" data-row="${entry.rowNumber}" style="padding:3px 8px; font-size:11px;">Edit Row</button>
+          </div>
+        </div>
+        <div class="ticket-timeline-note-body">${formatNoteHtmlWithTimestamps(entry.notes)}</div>
+      `;
+      ticketTimelineList.appendChild(div);
+    });
+  }
+}
+
+if (ticketTimelineList) {
+  ticketTimelineList.addEventListener('click', (e) => {
+    const loadBtn = e.target.closest('.btn-timeline-load-dock');
+    if (loadBtn) {
+      const sName = loadBtn.dataset.sheet;
+      const rNum = Number(loadBtn.dataset.row);
+      ticketDetailsModal.classList.remove('open');
+      loadRowIntoBottomDock(sName, rNum, true);
+    }
+  });
+}
+
+if (btnCloseTicketDetails) {
+  btnCloseTicketDetails.addEventListener('click', () => {
+    ticketDetailsModal.classList.remove('open');
+  });
+}
+
+if (btnTicketEditInDock) {
+  btnTicketEditInDock.addEventListener('click', () => {
+    if (!activeTicketDetailsTarget) return;
+    ticketDetailsModal.classList.remove('open');
+    loadRowIntoBottomDock(activeTicketDetailsTarget.sheetName, activeTicketDetailsTarget.rowNumber, true);
+  });
+}
+
+if (ticketQuickNoteForm) {
+  ticketQuickNoteForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!activeTicketDetailsTarget || !ticketQuickNoteInput) return;
+    const newNoteText = ticketQuickNoteInput.value.trim();
+    if (!newNoteText) return;
+
+    const seedItem = allRows.find(
+      r =>
+        r.sheetName === activeTicketDetailsTarget.sheetName &&
+        r.rowNumber === activeTicketDetailsTarget.rowNumber
+    ) || allRows.find(r => r.key === activeTicketDetailsTarget.key);
+
+    if (!seedItem) return;
+    const history = findTicketHistoryEntries(seedItem);
+    const latestEntry = history[history.length - 1] || seedItem;
+
+    const stampedLine = `${formatCurrentTimestampPrefix()} ${newNoteText}`;
+    const combinedNotes = latestEntry.notes
+      ? `${latestEntry.notes.replace(/\s+$/, '')}\n${stampedLine}`
+      : stampedLine;
+
+    const ok = await saveRequestToWorkbook(
+      { sheetName: latestEntry.sheetName, rowNumber: latestEntry.rowNumber, key: latestEntry.key },
+      {
+        subject: latestEntry.subject,
+        ticket: latestEntry.ticket,
+        broker: latestEntry.broker,
+        master: latestEntry.master,
+        bidder: latestEntry.bidder,
+        action: latestEntry.action,
+        yard: latestEntry.yard,
+        lots: latestEntry.lots,
+        notes: combinedNotes,
+        status: latestEntry.status
+      }
+    );
+
+    if (ok) {
+      ticketQuickNoteInput.value = '';
+      const refreshedSeed = allRows.find(
+        r => r.sheetName === latestEntry.sheetName && r.rowNumber === latestEntry.rowNumber
+      );
+      if (refreshedSeed) {
+        activeTicketDetailsTarget = {
+          sheetName: refreshedSeed.sheetName,
+          rowNumber: refreshedSeed.rowNumber,
+          key: refreshedSeed.key
+        };
+        renderTicketDetailsModal(refreshedSeed);
+      }
+      showToast(`Timestamped note appended to ${latestEntry.sheetName}.`, 'success');
+    }
+  });
+}
+
+// --- 6C. SUPERVISOR VIEW-ONLY TRACKER INSPECTOR (NON-LOCKING READ-ONLY SNAPSHOT) ---
+async function openViewOnlyTrackerModal() {
+  closeToolsMenu();
+  const targetMirrorDir = supervisorDirHandle || parentDirHandle;
+  if (!targetMirrorDir || !workingFileHandle) {
+    return showModalAlert({
+      title: 'No Active Workbook',
+      message: 'Please connect a Tracker folder and load a workbook first.'
+    });
+  }
+
+  const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
+  let mirrorHandle = null;
+
+  try {
+    mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: false });
+  } catch (notFoundErr) {
+    const createNow = await showModalConfirm({
+      title: '👁️ View-Only Mirror File Not Created Yet',
+      badge: mirrorFileName,
+      message:
+        `The supervisor file "${mirrorFileName}" does not exist yet in "${targetMirrorDir.name}".\n\n` +
+        `Would you like to generate and sync "${mirrorFileName}" right now from your active workbook?`,
+      confirmText: '✨ Generate & Open View-Only Copy'
+    });
+    if (!createNow) return;
+
+    const buf = await serializeWorkbookBuffer();
+    const ok = await attemptMirrorWrite(buf, false);
+    if (!ok) return;
+    mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: false });
+  }
+
+  try {
+    const file = await mirrorHandle.getFile();
+    const arrayBuffer = await file.arrayBuffer();
+    viewOnlySnapshotBuffer = arrayBuffer;
+    viewOnlySnapshotFileName = mirrorFileName;
+
+    const mirrorWb = new ExcelJS.Workbook();
+    await mirrorWb.xlsx.load(arrayBuffer);
+
+    viewOnlyRows = [];
+    viewOnlyDateSheets = [];
+
+    mirrorWb.eachSheet((ws) => {
+      const sName = ws.name.trim();
+      if (DATE_TAB_REGEX.test(sName)) {
+        viewOnlyDateSheets.push(sName);
+      }
+    });
+
+    viewOnlyDateSheets.sort((a, b) => parseDateTab(b) - parseDateTab(a));
+
+    viewOnlyDateSheets.forEach(sName => {
+      const ws = mirrorWb.getWorksheet(sName);
+      if (!ws) return;
+      const colMap = getWorksheetColumnMap(ws);
+      ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber === 1) return;
+        const subject = cellText(row, 1);
+        const ticket = cellText(row, 2);
+        const master = cellText(row, 4);
+        const broker = resolveBrokerFromMaster(master, cellText(row, 3));
+        const bidder = cellText(row, 5);
+        const action = cellText(row, 6);
+        const yard = cellText(row, 7);
+        const lots = cellText(row, 8);
+        const status = cellText(row, colMap.statusCol);
+        const notes = cellText(row, colMap.notesCol);
+        const hasData = [subject, ticket, broker, master, bidder, action, yard, lots, notes, status]
+          .some(v => v !== '');
+        if (!hasData) return;
+
+        viewOnlyRows.push({
+          sheetName: sName,
+          rowNumber,
+          subject,
+          ticket,
+          broker,
+          master,
+          bidder,
+          action,
+          yard,
+          lots,
+          notes,
+          status: status || 'Pending'
+        });
+      });
+    });
+
+    if (viewOnlyTitle) {
+      viewOnlyTitle.textContent = `👁️ View-Only Inspector: ${mirrorFileName}`;
+    }
+    if (viewOnlyPathBadge) {
+      viewOnlyPathBadge.textContent = `${targetMirrorDir.name}\\${mirrorFileName}`;
+    }
+
+    if (viewOnlySheetSelect) {
+      viewOnlySheetSelect.innerHTML = '';
+      const allOpt = document.createElement('option');
+      allOpt.value = '__ALL__';
+      allOpt.textContent = `All Daily Tabs (${viewOnlyRows.length} total)`;
+      viewOnlySheetSelect.appendChild(allOpt);
+
+      viewOnlyDateSheets.forEach(tab => {
+        const count = viewOnlyRows.filter(r => r.sheetName === tab).length;
+        const opt = document.createElement('option');
+        opt.value = tab;
+        opt.textContent = `${tab} (${count})`;
+        viewOnlySheetSelect.appendChild(opt);
+      });
+
+      if (viewOnlyDateSheets.length > 0) {
+        viewOnlySheetSelect.value = viewOnlyDateSheets[0];
+      }
+    }
+
+    if (viewOnlySearchInput) {
+      viewOnlySearchInput.value = '';
+    }
+
+    renderViewOnlyTable();
+    if (viewOnlyModal) {
+      viewOnlyModal.classList.add('open');
+    }
+  } catch (err) {
+    console.error('Failed to inspect View-Only file:', err);
+    await showModalAlert({
+      title: 'View-Only Read Error',
+      message: `Could not read "${mirrorFileName}": ${err.message}`,
+      variant: 'danger'
+    });
+  }
+}
+
+function renderViewOnlyTable() {
+  if (!viewOnlyBody) return;
+  const selectedTab = viewOnlySheetSelect ? viewOnlySheetSelect.value : '__ALL__';
+  const query = viewOnlySearchInput ? viewOnlySearchInput.value.trim().toLowerCase() : '';
+
+  const filtered = viewOnlyRows.filter(item => {
+    if (query.length > 0) {
+      const hay = [
+        item.sheetName, item.subject, item.ticket, item.broker,
+        item.master, item.bidder, item.action, item.yard, item.lots, item.notes, item.status
+      ].join(' ').toLowerCase();
+      return hay.includes(query);
+    }
+    if (selectedTab !== '__ALL__' && item.sheetName !== selectedTab) {
+      return false;
+    }
+    return true;
+  });
+
+  if (viewOnlyStatsText) {
+    viewOnlyStatsText.textContent = `Showing ${filtered.length} of ${viewOnlyRows.length} request(s)`;
+  }
+
+  viewOnlyBody.innerHTML = '';
+  if (filtered.length === 0) {
+    viewOnlyBody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:20px;">No matching requests in View-Only snapshot.</td></tr>`;
+    return;
+  }
+
+  filtered.forEach(item => {
+    const tr = document.createElement('tr');
+    const isDone = isCompletedStatus(item.status);
+    tr.innerHTML = `
+      <td style="white-space:nowrap; font-family:monospace;">📅 ${escapeHtml(item.sheetName)}</td>
+      <td>${escapeHtml(item.subject || '—')}</td>
+      <td style="font-family:monospace;">${escapeHtml(item.ticket || '—')}</td>
+      <td>${escapeHtml(item.broker || '—')}</td>
+      <td style="font-family:monospace; font-size:12px;">M: ${escapeHtml(item.master || '—')}<br>B: ${escapeHtml(item.bidder || '—')}</td>
+      <td>${escapeHtml(item.action || '—')}</td>
+      <td style="font-size:12px;">Y: ${escapeHtml(item.yard || '—')}<br>L: ${escapeHtml(item.lots || '—')}</td>
+      <td style="max-width:260px; white-space:pre-wrap; font-size:12px;">${escapeHtml(item.notes || '—')}</td>
+      <td><span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(item.status)}</span></td>
+    `;
+    viewOnlyBody.appendChild(tr);
+  });
+}
+
+if (btnOpenViewOnly) {
+  btnOpenViewOnly.addEventListener('click', openViewOnlyTrackerModal);
+}
+if (menuOpenViewOnly) {
+  menuOpenViewOnly.addEventListener('click', openViewOnlyTrackerModal);
+}
+if (btnRefreshViewOnly) {
+  btnRefreshViewOnly.addEventListener('click', openViewOnlyTrackerModal);
+}
+if (viewOnlySheetSelect) {
+  viewOnlySheetSelect.addEventListener('change', renderViewOnlyTable);
+}
+if (viewOnlySearchInput) {
+  viewOnlySearchInput.addEventListener('input', renderViewOnlyTable);
+}
+if (btnCloseViewOnlyModal) {
+  btnCloseViewOnlyModal.addEventListener('click', () => {
+    viewOnlyModal.classList.remove('open');
+  });
+}
+if (btnDownloadViewOnly) {
+  btnDownloadViewOnly.addEventListener('click', () => {
+    if (!viewOnlySnapshotBuffer) return;
+    const blob = new Blob([viewOnlySnapshotBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = viewOnlySnapshotFileName || 'Tracker (VIEW ONLY).xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast(`Downloaded copy of "${viewOnlySnapshotFileName}" (safe to open in Excel).`, 'info');
+  });
+}
 
 function getNextEmptyRow(worksheet) {
   const colMap = getWorksheetColumnMap(worksheet);
@@ -3618,6 +4873,7 @@ rolloverForm.addEventListener('submit', async (e) => {
     const saveResult = await saveWorkbookToDisk();
     if (saveResult) {
       rolloverModal.classList.remove('open');
+      clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
       await loadWorkbookFromDisk(targetTabName, {
         preserveStatus: saveResult === 'mirror-locked'
       });
@@ -3834,6 +5090,7 @@ async function attemptMirrorWrite(buffer, isRetry = false) {
 
     const mirrorLocationNote = supervisorDirHandle ? ` (Mirrored to ${supervisorDirHandle.name})` : '';
     setStatus(`Saved & Mirrored: ${workingFileHandle.name}${mirrorLocationNote}`, 'ready');
+    updateFilePathsBarUI();
     if (wasRetrying) {
       showToast(`✅ Supervisor mirror "${mirrorFileName}" synced!`, 'success');
     }
@@ -3979,7 +5236,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
-const APP_VERSION = 'v1.10.0';
+const APP_VERSION = 'v1.11.0';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
