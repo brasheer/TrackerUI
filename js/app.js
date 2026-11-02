@@ -239,7 +239,7 @@ const dockNotes = document.getElementById('dockNotes');
 const btnDockInsertTimestamp = document.getElementById('btnDockInsertTimestamp');
 const dockHintText = document.getElementById('dockHintText');
 const btnDockCancelEdit = document.getElementById('btnDockCancelEdit');
-const btnDockSave = document.getElementById('dockSave') || document.getElementById('btnDockSave');
+const btnDockSave = document.getElementById('btnDockSave');
 
 // Ticket Details Modal DOM Elements
 const ticketDetailsTitle = document.getElementById('ticketDetailsTitle');
@@ -251,6 +251,7 @@ const ticketTimelineList = document.getElementById('ticketTimelineList');
 const ticketQuickNoteForm = document.getElementById('ticketQuickNoteForm');
 const ticketQuickNoteTargetBadge = document.getElementById('ticketQuickNoteTargetBadge');
 const ticketQuickNoteInput = document.getElementById('ticketQuickNoteInput');
+const btnTicketEditInDock = document.getElementById('btnTicketEditInDock');
 const btnCloseTicketDetails = document.getElementById('btnCloseTicketDetails');
 
 // View-Only Inspector Modal DOM Elements
@@ -3337,7 +3338,7 @@ function renderList() {
         </span>
       </td>
       <td>
-        <div class="row-actions-wrap">
+        <div class="row-actions-group">
           <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Ticket Details &amp; Aggregated Timestamped Notes">📋 Details</button>
           <button type="button" class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="Load into Bottom Editor (Double-click for Modal)">Edit</button>
         </div>
@@ -3669,6 +3670,12 @@ if (btnDockInsertTimestamp) {
   });
 }
 
+if (btnModalInsertTimestamp) {
+  btnModalInsertTimestamp.addEventListener('click', () => {
+    insertTimestampIntoTextarea(fNotes);
+  });
+}
+
 function syncBottomDockStateAfterLoad() {
   if (!bottomEditorDock) return;
   if (!workbook || dateSheets.length === 0) {
@@ -3696,16 +3703,23 @@ function setBottomDockNewMode(focusInput = false) {
   dockEditingTarget = null;
   if (!bottomEditorDock) return;
 
+  bottomEditorDock.classList.remove('editing-mode');
   const activeTab = sheetSelect.value || 'Daily Tab';
+
   if (dockModeBadge) {
-    dockModeBadge.textContent = '＋ New Request Mode';
-    dockModeBadge.classList.remove('editing-mode');
+    dockModeBadge.textContent = '➕ New Request Mode';
+    dockModeBadge.classList.add('new-mode');
+    dockModeBadge.classList.remove('edit-mode');
   }
-  if (dockTitleText) {
-    dockTitleText.textContent = `Creating New Support Request on ${activeTab}`;
+  if (dockTargetLabel) {
+    dockTargetLabel.textContent = `Creating new support request on ${activeTab} — or click any row above to edit`;
   }
-  if (dockTargetMeta) {
-    dockTargetMeta.textContent = '(Click any request row above to populate & edit here)';
+  if (dockKeyBadge) {
+    dockKeyBadge.style.display = 'none';
+    dockKeyBadge.textContent = '';
+  }
+  if (dockHintText) {
+    dockHintText.textContent = '💡 Tip: Click any request row in the table above to load it here for instant editing.';
   }
   if (btnDockTicketDetails) {
     btnDockTicketDetails.style.display = 'none';
@@ -3741,17 +3755,25 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false) {
   if (!item || !bottomEditorDock) return;
 
   bottomEditorDock.style.display = 'block';
+  bottomEditorDock.classList.add('editing-mode');
   dockEditingTarget = { sheetName, rowNumber, key: item.key };
 
   if (dockModeBadge) {
     dockModeBadge.textContent = '✏️ Editing Selected Row';
-    dockModeBadge.classList.add('editing-mode');
+    dockModeBadge.classList.remove('new-mode');
+    dockModeBadge.classList.add('edit-mode');
   }
-  if (dockTitleText) {
-    dockTitleText.textContent = `${item.subject || 'Untitled Request'} (${sheetName} • Row ${rowNumber})`;
+  if (dockTargetLabel) {
+    const ticketSuffix = item.ticket ? ` • Ticket #${item.ticket}` : '';
+    dockTargetLabel.textContent = `${item.subject || 'Untitled Request'} (${sheetName} • Row ${rowNumber}${ticketSuffix})`;
   }
-  if (dockTargetMeta) {
-    dockTargetMeta.textContent = item.ticket ? `Ticket: ${item.ticket}` : `Broker: ${item.broker || '—'}`;
+  if (dockKeyBadge) {
+    dockKeyBadge.style.display = 'inline-block';
+    dockKeyBadge.textContent = `🔍 ${item.key.slice(0, 8)}...`;
+    dockKeyBadge.title = `Immutable Tracking ID (Excluded from editable inputs): ${item.key}`;
+  }
+  if (dockHintText) {
+    dockHintText.textContent = `✏️ Editing Row ${rowNumber} on ${sheetName}. Unique Tracking ID is preserved automatically on save.`;
   }
   if (btnDockTicketDetails) {
     btnDockTicketDetails.style.display = 'inline-block';
@@ -4091,48 +4113,54 @@ function renderTicketDetailsModal(seedItem) {
   if (ticketDetailsTitle) {
     ticketDetailsTitle.textContent = `📋 ${latest.subject || 'Ticket Details'}`;
   }
-  if (ticketDetailsBadge) {
-    ticketDetailsBadge.textContent = latest.ticket ? `Ticket #${latest.ticket}` : `ID: ${latest.key.slice(0, 8)}...`;
+  if (ticketDetailsSubtitle) {
+    ticketDetailsSubtitle.textContent = `Tracked across ${history.length} daily tab${history.length === 1 ? '' : 's'} (${spanDays} day span • First logged ${oldest.sheetName})`;
   }
-  if (ticketTimelineCountBadge) {
-    ticketTimelineCountBadge.textContent = `${history.length} Daily Tab${history.length === 1 ? '' : 's'} • ${spanDays} Day Span`;
+  if (ticketDetailsKeyBadge) {
+    ticketDetailsKeyBadge.textContent = latest.ticket ? `Ticket #${latest.ticket}` : `🔍 ${latest.key.slice(0, 8)}...`;
+    ticketDetailsKeyBadge.title = `Tracking ID: ${latest.key}`;
+  }
+  if (ticketTimelineHeader) {
+    ticketTimelineHeader.textContent = `🕒 Aggregated Notes & Daily Timeline (${history.length} Tab${history.length === 1 ? '' : 's'} • ${spanDays} Day Span)`;
+  }
+  if (ticketQuickNoteTargetBadge) {
+    ticketQuickNoteTargetBadge.textContent = `Target: ${latest.sheetName} (Row ${latest.rowNumber})`;
   }
 
-  if (ticketMetaGrid) {
+  if (ticketDetailsMetaGrid) {
     const isDone = isCompletedStatus(latest.status);
-    ticketMetaGrid.innerHTML = `
+    ticketDetailsMetaGrid.innerHTML = `
       <div class="ticket-meta-card">
-        <span class="ticket-meta-label">Ticket Number</span>
-        <span class="ticket-meta-value">${escapeHtml(latest.ticket || '—')}</span>
+        <div class="ticket-meta-card-label">Ticket Number</div>
+        <div class="ticket-meta-card-val">${escapeHtml(latest.ticket || '—')}</div>
       </div>
       <div class="ticket-meta-card">
-        <span class="ticket-meta-label">Current Status (${escapeHtml(latest.sheetName)})</span>
-        <span class="ticket-meta-value">
+        <div class="ticket-meta-card-label">Current Status (${escapeHtml(latest.sheetName)})</div>
+        <div class="ticket-meta-card-val">
           <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(latest.status)}</span>
-        </span>
+        </div>
       </div>
       <div class="ticket-meta-card">
-        <span class="ticket-meta-label">Original Creation Tab</span>
-        <span class="ticket-meta-value">📅 ${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</span>
+        <div class="ticket-meta-card-label">Original Creation Tab</div>
+        <div class="ticket-meta-card-val">📅 ${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
       </div>
       <div class="ticket-meta-card">
-        <span class="ticket-meta-label">Broker &amp; Accounts</span>
-        <span class="ticket-meta-value">${escapeHtml(latest.broker || '—')} (M: ${escapeHtml(latest.master || '—')} / B: ${escapeHtml(latest.bidder || '—')})</span>
+        <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
+        <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${escapeHtml(latest.master || '—')} / B: ${escapeHtml(latest.bidder || '—')})</div>
       </div>
       <div class="ticket-meta-card">
-        <span class="ticket-meta-label">Requested Action</span>
-        <span class="ticket-meta-value">${escapeHtml(latest.action || '—')}</span>
+        <div class="ticket-meta-card-label">Requested Action</div>
+        <div class="ticket-meta-card-val">${escapeHtml(latest.action || '—')}</div>
       </div>
       <div class="ticket-meta-card">
-        <span class="ticket-meta-label">Yard # &amp; Lot Numbers</span>
-        <span class="ticket-meta-value">Y: ${escapeHtml(latest.yard || '—')} • Lots: ${escapeHtml(latest.lots || '—')}</span>
+        <div class="ticket-meta-card-label">Yard # &amp; Lot Numbers</div>
+        <div class="ticket-meta-card-val">Y: ${escapeHtml(latest.yard || '—')} • Lots: ${escapeHtml(latest.lots || '—')}</div>
       </div>
     `;
   }
 
   if (ticketTimelineList) {
     ticketTimelineList.innerHTML = '';
-    // Show chronological history (newest at top or oldest to newest with clear labels)
     history.forEach((entry, idx) => {
       const isOrigin = idx === 0;
       const isLatest = idx === history.length - 1;
@@ -4142,19 +4170,19 @@ function renderTicketDetailsModal(seedItem) {
         : (isLatest ? 'Latest Daily Tab' : `Day ${idx + 1} Rollover`);
 
       const div = document.createElement('div');
-      div.className = 'ticket-timeline-item';
+      div.className = 'timeline-entry' + (isDone ? ' completed-entry' : '');
       div.innerHTML = `
-        <div class="ticket-timeline-item-header">
-          <div class="ticket-timeline-date">
-            <span>📅 ${escapeHtml(entry.sheetName)}</span>
-            <span style="font-size:11px; color:var(--text-muted); font-weight:500;">(Row ${entry.rowNumber} • ${stepLabel})</span>
+        <div class="timeline-entry-header">
+          <div>
+            <strong>📅 ${escapeHtml(entry.sheetName)}</strong>
+            <span style="font-size:11px; color:var(--text-muted); font-weight:500; margin-left:6px;">(Row ${entry.rowNumber} • ${stepLabel})</span>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(entry.status)}</span>
             <button type="button" class="btn-edit btn-timeline-load-dock" data-sheet="${escapeHtml(entry.sheetName)}" data-row="${entry.rowNumber}" style="padding:3px 8px; font-size:11px;">Edit Row</button>
           </div>
         </div>
-        <div class="ticket-timeline-note-body">${formatNoteHtmlWithTimestamps(entry.notes)}</div>
+        <div class="timeline-entry-body">${formatNoteHtmlWithTimestamps(entry.notes)}</div>
       `;
       ticketTimelineList.appendChild(div);
     });
@@ -4279,25 +4307,28 @@ async function openViewOnlyTrackerModal() {
   try {
     const file = await mirrorHandle.getFile();
     const arrayBuffer = await file.arrayBuffer();
-    viewOnlySnapshotBuffer = arrayBuffer;
-    viewOnlySnapshotFileName = mirrorFileName;
+    const sanitizedBuffer = sanitizeXlsxBufferForExcelJS(arrayBuffer);
+
+    viewOnlyState.buffer = arrayBuffer;
+    viewOnlyState.fileName = mirrorFileName;
+    viewOnlyState.fullPath = `${targetMirrorDir.name}\\${mirrorFileName}`;
+    viewOnlyState.lastModified = file.lastModified || Date.now();
+    viewOnlyState.rows = [];
+    viewOnlyState.sheets = [];
 
     const mirrorWb = new ExcelJS.Workbook();
-    await mirrorWb.xlsx.load(arrayBuffer);
-
-    viewOnlyRows = [];
-    viewOnlyDateSheets = [];
+    await mirrorWb.xlsx.load(sanitizedBuffer);
 
     mirrorWb.eachSheet((ws) => {
       const sName = ws.name.trim();
       if (DATE_TAB_REGEX.test(sName)) {
-        viewOnlyDateSheets.push(sName);
+        viewOnlyState.sheets.push(sName);
       }
     });
 
-    viewOnlyDateSheets.sort((a, b) => parseDateTab(b) - parseDateTab(a));
+    viewOnlyState.sheets.sort((a, b) => parseDateTab(b) - parseDateTab(a));
 
-    viewOnlyDateSheets.forEach(sName => {
+    viewOnlyState.sheets.forEach(sName => {
       const ws = mirrorWb.getWorksheet(sName);
       if (!ws) return;
       const colMap = getWorksheetColumnMap(ws);
@@ -4317,7 +4348,7 @@ async function openViewOnlyTrackerModal() {
           .some(v => v !== '');
         if (!hasData) return;
 
-        viewOnlyRows.push({
+        viewOnlyState.rows.push({
           sheetName: sName,
           rowNumber,
           subject,
@@ -4337,27 +4368,38 @@ async function openViewOnlyTrackerModal() {
     if (viewOnlyTitle) {
       viewOnlyTitle.textContent = `👁️ View-Only Inspector: ${mirrorFileName}`;
     }
-    if (viewOnlyPathBadge) {
-      viewOnlyPathBadge.textContent = `${targetMirrorDir.name}\\${mirrorFileName}`;
+    if (viewOnlyPathSubtitle) {
+      const modTimeStr = file.lastModified
+        ? ` • Last synced: ${new Date(file.lastModified).toLocaleString()}`
+        : '';
+      viewOnlyPathSubtitle.textContent = `Path: ${viewOnlyState.fullPath}${modTimeStr}`;
+    }
+    if (viewOnlySyncBadge) {
+      viewOnlySyncBadge.textContent = pendingMirrorBuffer
+        ? '⚠️ Pending Mirror Retry'
+        : 'Read-Only ArrayBuffer';
+      viewOnlySyncBadge.className = pendingMirrorBuffer
+        ? 'badge badge-pending'
+        : 'badge badge-complete';
     }
 
     if (viewOnlySheetSelect) {
       viewOnlySheetSelect.innerHTML = '';
       const allOpt = document.createElement('option');
       allOpt.value = '__ALL__';
-      allOpt.textContent = `All Daily Tabs (${viewOnlyRows.length} total)`;
+      allOpt.textContent = `All Daily Tabs (${viewOnlyState.rows.length} total)`;
       viewOnlySheetSelect.appendChild(allOpt);
 
-      viewOnlyDateSheets.forEach(tab => {
-        const count = viewOnlyRows.filter(r => r.sheetName === tab).length;
+      viewOnlyState.sheets.forEach(tab => {
+        const count = viewOnlyState.rows.filter(r => r.sheetName === tab).length;
         const opt = document.createElement('option');
         opt.value = tab;
         opt.textContent = `${tab} (${count})`;
         viewOnlySheetSelect.appendChild(opt);
       });
 
-      if (viewOnlyDateSheets.length > 0) {
-        viewOnlySheetSelect.value = viewOnlyDateSheets[0];
+      if (viewOnlyState.sheets.length > 0) {
+        viewOnlySheetSelect.value = viewOnlyState.sheets[0];
       }
     }
 
@@ -4384,7 +4426,7 @@ function renderViewOnlyTable() {
   const selectedTab = viewOnlySheetSelect ? viewOnlySheetSelect.value : '__ALL__';
   const query = viewOnlySearchInput ? viewOnlySearchInput.value.trim().toLowerCase() : '';
 
-  const filtered = viewOnlyRows.filter(item => {
+  const filtered = viewOnlyState.rows.filter(item => {
     if (query.length > 0) {
       const hay = [
         item.sheetName, item.subject, item.ticket, item.broker,
@@ -4399,7 +4441,7 @@ function renderViewOnlyTable() {
   });
 
   if (viewOnlyStatsText) {
-    viewOnlyStatsText.textContent = `Showing ${filtered.length} of ${viewOnlyRows.length} request(s)`;
+    viewOnlyStatsText.textContent = `Showing ${filtered.length} of ${viewOnlyState.rows.length} request(s)`;
   }
 
   viewOnlyBody.innerHTML = '';
@@ -4441,26 +4483,26 @@ if (viewOnlySheetSelect) {
 if (viewOnlySearchInput) {
   viewOnlySearchInput.addEventListener('input', renderViewOnlyTable);
 }
-if (btnCloseViewOnlyModal) {
-  btnCloseViewOnlyModal.addEventListener('click', () => {
+if (btnCloseViewOnly) {
+  btnCloseViewOnly.addEventListener('click', () => {
     viewOnlyModal.classList.remove('open');
   });
 }
 if (btnDownloadViewOnly) {
   btnDownloadViewOnly.addEventListener('click', () => {
-    if (!viewOnlySnapshotBuffer) return;
-    const blob = new Blob([viewOnlySnapshotBuffer], {
+    if (!viewOnlyState.buffer) return;
+    const blob = new Blob([viewOnlyState.buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = viewOnlySnapshotFileName || 'Tracker (VIEW ONLY).xlsx';
+    a.download = viewOnlyState.fileName || 'Tracker (VIEW ONLY).xlsx';
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    showToast(`Downloaded copy of "${viewOnlySnapshotFileName}" (safe to open in Excel).`, 'info');
+    showToast(`Downloaded copy of "${viewOnlyState.fileName}" (safe to open in Excel).`, 'info');
   });
 }
 
@@ -5236,7 +5278,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
-const APP_VERSION = 'v1.11.0';
+const APP_VERSION = 'v1.11.1';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
