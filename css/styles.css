@@ -13,28 +13,33 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
   line-height: 1.4;
-  padding-bottom: 40px;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Top Bar */
 header {
+  flex-shrink: 0;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 12px 20px;
+  padding: 10px 20px;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  z-index: 25;
 }
 .brand { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .brand h1 { font-size: 16px; font-weight: 600; }
@@ -79,7 +84,8 @@ header {
 
 /* Controls Bar */
 .controls {
-  padding: 14px 20px;
+  flex-shrink: 0;
+  padding: 10px 20px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -277,9 +283,10 @@ button:hover { background: var(--surface-hover); }
   cursor: not-allowed;
 }
 .sheet-tabs-bar {
+  flex-shrink: 0;
   display: flex;
   gap: 6px;
-  padding: 8px 20px;
+  padding: 7px 20px;
   background: rgba(15, 23, 42, 0.65);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -323,9 +330,10 @@ button:hover { background: var(--surface-hover); }
 
 /* Schema / Blank Workbook Bootstrap Banner */
 .schema-banner {
+  flex-shrink: 0;
   background: rgba(56, 189, 248, 0.12);
   border-bottom: 1px solid var(--accent);
-  padding: 10px 20px;
+  padding: 8px 20px;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -385,10 +393,11 @@ button:hover { background: var(--surface-hover); }
 
 /* Active Filter Banner */
 #filterBanner {
+  flex-shrink: 0;
   display: none;
   background: rgba(56, 189, 248, 0.12);
   border-bottom: 1px solid var(--accent);
-  padding: 10px 20px;
+  padding: 8px 20px;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
@@ -402,9 +411,10 @@ button:hover { background: var(--surface-hover); }
 
 /* Delete Selection Mode Banner */
 .delete-banner {
+  flex-shrink: 0;
   background: rgba(239, 68, 68, 0.14);
   border-bottom: 1px solid rgba(239, 68, 68, 0.5);
-  padding: 10px 20px;
+  padding: 8px 20px;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -431,15 +441,25 @@ tr.selected-for-delete td {
   background: rgba(239, 68, 68, 0.14);
 }
 
-/* Table / List View */
+/* Table / List View (Independently Scrollable Pane) */
 .table-wrap {
-  padding: 0 20px;
-  overflow-x: auto;
+  flex: 1 1 0;
+  min-height: 140px;
+  padding: 0 20px 16px;
+  overflow: auto;
+  scrollbar-width: thin;
 }
 table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 12px;
+  margin-top: 0;
+}
+thead#tableHead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 th, td {
   text-align: left;
@@ -944,10 +964,7 @@ tr.shadow-new-row:hover .shadow-action-pill {
 
 /* Bottom Workspace Status Bar */
 .status-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
   padding: 6px 20px;
@@ -980,9 +997,10 @@ tr.shadow-new-row:hover .shadow-action-pill {
 
 /* File Paths & Auto-Reconnect Bar */
 .file-paths-bar {
+  flex-shrink: 0;
   background: rgba(15, 23, 42, 0.85);
   border-bottom: 1px solid var(--border);
-  padding: 6px 20px;
+  padding: 5px 20px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -1096,18 +1114,36 @@ tbody#listBody tr.active-editing-row td {
   color: #0f172a;
 }
 
-/* Bottom Docked Request Editor Panel */
+/* Bottom Docked Request Editor Panel (Pinned Viewport Footer Pane & Collapsible) */
 .bottom-editor-dock {
-  margin: 18px 20px 28px;
+  flex-shrink: 0;
+  margin: 0;
   background: var(--surface);
-  border: 1px solid var(--border);
   border-top: 3px solid var(--accent);
-  border-radius: 10px;
-  padding: 14px 18px;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.45);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px 12px;
+  box-shadow: 0 -10px 24px -4px rgba(0, 0, 0, 0.5);
+  z-index: 20;
 }
 .bottom-editor-dock.editing-mode {
   border-top-color: #fbbf24;
+}
+.bottom-editor-dock.collapsed {
+  padding: 7px 20px;
+}
+.bottom-editor-dock.collapsed .bottom-editor-header {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+.bottom-editor-dock.collapsed .dock-form {
+  display: none;
+}
+.bottom-editor-dock .dock-form {
+  max-height: 36vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-right: 2px;
 }
 .bottom-editor-header {
   display: flex;
@@ -1115,8 +1151,8 @@ tbody#listBody tr.active-editing-row td {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 10px;
-  margin-bottom: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
   border-bottom: 1px solid var(--border);
 }
 .bottom-editor-title-group {
@@ -1124,6 +1160,11 @@ tbody#listBody tr.active-editing-row td {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+.bottom-editor-title-group:hover .dock-target-label {
+  color: var(--text);
 }
 .dock-mode-badge {
   font-size: 12px;
@@ -1145,6 +1186,7 @@ tbody#listBody tr.active-editing-row td {
   font-size: 12.5px;
   color: var(--text-muted);
   font-weight: 500;
+  transition: color 0.15s;
 }
 .bottom-editor-header-actions {
   display: flex;
@@ -1154,7 +1196,7 @@ tbody#listBody tr.active-editing-row td {
 }
 .btn-dock-secondary {
   font-size: 12px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid var(--border);
   color: var(--text);
@@ -1164,10 +1206,23 @@ tbody#listBody tr.active-editing-row td {
   border-color: var(--accent);
   color: var(--accent);
 }
+.btn-dock-collapse {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: var(--accent);
+  border-radius: 6px;
+}
+.btn-dock-collapse:hover {
+  background: rgba(56, 189, 248, 0.24);
+  border-color: var(--accent);
+}
 .dock-form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 8px;
 }
 .dock-col-subject {
   grid-column: span 2;
@@ -1199,8 +1254,8 @@ tbody#listBody tr.active-editing-row td {
   color: #0f172a;
 }
 .dock-form-actions {
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: 9px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
   display: flex;
   flex-wrap: wrap;

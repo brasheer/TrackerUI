@@ -20,6 +20,8 @@ let activeFieldFilter = null; // { field, label, value } for Like-Item filtering
 let sortState = { column: null, direction: 'asc' }; // Column sort state
 let editingTarget = null; // { sheetName, rowNumber, key } or null for new (Modal)
 let dockEditingTarget = null; // { sheetName, rowNumber, key } or null for new (Bottom Dock)
+const DOCK_COLLAPSED_STORAGE_KEY = 'trackerui_dock_collapsed';
+let isBottomDockCollapsed = localStorage.getItem(DOCK_COLLAPSED_STORAGE_KEY) === 'true';
 let activeTicketDetailsTarget = null; // { key, ticket, sheetName, rowNumber }
 let viewOnlyState = { fileName: '', fullPath: '', lastModified: 0, buffer: null, sheets: [], rows: [] };
 
@@ -219,12 +221,14 @@ const actionListEl = document.getElementById('actionList');
 
 // Bottom Dock Editor DOM Elements
 const bottomEditorDock = document.getElementById('bottomEditorDock');
+const dockHeaderToggleZone = document.getElementById('dockHeaderToggleZone');
 const dockModeBadge = document.getElementById('dockModeBadge');
 const dockTargetLabel = document.getElementById('dockTargetLabel');
 const dockKeyBadge = document.getElementById('dockKeyBadge');
 const btnDockTicketDetails = document.getElementById('btnDockTicketDetails');
 const btnDockOpenModal = document.getElementById('btnDockOpenModal');
 const btnDockNewClear = document.getElementById('btnDockNewClear');
+const btnDockToggleCollapse = document.getElementById('btnDockToggleCollapse');
 const dockEntryForm = document.getElementById('dockEntryForm');
 const dockSubject = document.getElementById('dockSubject');
 const dockTicket = document.getElementById('dockTicket');
@@ -3676,6 +3680,33 @@ if (btnModalInsertTimestamp) {
   });
 }
 
+function setBottomDockCollapsed(collapsed, { persist = true } = {}) {
+  isBottomDockCollapsed = Boolean(collapsed);
+  if (persist) {
+    localStorage.setItem(DOCK_COLLAPSED_STORAGE_KEY, String(isBottomDockCollapsed));
+  }
+  if (bottomEditorDock) {
+    bottomEditorDock.classList.toggle('collapsed', isBottomDockCollapsed);
+  }
+  if (btnDockToggleCollapse) {
+    btnDockToggleCollapse.textContent = isBottomDockCollapsed ? '▴ Expand Editor' : '▾ Collapse';
+    btnDockToggleCollapse.setAttribute('aria-expanded', String(!isBottomDockCollapsed));
+  }
+}
+
+if (btnDockToggleCollapse) {
+  btnDockToggleCollapse.addEventListener('click', () => {
+    setBottomDockCollapsed(!isBottomDockCollapsed);
+  });
+}
+
+if (dockHeaderToggleZone) {
+  dockHeaderToggleZone.addEventListener('click', (e) => {
+    if (e.target.closest('.key-chip')) return;
+    setBottomDockCollapsed(!isBottomDockCollapsed);
+  });
+}
+
 function syncBottomDockStateAfterLoad() {
   if (!bottomEditorDock) return;
   if (!workbook || dateSheets.length === 0) {
@@ -3684,6 +3715,7 @@ function syncBottomDockStateAfterLoad() {
     return;
   }
   bottomEditorDock.style.display = 'block';
+  setBottomDockCollapsed(isBottomDockCollapsed, { persist: false });
 
   if (dockEditingTarget) {
     const updatedMatch = allRows.find(
@@ -3692,7 +3724,7 @@ function syncBottomDockStateAfterLoad() {
         (r.rowNumber === dockEditingTarget.rowNumber || r.key === dockEditingTarget.key)
     );
     if (updatedMatch) {
-      loadRowIntoBottomDock(updatedMatch.sheetName, updatedMatch.rowNumber, false);
+      loadRowIntoBottomDock(updatedMatch.sheetName, updatedMatch.rowNumber, false, { expandIfCollapsed: false });
       return;
     }
   }
@@ -3702,6 +3734,10 @@ function syncBottomDockStateAfterLoad() {
 function setBottomDockNewMode(focusInput = false) {
   dockEditingTarget = null;
   if (!bottomEditorDock) return;
+
+  if (focusInput && isBottomDockCollapsed) {
+    setBottomDockCollapsed(false);
+  }
 
   bottomEditorDock.classList.remove('editing-mode');
   const activeTab = sheetSelect.value || 'Daily Tab';
@@ -3745,16 +3781,18 @@ function setBottomDockNewMode(focusInput = false) {
   }
 
   if (focusInput && dockSubject) {
-    bottomEditorDock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     setTimeout(() => dockSubject.focus(), 30);
   }
 }
 
-function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false) {
+function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expandIfCollapsed = true } = {}) {
   const item = allRows.find(r => r.sheetName === sheetName && r.rowNumber === rowNumber);
   if (!item || !bottomEditorDock) return;
 
   bottomEditorDock.style.display = 'block';
+  if (expandIfCollapsed && isBottomDockCollapsed) {
+    setBottomDockCollapsed(false);
+  }
   bottomEditorDock.classList.add('editing-mode');
   dockEditingTarget = { sheetName, rowNumber, key: item.key };
 
@@ -3806,7 +3844,6 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false) {
   }
 
   if (focusInput && dockSubject) {
-    bottomEditorDock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     setTimeout(() => dockSubject.focus(), 30);
   }
 }
@@ -5278,7 +5315,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
-const APP_VERSION = 'v1.11.1';
+const APP_VERSION = 'v1.11.2';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
