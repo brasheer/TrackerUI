@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.11.2</title>
+  <title>TrackerUI v1.12.0</title>
 
   <!-- PWA Meta & Manifest -->
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" id="metaThemeColor" content="#0f172a">
   <meta name="description" content="Support tracker and daily rollover workspace for agent Excel workbooks">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -24,91 +24,281 @@
 
   <header>
     <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="3" width="15" height="14" rx="2.5"></rect>
+          <line x1="2.5" y1="7.5" x2="17.5" y2="7.5"></line>
+          <line x1="7.5" y1="7.5" x2="7.5" y2="17"></line>
+        </svg>
+      </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.11.2)">v1.11.2</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.12.0)">v1.12.0</span>
     </div>
 
     <div class="header-actions">
       <div id="workbookPickerWrap" class="workbook-picker-wrap">
-        <label for="workbookSelect">Workbook:</label>
+        <label for="workbookSelect">Workbook</label>
         <select id="workbookSelect" title="Select active monthly workbook"></select>
       </div>
 
-      <button type="button" id="btnReconnect" class="btn-reconnect" style="display:none;">🔄 Reconnect Folder</button>
-      <button type="button" id="btnLinkFile">📂 Select Agent Folder</button>
-      <button type="button" id="btnOpenViewOnly" class="btn-view-only" style="display:none;" title="Inspect the Supervisor (VIEW ONLY).xlsx mirror workbook">
-        👁️ Open View-Only
+      <button type="button" id="btnReconnect" class="btn-reconnect btn-with-icon" style="display:none;">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3.5 10a6.5 6.5 0 0 1 11.1-4.6L16.5 7"></path>
+          <path d="M16.5 3.5V7H13"></path>
+          <path d="M16.5 10a6.5 6.5 0 0 1-11.1 4.6L3.5 13"></path>
+          <path d="M3.5 16.5V13H7"></path>
+        </svg>
+        <span id="reconnectBtnLabel">Reconnect Folder</span>
       </button>
-      <button type="button" id="btnRollover" class="btn-rollover" style="display:none;">⏭️ Rollover / Sync</button>
 
-      <!-- Clean Popover Workspace & Tools Menu -->
-      <div class="tools-menu-wrap" id="toolsMenuWrap">
-        <button type="button" id="btnToolsMenu" class="btn-tools-menu" title="Workspace folders, sheet tools, and batch actions">
-          ⚙️ Tools &amp; Setup ▾
+      <button type="button" id="btnLinkFile" class="btn-primary btn-with-icon">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.9a1.5 1.5 0 0 1 1.1.47l1.1 1.06a1.5 1.5 0 0 0 1.05.47H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5v-9Z"></path>
+        </svg>
+        <span>Select Agent Folder</span>
+      </button>
+
+      <button type="button" id="btnRollover" class="btn-rollover btn-with-icon" style="display:none;" title="Consolidate unfinished requests and append daily notes into target tab">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 10h9.5"></path>
+          <path d="m10 6 4 4-4 4"></path>
+          <line x1="16" y1="5" x2="16" y2="15"></line>
+        </svg>
+        <span>Rollover / Sync</span>
+      </button>
+
+      <!-- Quick Theme Switcher (Light / Auto / Dark) -->
+      <div class="theme-segmented" id="headerThemeGroup" role="group" aria-label="Color theme mode">
+        <button type="button" class="theme-seg-btn" data-theme-choice="light" title="Light Mode">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="10" cy="10" r="3.5"></circle>
+            <line x1="10" y1="2" x2="10" y2="4"></line>
+            <line x1="10" y1="16" x2="10" y2="18"></line>
+            <line x1="4.3" y1="4.3" x2="5.7" y2="5.7"></line>
+            <line x1="14.3" y1="14.3" x2="15.7" y2="15.7"></line>
+            <line x1="2" y1="10" x2="4" y2="10"></line>
+            <line x1="16" y1="10" x2="18" y2="10"></line>
+            <line x1="4.3" y1="15.7" x2="5.7" y2="14.3"></line>
+            <line x1="14.3" y1="5.7" x2="15.7" y2="4.3"></line>
+          </svg>
+          <span class="theme-seg-label">Light</span>
         </button>
+        <button type="button" class="theme-seg-btn active" data-theme-choice="auto" title="Automatic (Follow System Light/Dark Preference)">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2.5" y="3.5" width="15" height="10" rx="1.5"></rect>
+            <line x1="7" y1="16.5" x2="13" y2="16.5"></line>
+            <line x1="10" y1="13.5" x2="10" y2="16.5"></line>
+          </svg>
+          <span class="theme-seg-label">Auto</span>
+        </button>
+        <button type="button" class="theme-seg-btn" data-theme-choice="dark" title="Dark Mode">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15.5 12.8A6.5 6.5 0 0 1 7.2 4.5a6.5 6.5 0 1 0 8.3 8.3Z"></path>
+          </svg>
+          <span class="theme-seg-label">Dark</span>
+        </button>
+      </div>
+
+      <!-- Popover Workspace, Appearance & Tools Menu -->
+      <div class="tools-menu-wrap" id="toolsMenuWrap">
+        <button type="button" id="btnToolsMenu" class="btn-tools-menu btn-with-icon" title="Appearance, workspace directories, view-only mirror, and sheet tools">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="10" cy="10" r="2.5"></circle>
+            <path d="M16.2 12.2a1.2 1.2 0 0 0 .24 1.32l.05.05a1.45 1.45 0 1 1-2.05 2.05l-.05-.05a1.2 1.2 0 0 0-1.32-.24 1.2 1.2 0 0 0-.73 1.1v.14a1.45 1.45 0 1 1-2.9 0v-.07a1.2 1.2 0 0 0-.78-1.1 1.2 1.2 0 0 0-1.32.24l-.05.05a1.45 1.45 0 1 1-2.05-2.05l.05-.05a1.2 1.2 0 0 0 .24-1.32 1.2 1.2 0 0 0-1.1-.73h-.14a1.45 1.45 0 1 1 0-2.9h.07a1.2 1.2 0 0 0 1.1-.78 1.2 1.2 0 0 0-.24-1.32l-.05-.05a1.45 1.45 0 1 1 2.05-2.05l.05.05a1.2 1.2 0 0 0 1.32.24h.06a1.2 1.2 0 0 0 .73-1.1v-.14a1.45 1.45 0 1 1 2.9 0v.07a1.2 1.2 0 0 0 .73 1.1 1.2 1.2 0 0 0 1.32-.24l.05-.05a1.45 1.45 0 1 1 2.05 2.05l-.05.05a1.2 1.2 0 0 0-.24 1.32v.06a1.2 1.2 0 0 0 1.1.73h.14a1.45 1.45 0 1 1 0 2.9h-.07a1.2 1.2 0 0 0-1.1.73Z"></path>
+          </svg>
+          <span>Tools &amp; Setup</span>
+          <svg class="ui-icon chevron-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 6 8 10 12 6"></polyline>
+          </svg>
+        </button>
+
         <div id="toolsMenuDropdown" class="tools-menu-dropdown">
+          <!-- 1. Appearance: Theme & App-Wide Text Size -->
+          <div class="menu-section">
+            <div class="menu-section-header-row">
+              <span class="menu-section-title">Appearance &amp; Display</span>
+              <span id="menuThemeHint" class="menu-meta-hint">Auto</span>
+            </div>
+
+            <div class="menu-theme-row" id="menuThemeGroup" role="group" aria-label="Theme preference">
+              <button type="button" class="theme-seg-btn" data-theme-choice="light">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="10" cy="10" r="3.5"></circle>
+                  <line x1="10" y1="2" x2="10" y2="4"></line>
+                  <line x1="10" y1="16" x2="10" y2="18"></line>
+                  <line x1="4.3" y1="4.3" x2="5.7" y2="5.7"></line>
+                  <line x1="14.3" y1="14.3" x2="15.7" y2="15.7"></line>
+                  <line x1="2" y1="10" x2="4" y2="10"></line>
+                  <line x1="16" y1="10" x2="18" y2="10"></line>
+                  <line x1="4.3" y1="15.7" x2="5.7" y2="14.3"></line>
+                  <line x1="14.3" y1="5.7" x2="15.7" y2="4.3"></line>
+                </svg>
+                <span>Light</span>
+              </button>
+              <button type="button" class="theme-seg-btn active" data-theme-choice="auto">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="3.5" width="15" height="10" rx="1.5"></rect>
+                  <line x1="7" y1="16.5" x2="13" y2="16.5"></line>
+                  <line x1="10" y1="13.5" x2="10" y2="16.5"></line>
+                </svg>
+                <span>Auto</span>
+              </button>
+              <button type="button" class="theme-seg-btn" data-theme-choice="dark">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M15.5 12.8A6.5 6.5 0 0 1 7.2 4.5a6.5 6.5 0 1 0 8.3 8.3Z"></path>
+                </svg>
+                <span>Dark</span>
+              </button>
+            </div>
+
+            <div class="menu-fontsize-control">
+              <div class="menu-fontsize-top">
+                <label for="fontSizeSlider" class="menu-fontsize-label">Text Size</label>
+                <div class="menu-fontsize-meta">
+                  <span id="fontSizeValue" class="fontsize-value-pill">100%</span>
+                  <button type="button" id="btnResetFontSize" class="btn-inline-link" style="display:none;" title="Reset text size to 100%">Reset</button>
+                </div>
+              </div>
+              <div class="menu-fontsize-slider-row">
+                <button type="button" id="btnFontDecrease" class="btn-font-step" title="Decrease text size">A−</button>
+                <input type="range" id="fontSizeSlider" class="font-size-slider" min="85" max="125" step="5" value="100" aria-label="Application text size percentage">
+                <button type="button" id="btnFontIncrease" class="btn-font-step" title="Increase text size">A+</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Directories & View-Only Mirror -->
           <div class="menu-section">
             <div class="menu-section-title">Directories &amp; Mirroring</div>
             <div class="menu-item-group">
               <button type="button" id="menuSelectAgentFolder" class="menu-item" title="Select folder containing current monthly tracker workbooks">
-                <span>📂 Tracker Workbooks Folder...</span>
+                <span class="menu-item-left">
+                  <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.9a1.5 1.5 0 0 1 1.1.47l1.1 1.06a1.5 1.5 0 0 0 1.05.47H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5v-9Z"></path>
+                  </svg>
+                  <span id="agentDirLabel">Tracker Workbooks Folder...</span>
+                </span>
               </button>
               <button type="button" id="btnResetAgentDir" class="menu-item-reset" style="display:none;" title="Clear saved Agent folder handle">
-                ✕ Clear
+                Clear
               </button>
             </div>
             <div class="menu-item-group">
               <button type="button" id="btnSupervisorDir" class="menu-item" title="Select folder where (VIEW ONLY).xlsx copies are saved">
-                👁️ Supervisor Folder: Same as Agent
+                <span class="menu-item-left">
+                  <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10Z"></path>
+                    <circle cx="10" cy="10" r="2.5"></circle>
+                  </svg>
+                  <span id="supervisorDirLabel">Supervisor Folder: Same as Agent</span>
+                </span>
               </button>
               <button type="button" id="btnResetSupervisorDir" class="menu-item-reset" style="display:none;" title="Reset Supervisor export back to Agent folder">
-                ✕ Reset
+                Reset
               </button>
             </div>
             <div class="menu-item-group">
               <button type="button" id="btnTemplatesDir" class="menu-item" title="Select folder containing master .xlsx templates for new monthly workbooks">
-                📋 Templates Folder: Built-in Default
+                <span class="menu-item-left">
+                  <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4" y="2.5" width="12" height="15" rx="1.8"></rect>
+                    <line x1="7" y1="7" x2="13" y2="7"></line>
+                    <line x1="7" y1="10.5" x2="13" y2="10.5"></line>
+                    <line x1="7" y1="14" x2="10.5" y2="14"></line>
+                  </svg>
+                  <span id="templatesDirLabel">Templates Folder: Built-in Default</span>
+                </span>
               </button>
               <button type="button" id="btnResetTemplatesDir" class="menu-item-reset" style="display:none;" title="Clear custom Templates folder">
-                ✕ Reset
+                Reset
               </button>
             </div>
-            <button type="button" id="menuOpenViewOnly" class="menu-item" disabled>
-              <span>👁️ Open View-Only Tracker...</span>
+
+            <button type="button" id="menuOpenViewOnly" class="menu-item menu-item-highlight" disabled title="Inspect or download the Supervisor (VIEW ONLY).xlsx mirror workbook">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10Z"></path>
+                  <circle cx="10" cy="10" r="2.5"></circle>
+                </svg>
+                <span>Open View-Only Mirror...</span>
+              </span>
+              <span class="menu-item-tag">Read-Only</span>
             </button>
+
             <label class="menu-checkbox-item" title="Automatically reconnect saved directories when opening TrackerUI">
               <input type="checkbox" id="chkAutoReconnect" checked>
-              <span>⚡ Auto-Reconnect Folders on Startup</span>
+              <span>Auto-Reconnect Folders on Startup</span>
             </label>
           </div>
 
+          <!-- 3. Workbook & Schema -->
           <div class="menu-section">
             <div class="menu-section-title">Workbook &amp; Schema</div>
             <button type="button" id="btnNewWorkbook" class="menu-item" disabled>
-              <span>✨ Create New Monthly Workbook (.xlsx)...</span>
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M11.5 2.5H5.5A1.5 1.5 0 0 0 4 4v12a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 16 16V7l-4.5-4.5Z"></path>
+                  <polyline points="11.5 2.5 11.5 7 16 7"></polyline>
+                  <line x1="10" y1="10" x2="10" y2="14"></line>
+                  <line x1="8" y1="12" x2="12" y2="12"></line>
+                </svg>
+                <span>Create New Monthly Workbook...</span>
+              </span>
             </button>
             <button type="button" id="btnRepairSchema" class="menu-item" disabled>
-              <span>🛠️ Bootstrap / Repair Workbook Schema</span>
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.1-2.1a5 5 0 0 1-6.5 6.5l-5.8 5.8a1.8 1.8 0 0 1-2.5-2.5l5.8-5.8a5 5 0 0 1 6.5-6.5l-2.1 2.1Z"></path>
+                </svg>
+                <span>Bootstrap / Repair Workbook Schema</span>
+              </span>
             </button>
           </div>
 
+          <!-- 4. Active Day Tab Management -->
           <div class="menu-section">
             <div class="menu-section-title">Active Day Tab Management</div>
             <button type="button" id="btnAddBlankTab" class="menu-item" disabled>
-              <span>➕ New Blank Day Tab (MM-DD-YYYY)...</span>
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3.5" width="14" height="13.5" rx="2"></rect>
+                  <line x1="10" y1="7.5" x2="10" y2="13.5"></line>
+                  <line x1="7" y1="10.5" x2="13" y2="10.5"></line>
+                </svg>
+                <span>New Blank Day Tab (MM-DD-YYYY)...</span>
+              </span>
             </button>
             <button type="button" id="btnRenameTab" class="menu-item" disabled>
-              <span>✏️ Rename Current Day Tab...</span>
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M13.8 3.5a1.8 1.8 0 0 1 2.5 2.5L6.8 15.5l-3.5.8.8-3.5 9.7-9.3Z"></path>
+                </svg>
+                <span>Rename Current Day Tab...</span>
+              </span>
             </button>
             <button type="button" id="btnDeleteTab" class="menu-item menu-item-danger" disabled>
-              <span>🗑️ Delete Current Day Tab...</span>
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="3.5 5.5 16.5 5.5"></polyline>
+                  <path d="M7.5 5.5V3.8A1.3 1.3 0 0 1 8.8 2.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7"></path>
+                  <path d="M5.5 5.5l.8 11a1.5 1.5 0 0 0 1.5 1.4h4.4a1.5 1.5 0 0 0 1.5-1.4l.8-11"></path>
+                </svg>
+                <span>Delete Current Day Tab...</span>
+              </span>
             </button>
           </div>
 
+          <!-- 5. Row Management -->
           <div class="menu-section">
             <div class="menu-section-title">Row Management</div>
             <button type="button" id="btnDeleteMode" class="menu-item menu-item-danger" disabled>
-              <span>☑️ Batch Delete Requests Mode</span>
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="14" height="14" rx="2.2"></rect>
+                  <polyline points="7 10.2 9.2 12.4 13.4 7.8"></polyline>
+                </svg>
+                <span id="deleteModeLabel">Batch Delete Requests Mode</span>
+              </span>
             </button>
           </div>
         </div>
@@ -120,15 +310,15 @@
   <div id="filePathsBar" class="file-paths-bar">
     <div class="file-paths-list">
       <span class="file-path-item" id="pathTrackerItem" title="Active working tracker workbook path">
-        <strong>📂 Tracker:</strong> <code id="pathTrackerText">Not connected</code>
+        <span class="file-path-label">Tracker:</span> <code id="pathTrackerText">Not connected</code>
       </span>
       <span class="file-path-sep">•</span>
       <span class="file-path-item" id="pathViewOnlyItem" title="Supervisor (VIEW ONLY) mirror workbook path">
-        <strong>👁️ View-Only:</strong> <code id="pathViewOnlyText">Not connected</code>
+        <span class="file-path-label">View-Only:</span> <code id="pathViewOnlyText">Not connected</code>
       </span>
       <span class="file-path-sep" id="pathTemplatesSep" style="display:none;">•</span>
       <span class="file-path-item" id="pathTemplatesItem" style="display:none;" title="Custom templates directory">
-        <strong>📋 Templates:</strong> <code id="pathTemplatesText">Built-in</code>
+        <span class="file-path-label">Templates:</span> <code id="pathTemplatesText">Built-in</code>
       </span>
     </div>
     <div class="file-paths-actions">
@@ -140,12 +330,12 @@
   </div>
 
   <div class="controls">
-    <button type="button" id="btnNewEntry" class="btn-primary btn-new-request-bar" style="display:none;" title="Prepare a new support request in the bottom editor (or double-click for popup)">
+    <button type="button" id="btnNewEntry" class="btn-primary btn-new-request-bar" style="display:none;" title="Prepare a new support request in the bottom editor (or double-click Edit for popup)">
       <span class="plus-icon">＋</span> New Request
     </button>
 
     <div class="sheet-nav-group">
-      <label for="sheetSelect" style="color:var(--text-muted); font-size:12px;">Day Tab:</label>
+      <label for="sheetSelect" class="control-label">Day Tab</label>
       <button type="button" id="btnPrevSheet" class="btn-sheet-step" title="Previous (Older) Day Tab" disabled>◀</button>
       <select id="sheetSelect" disabled>
         <option>Connect agent folder first...</option>
@@ -153,14 +343,16 @@
       <button type="button" id="btnNextSheet" class="btn-sheet-step" title="Next (Newer) Day Tab" disabled>▶</button>
     </div>
 
-    <label for="scopeSelect" style="color:var(--text-muted); font-size:12px;">View Scope:</label>
-    <select id="scopeSelect" disabled>
-      <option value="current">Current Day Tab Only</option>
-      <option value="all">All Daily Tabs (Full History)</option>
-    </select>
+    <div class="scope-nav-group">
+      <label for="scopeSelect" class="control-label">Scope</label>
+      <select id="scopeSelect" disabled>
+        <option value="current">Current Day Tab Only</option>
+        <option value="all">All Daily Tabs (Full History)</option>
+      </select>
+    </div>
 
     <input type="text" id="searchInput" class="search-box" placeholder="Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)..." disabled>
-    <span id="searchScopeHint" class="search-scope-pill" style="display:none;">🌐 Searching All Tabs</span>
+    <span id="searchScopeHint" class="search-scope-pill" style="display:none;">Searching All Tabs</span>
     <button type="button" id="btnClearSortFilter" class="btn-clear-sort-filter" style="display:none;" title="Clear active search, like-item filter, and column sort">
       ✕ Clear Sort / Filter
     </button>
@@ -172,10 +364,10 @@
   <!-- Schema / Blank Workbook Bootstrap Banner -->
   <div id="schemaBanner" class="schema-banner" style="display:none;">
     <div id="schemaBannerText">
-      <strong>✨ Workbook Schema Incomplete:</strong> This workbook is blank or missing standard tracker tabs.
+      <strong>Workbook Schema Incomplete:</strong> This workbook is blank or missing standard tracker tabs.
     </div>
-    <button type="button" id="btnBannerBootstrap" class="btn-primary" style="padding: 5px 12px; font-size:12.5px;">
-      ✨ Bootstrap Tracker Schema Now
+    <button type="button" id="btnBannerBootstrap" class="btn-primary btn-sm">
+      Bootstrap Tracker Schema Now
     </button>
   </div>
 
@@ -183,10 +375,10 @@
     <div id="filterBannerContent">
       <strong id="filterBannerTitle">Like-Item Filter Active:</strong>
       <span id="filterBannerDesc">Showing all daily entries matching</span>
-      <code id="filterKeyText" style="color:var(--accent);"></code>
+      <code id="filterKeyText" class="filter-key-code"></code>
     </div>
     <div class="filter-banner-actions">
-      <button type="button" id="btnClearKeyFilter" style="padding: 4px 10px; font-size:12px;">✕ Clear Filter / Sort</button>
+      <button type="button" id="btnClearKeyFilter" class="btn-sm">✕ Clear Filter / Sort</button>
     </div>
   </div>
 
@@ -198,8 +390,8 @@
       </label>
     </div>
     <div class="delete-banner-actions">
-      <button type="button" id="btnConfirmDeleteSelected" class="btn-danger" disabled>🗑️ Delete Selected (0)</button>
-      <button type="button" id="btnCancelDeleteMode">Cancel</button>
+      <button type="button" id="btnConfirmDeleteSelected" class="btn-danger btn-sm" disabled>Delete Selected (0)</button>
+      <button type="button" id="btnCancelDeleteMode" class="btn-sm">Cancel</button>
     </div>
   </div>
 
@@ -248,7 +440,7 @@
         </tr>
       </thead>
       <tbody id="listBody">
-        <tr><td colspan="12" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
+        <tr><td colspan="12" class="empty-table-cell">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
       </tbody>
     </table>
   </div>
@@ -257,19 +449,19 @@
   <section id="bottomEditorDock" class="bottom-editor-dock" style="display:none;">
     <div id="dockHeaderBar" class="bottom-editor-header">
       <div id="dockHeaderToggleZone" class="bottom-editor-title-group" title="Click to collapse or expand the bottom editor">
-        <span id="dockModeBadge" class="dock-mode-badge new-mode">➕ New Request</span>
+        <span id="dockModeBadge" class="dock-mode-badge new-mode">＋ New Request</span>
         <span id="dockTargetLabel" class="dock-target-label">Select a row above to edit, or enter a new request below</span>
         <span id="dockKeyBadge" class="key-chip" style="display:none; cursor:default;" title="Immutable Tracking ID (Excluded from editable inputs)"></span>
       </div>
       <div class="bottom-editor-header-actions">
         <button type="button" id="btnDockTicketDetails" class="btn-dock-secondary" style="display:none;" title="View aggregated notes history with date-time stamps for this request">
-          📋 Ticket Details &amp; Notes History
+          Ticket Details &amp; History
         </button>
         <button type="button" id="btnDockOpenModal" class="btn-dock-secondary" title="Open current request in popup modal">
-          🗔 Popup Editor
+          Popup Editor
         </button>
         <button type="button" id="btnDockNewClear" class="btn-dock-secondary" title="Clear form and switch to New Request mode">
-          ＋ New / Clear Form
+          ＋ Clear / New
         </button>
         <button type="button" id="btnDockToggleCollapse" class="btn-dock-collapse" aria-expanded="true" title="Collapse or expand the bottom editor dock">
           ▾ Collapse
@@ -325,7 +517,7 @@
           <div class="dock-notes-label-row">
             <label for="dockNotes">Action Notes (Col I)</label>
             <button type="button" id="btnDockInsertTimestamp" class="btn-timestamp-chip" title="Insert current date &amp; time stamp into Action Notes">
-              🕒 + Insert Timestamp
+              + Insert Timestamp
             </button>
           </div>
           <textarea id="dockNotes" rows="2" placeholder="Enter action notes (click '+ Insert Timestamp' to prefix with date/time)..."></textarea>
@@ -333,10 +525,10 @@
       </div>
 
       <div class="dock-form-actions">
-        <span id="dockHintText" class="dock-hint-text">💡 Tip: Click any request row in the table above to load it here for instant editing.</span>
+        <span id="dockHintText" class="dock-hint-text">Tip: Click any request row in the table above to load it here for instant editing.</span>
         <div class="dock-submit-group">
           <button type="button" id="btnDockCancelEdit" style="display:none;">Cancel Edit</button>
-          <button type="submit" id="btnDockSave" class="btn-primary">💾 Save to Workbook</button>
+          <button type="submit" id="btnDockSave" class="btn-primary">Save to Workbook</button>
         </div>
       </div>
     </form>
@@ -399,7 +591,7 @@
             <div class="dock-notes-label-row">
               <label>Action Notes (Col I)</label>
               <button type="button" id="btnModalInsertTimestamp" class="btn-timestamp-chip" title="Insert current date &amp; time stamp into Action Notes">
-                🕒 + Insert Timestamp
+                + Insert Timestamp
               </button>
             </div>
             <textarea id="fNotes" rows="4"></textarea>
@@ -407,7 +599,7 @@
         </div>
         <div class="modal-actions">
           <button type="button" id="btnCancelModal">Cancel</button>
-          <button type="submit" class="btn-primary">💾 Save to Workbook</button>
+          <button type="submit" class="btn-primary">Save to Workbook</button>
         </div>
       </form>
     </div>
@@ -418,8 +610,8 @@
     <div class="modal modal-wide">
       <div class="modal-header">
         <div>
-          <h3 id="ticketDetailsTitle">📋 Ticket Details &amp; Aggregated Notes</h3>
-          <div id="ticketDetailsSubtitle" style="font-size:12px; color:var(--text-muted); margin-top:2px;"></div>
+          <h3 id="ticketDetailsTitle">Ticket Details &amp; Aggregated Notes</h3>
+          <div id="ticketDetailsSubtitle" class="modal-subtitle"></div>
         </div>
         <span id="ticketDetailsKeyBadge" class="key-chip" style="cursor:default;"></span>
       </div>
@@ -427,23 +619,23 @@
       <div id="ticketDetailsMetaGrid" class="ticket-meta-grid"></div>
 
       <div class="ticket-timeline-section">
-        <div class="preview-section-title" id="ticketTimelineHeader">🕒 Aggregated Notes &amp; Daily Timeline</div>
+        <div class="preview-section-title" id="ticketTimelineHeader">Aggregated Notes &amp; Daily Timeline</div>
         <div id="ticketTimelineList" class="ticket-timeline-list"></div>
       </div>
 
       <form id="ticketQuickNoteForm" class="ticket-quick-note-form">
         <div class="dock-notes-label-row">
-          <label for="ticketQuickNoteInput">➕ Append New Timestamped Note to Latest Entry</label>
+          <label for="ticketQuickNoteInput">Append New Timestamped Note to Latest Entry</label>
           <span id="ticketQuickNoteTargetBadge" class="badge badge-pending"></span>
         </div>
         <div class="ticket-quick-note-row">
           <textarea id="ticketQuickNoteInput" rows="2" placeholder="Type a new note update (a [MM/DD/YYYY HH:MM AM/PM] timestamp will be added automatically)..." required></textarea>
-          <button type="submit" class="btn-primary">➕ Add Timestamped Note</button>
+          <button type="submit" class="btn-primary">＋ Add Timestamped Note</button>
         </div>
       </form>
 
       <div class="modal-actions">
-        <button type="button" id="btnTicketEditInDock" class="btn-dock-secondary">✏️ Edit in Bottom Dock</button>
+        <button type="button" id="btnTicketEditInDock" class="btn-dock-secondary">Edit in Bottom Dock</button>
         <button type="button" id="btnCloseTicketDetails" class="btn-primary">Close</button>
       </div>
     </div>
@@ -454,22 +646,22 @@
     <div class="modal modal-xl">
       <div class="modal-header">
         <div>
-          <h3 id="viewOnlyTitle">👁️ Supervisor View-Only Tracker Inspector</h3>
-          <div id="viewOnlyPathSubtitle" style="font-size:12px; color:var(--text-muted); margin-top:2px;"></div>
+          <h3 id="viewOnlyTitle">Supervisor View-Only Tracker Inspector</h3>
+          <div id="viewOnlyPathSubtitle" class="modal-subtitle"></div>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div class="modal-header-right">
           <span id="viewOnlySyncBadge" class="badge badge-complete">Read-Only ArrayBuffer</span>
           <button type="button" id="btnDownloadViewOnly" class="btn-dock-secondary" title="Download/open a standalone copy of the View-Only .xlsx file">
-            📥 Download / Open .xlsx
+            Download / Open .xlsx
           </button>
         </div>
       </div>
 
       <div class="view-only-controls">
-        <label for="viewOnlySheetSelect" style="font-size:12px; color:var(--text-muted);">Day Tab:</label>
+        <label for="viewOnlySheetSelect" class="control-label">Day Tab</label>
         <select id="viewOnlySheetSelect"></select>
         <input type="text" id="viewOnlySearchInput" class="search-box" placeholder="Filter View-Only rows...">
-        <span id="viewOnlyStatsText" style="font-size:12px; color:var(--text-muted);"></span>
+        <span id="viewOnlyStatsText" class="control-label"></span>
       </div>
 
       <div class="view-only-table-wrap">
@@ -492,7 +684,7 @@
       </div>
 
       <div class="modal-actions">
-        <button type="button" id="btnRefreshViewOnly" class="btn-dock-secondary">🔄 Refresh View-Only</button>
+        <button type="button" id="btnRefreshViewOnly" class="btn-dock-secondary">Refresh View-Only</button>
         <button type="button" id="btnCloseViewOnly" class="btn-primary">Close</button>
       </div>
     </div>
@@ -502,13 +694,13 @@
   <div id="rolloverModal" class="modal-backdrop">
     <div class="modal modal-wide">
       <div class="modal-header">
-        <h3>⏭️ Rollover / Sync Unfinished Requests</h3>
+        <h3>Rollover / Sync Unfinished Requests</h3>
         <span id="rolloverTodayBadge" class="key-chip" style="cursor:default;"></span>
       </div>
       <form id="rolloverForm">
         <div id="rolloverFutureBanner" class="rollover-banner" style="display:none;"></div>
 
-        <div class="form-group full" style="margin-bottom: 12px;">
+        <div class="form-group full rollover-target-group">
           <label for="rolloverTargetDate">Target Daily Tab (MM-DD-YYYY)</label>
           <div class="rollover-target-row">
             <input type="text" id="rolloverTargetDate" placeholder="MM-DD-YYYY" required>
@@ -527,7 +719,7 @@
 
         <div class="modal-actions">
           <button type="button" id="btnCancelRollover">Cancel</button>
-          <button type="submit" id="btnConfirmRollover" class="btn-primary">⏭️ Run Rollover / Sync</button>
+          <button type="submit" id="btnConfirmRollover" class="btn-primary">Run Rollover / Sync</button>
         </div>
       </form>
     </div>
@@ -542,11 +734,11 @@
       </div>
       <form id="dialogForm">
         <div id="dialogMessage" class="dialog-message"></div>
-        <div id="dialogSelectWrap" class="form-group" style="display:none; margin-top: 12px;">
+        <div id="dialogSelectWrap" class="form-group dialog-field-gap" style="display:none;">
           <label id="dialogSelectLabel" for="dialogSelect">Template Source</label>
           <select id="dialogSelect"></select>
         </div>
-        <div id="dialogInputWrap" class="form-group" style="display:none; margin-top: 14px;">
+        <div id="dialogInputWrap" class="form-group dialog-field-gap" style="display:none;">
           <label id="dialogInputLabel" for="dialogInput">Value</label>
           <input type="text" id="dialogInput" autocomplete="off">
           <div id="dialogInputError" class="dialog-input-error" style="display:none;"></div>
@@ -567,18 +759,18 @@
     <div class="status-bar-left">
       <span id="statusPill" class="status-pill">No Folder Linked</span>
       <button type="button" id="btnRetryMirror" class="btn-retry-mirror" style="display:none;" title="Supervisor (VIEW ONLY) mirror was in use. Click to retry syncing now.">
-        🔄 Retry Mirror Sync
+        Retry Mirror Sync
       </button>
     </div>
     <div class="status-bar-center">
-      <span id="statusFolderInfo" class="status-meta-item">📂 Folder: Not connected</span>
+      <span id="statusFolderInfo" class="status-meta-item">Folder: Not connected</span>
       <span class="status-divider">•</span>
-      <span id="statusRowStats" class="status-meta-item">📊 0 requests</span>
+      <span id="statusRowStats" class="status-meta-item">0 requests</span>
     </div>
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.11.2</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.12.0</span>
     </div>
   </footer>
 

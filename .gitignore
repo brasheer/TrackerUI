@@ -104,6 +104,7 @@ pnpm-debug.log*
 # General Logs & Backups
 # ==========================================
 *.log
+errorlogs
 *.bak
 *.old
 *.orig

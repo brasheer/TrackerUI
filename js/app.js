@@ -127,27 +127,55 @@ const IDB_SUPERVISOR_KEY = 'supervisorFolderHandle';
 const IDB_TEMPLATES_KEY = 'templatesFolderHandle';
 const IDB_LAST_WORKBOOK_KEY = 'lastActiveWorkbookName';
 const AUTO_RECONNECT_STORAGE_KEY = 'trackerui_auto_reconnect';
+const THEME_STORAGE_KEY = 'trackerui_theme_mode'; // 'auto' | 'light' | 'dark'
+const FONT_SCALE_STORAGE_KEY = 'trackerui_font_scale'; // '85' .. '125' (percent)
+const FONT_SCALE_MIN = 85;
+const FONT_SCALE_MAX = 125;
+const FONT_SCALE_STEP = 5;
+
+let themePreference = localStorage.getItem(THEME_STORAGE_KEY) || 'auto';
+if (!['auto', 'light', 'dark'].includes(themePreference)) {
+  themePreference = 'auto';
+}
+let fontScalePercent = parseInt(localStorage.getItem(FONT_SCALE_STORAGE_KEY) || '100', 10);
+if (isNaN(fontScalePercent) || fontScalePercent < FONT_SCALE_MIN || fontScalePercent > FONT_SCALE_MAX) {
+  fontScalePercent = 100;
+}
 
 // --- DOM ELEMENTS ---
+const metaThemeColor = document.getElementById('metaThemeColor');
 const statusPill = document.getElementById('statusPill');
 const btnRetryMirror = document.getElementById('btnRetryMirror');
 const workbookPickerWrap = document.getElementById('workbookPickerWrap');
 const workbookSelect = document.getElementById('workbookSelect');
 const btnReconnect = document.getElementById('btnReconnect');
+const reconnectBtnLabel = document.getElementById('reconnectBtnLabel');
 const btnLinkFile = document.getElementById('btnLinkFile');
 const btnOpenViewOnly = document.getElementById('btnOpenViewOnly');
 const btnRollover = document.getElementById('btnRollover');
 const btnNewEntry = document.getElementById('btnNewEntry');
 
-// Popover Tools Menu Elements
+// Appearance & Popover Tools Menu Elements
+const headerThemeGroup = document.getElementById('headerThemeGroup');
+const menuThemeGroup = document.getElementById('menuThemeGroup');
+const menuThemeHint = document.getElementById('menuThemeHint');
+const fontSizeSlider = document.getElementById('fontSizeSlider');
+const btnFontDecrease = document.getElementById('btnFontDecrease');
+const btnFontIncrease = document.getElementById('btnFontIncrease');
+const fontSizeValue = document.getElementById('fontSizeValue');
+const btnResetFontSize = document.getElementById('btnResetFontSize');
+
 const toolsMenuWrap = document.getElementById('toolsMenuWrap');
 const btnToolsMenu = document.getElementById('btnToolsMenu');
 const toolsMenuDropdown = document.getElementById('toolsMenuDropdown');
 const menuSelectAgentFolder = document.getElementById('menuSelectAgentFolder');
+const agentDirLabel = document.getElementById('agentDirLabel');
 const btnResetAgentDir = document.getElementById('btnResetAgentDir');
 const btnSupervisorDir = document.getElementById('btnSupervisorDir');
+const supervisorDirLabel = document.getElementById('supervisorDirLabel');
 const btnResetSupervisorDir = document.getElementById('btnResetSupervisorDir');
 const btnTemplatesDir = document.getElementById('btnTemplatesDir');
+const templatesDirLabel = document.getElementById('templatesDirLabel');
 const btnResetTemplatesDir = document.getElementById('btnResetTemplatesDir');
 const menuOpenViewOnly = document.getElementById('menuOpenViewOnly');
 const chkAutoReconnect = document.getElementById('chkAutoReconnect');
@@ -158,6 +186,137 @@ const btnAddBlankTab = document.getElementById('btnAddBlankTab');
 const btnRenameTab = document.getElementById('btnRenameTab');
 const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
+const deleteModeLabel = document.getElementById('deleteModeLabel');
+
+// --- APPEARANCE ENGINE: THEME (LIGHT / DARK / AUTO) & APP-WIDE FONT SCALING ---
+const systemLightMediaQuery = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(prefers-color-scheme: light)')
+  : null;
+
+function resolveEffectiveTheme(pref = themePreference) {
+  if (pref === 'light') return 'light';
+  if (pref === 'dark') return 'dark';
+  return (systemLightMediaQuery && systemLightMediaQuery.matches) ? 'light' : 'dark';
+}
+
+function applyThemeToDOM() {
+  const effective = resolveEffectiveTheme(themePreference);
+  document.documentElement.setAttribute('data-theme', effective);
+  document.documentElement.style.colorScheme = effective;
+
+  if (metaThemeColor) {
+    metaThemeColor.setAttribute('content', effective === 'light' ? '#ffffff' : '#0f172a');
+  }
+
+  const updateSegButtons = (container) => {
+    if (!container) return;
+    container.querySelectorAll('.theme-seg-btn').forEach(btn => {
+      const active = btn.dataset.themeChoice === themePreference;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+  };
+  updateSegButtons(headerThemeGroup);
+  updateSegButtons(menuThemeGroup);
+
+  if (menuThemeHint) {
+    if (themePreference === 'auto') {
+      const sysLabel = effective === 'light' ? 'Light' : 'Dark';
+      menuThemeHint.textContent = `Auto (${sysLabel})`;
+    } else {
+      menuThemeHint.textContent = themePreference === 'light' ? 'Light Mode' : 'Dark Mode';
+    }
+  }
+}
+
+function setThemePreference(nextPref, { persist = true, announce = false } = {}) {
+  if (!['auto', 'light', 'dark'].includes(nextPref)) return;
+  themePreference = nextPref;
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, themePreference);
+  }
+  applyThemeToDOM();
+  if (announce) {
+    const effective = resolveEffectiveTheme(themePreference);
+    const label = themePreference === 'auto'
+      ? `Automatic (${effective === 'light' ? 'System Light' : 'System Dark'})`
+      : (themePreference === 'light' ? 'Light Mode' : 'Dark Mode');
+    showToast(`Theme set to ${label}.`, 'info');
+  }
+}
+
+function applyFontScaleToDOM(percent, { persist = true } = {}) {
+  const clamped = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, Math.round(percent / FONT_SCALE_STEP) * FONT_SCALE_STEP));
+  fontScalePercent = clamped;
+  const scaleRatio = +(clamped / 100).toFixed(2);
+  document.documentElement.style.setProperty('--font-scale', String(scaleRatio));
+
+  if (persist) {
+    localStorage.setItem(FONT_SCALE_STORAGE_KEY, String(clamped));
+  }
+  if (fontSizeSlider) {
+    fontSizeSlider.value = String(clamped);
+  }
+  if (fontSizeValue) {
+    fontSizeValue.textContent = `${clamped}%`;
+  }
+  if (btnResetFontSize) {
+    btnResetFontSize.style.display = clamped !== 100 ? 'inline-block' : 'none';
+  }
+  if (btnFontDecrease) {
+    btnFontDecrease.disabled = clamped <= FONT_SCALE_MIN;
+  }
+  if (btnFontIncrease) {
+    btnFontIncrease.disabled = clamped >= FONT_SCALE_MAX;
+  }
+}
+
+// Apply saved/system appearance immediately before initial render
+applyThemeToDOM();
+applyFontScaleToDOM(fontScalePercent, { persist: false });
+
+if (systemLightMediaQuery) {
+  const handleSystemThemeChange = () => {
+    if (themePreference === 'auto') {
+      applyThemeToDOM();
+    }
+  };
+  if (typeof systemLightMediaQuery.addEventListener === 'function') {
+    systemLightMediaQuery.addEventListener('change', handleSystemThemeChange);
+  } else if (typeof systemLightMediaQuery.addListener === 'function') {
+    systemLightMediaQuery.addListener(handleSystemThemeChange);
+  }
+}
+
+[headerThemeGroup, menuThemeGroup].forEach(groupEl => {
+  if (!groupEl) return;
+  groupEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.theme-seg-btn');
+    if (!btn || !btn.dataset.themeChoice) return;
+    setThemePreference(btn.dataset.themeChoice, { persist: true, announce: false });
+  });
+});
+
+if (fontSizeSlider) {
+  fontSizeSlider.addEventListener('input', (e) => {
+    applyFontScaleToDOM(Number(e.target.value), { persist: true });
+  });
+}
+if (btnFontDecrease) {
+  btnFontDecrease.addEventListener('click', () => {
+    applyFontScaleToDOM(fontScalePercent - FONT_SCALE_STEP, { persist: true });
+  });
+}
+if (btnFontIncrease) {
+  btnFontIncrease.addEventListener('click', () => {
+    applyFontScaleToDOM(fontScalePercent + FONT_SCALE_STEP, { persist: true });
+  });
+}
+if (btnResetFontSize) {
+  btnResetFontSize.addEventListener('click', () => {
+    applyFontScaleToDOM(100, { persist: true });
+  });
+}
 
 // File Paths Bar Elements
 const pathTrackerText = document.getElementById('pathTrackerText');
@@ -599,17 +758,29 @@ if (chkAutoReconnectBar) {
   });
 }
 
+function setReconnectButtonText(text) {
+  if (reconnectBtnLabel) {
+    reconnectBtnLabel.textContent = text;
+  } else if (btnReconnect) {
+    btnReconnect.textContent = text;
+  }
+}
+
 function updateAgentDirUI() {
+  const setLabel = (txt) => {
+    if (agentDirLabel) agentDirLabel.textContent = txt;
+    else menuSelectAgentFolder.textContent = txt;
+  };
   if (parentDirHandle) {
-    menuSelectAgentFolder.innerHTML = `<span>📂 Tracker Folder: ${escapeHtml(parentDirHandle.name)}</span>`;
+    setLabel(`Tracker Folder: ${parentDirHandle.name}`);
     menuSelectAgentFolder.classList.add('custom-active');
     if (btnResetAgentDir) btnResetAgentDir.style.display = 'inline-block';
   } else if (cachedDirHandle) {
-    menuSelectAgentFolder.innerHTML = `<span>📂 Reconnect Tracker: ${escapeHtml(cachedDirHandle.name)}</span>`;
+    setLabel(`Reconnect Tracker: ${cachedDirHandle.name}`);
     menuSelectAgentFolder.classList.add('custom-active');
     if (btnResetAgentDir) btnResetAgentDir.style.display = 'inline-block';
   } else {
-    menuSelectAgentFolder.innerHTML = '<span>📂 Tracker Workbooks Folder...</span>';
+    setLabel('Tracker Workbooks Folder...');
     menuSelectAgentFolder.classList.remove('custom-active');
     if (btnResetAgentDir) btnResetAgentDir.style.display = 'none';
   }
@@ -618,18 +789,22 @@ function updateAgentDirUI() {
 }
 
 function updateSupervisorDirUI() {
+  const setLabel = (txt) => {
+    if (supervisorDirLabel) supervisorDirLabel.textContent = txt;
+    else btnSupervisorDir.textContent = txt;
+  };
   if (supervisorDirHandle) {
-    btnSupervisorDir.textContent = `👁️ Supervisor Folder: ${supervisorDirHandle.name}`;
+    setLabel(`Supervisor Folder: ${supervisorDirHandle.name}`);
     btnSupervisorDir.title = `Saving (VIEW ONLY).xlsx copies to "${supervisorDirHandle.name}". Click to change folder.`;
     btnSupervisorDir.classList.add('custom-active');
     btnResetSupervisorDir.style.display = 'inline-block';
   } else if (cachedSupervisorDirHandle) {
-    btnSupervisorDir.textContent = `👁️ Reconnect Supervisor: ${cachedSupervisorDirHandle.name}`;
+    setLabel(`Reconnect Supervisor: ${cachedSupervisorDirHandle.name}`);
     btnSupervisorDir.title = `Click to reconnect saved Supervisor folder "${cachedSupervisorDirHandle.name}"`;
     btnSupervisorDir.classList.add('custom-active');
     btnResetSupervisorDir.style.display = 'inline-block';
   } else {
-    btnSupervisorDir.textContent = '👁️ Supervisor Folder: Same as Agent';
+    setLabel('Supervisor Folder: Same as Agent');
     btnSupervisorDir.title = 'Select a custom folder where (VIEW ONLY).xlsx copies are saved';
     btnSupervisorDir.classList.remove('custom-active');
     btnResetSupervisorDir.style.display = 'none';
@@ -639,19 +814,23 @@ function updateSupervisorDirUI() {
 }
 
 function updateTemplatesDirUI() {
+  const setLabel = (txt) => {
+    if (templatesDirLabel) templatesDirLabel.textContent = txt;
+    else btnTemplatesDir.textContent = txt;
+  };
   if (templatesDirHandle) {
     const countSuffix = availableTemplates.length > 0 ? ` (${availableTemplates.length})` : '';
-    btnTemplatesDir.textContent = `📋 Templates Folder: ${templatesDirHandle.name}${countSuffix}`;
+    setLabel(`Templates Folder: ${templatesDirHandle.name}${countSuffix}`);
     btnTemplatesDir.title = `Using templates from "${templatesDirHandle.name}". Click to change folder.`;
     btnTemplatesDir.classList.add('custom-active');
     btnResetTemplatesDir.style.display = 'inline-block';
   } else if (cachedTemplatesDirHandle) {
-    btnTemplatesDir.textContent = `📋 Reconnect Templates: ${cachedTemplatesDirHandle.name}`;
+    setLabel(`Reconnect Templates: ${cachedTemplatesDirHandle.name}`);
     btnTemplatesDir.title = `Click to reconnect saved Templates folder "${cachedTemplatesDirHandle.name}"`;
     btnTemplatesDir.classList.add('custom-active');
     btnResetTemplatesDir.style.display = 'inline-block';
   } else {
-    btnTemplatesDir.textContent = '📋 Templates Folder: Built-in Default';
+    setLabel('Templates Folder: Built-in Default');
     btnTemplatesDir.title = 'Select folder containing master .xlsx templates for new monthly workbooks';
     btnTemplatesDir.classList.remove('custom-active');
     btnResetTemplatesDir.style.display = 'none';
@@ -839,8 +1018,8 @@ async function initCachedDirectoryHandles() {
   }
   if (savedAgentHandle) {
     cachedDirHandle = savedAgentHandle;
-    btnReconnect.textContent = `🔄 Reconnect Folder (${savedAgentHandle.name})`;
-    btnReconnect.style.display = 'inline-block';
+    setReconnectButtonText(`Reconnect (${savedAgentHandle.name})`);
+    btnReconnect.style.display = 'inline-flex';
   }
 
   updateAgentDirUI();
@@ -855,25 +1034,32 @@ async function initCachedDirectoryHandles() {
     if (!connectedImmediately) {
       // Browser requires a user gesture after full restart before requestPermission() can fire.
       autoReconnectGesturePending = true;
-      btnReconnect.textContent = `⚡ Auto-Reconnect (${savedAgentHandle.name})`;
+      setReconnectButtonText(`Auto-Reconnect (${savedAgentHandle.name})`);
       setStatus('Click anywhere to auto-reconnect folder', 'warning');
 
       const onFirstUserGesture = async (evt) => {
-        if (!autoReconnectGesturePending || !autoReconnectEnabled || parentDirHandle) return;
-        // Ignore if user is explicitly unchecking the auto-reconnect toggle or picking a new folder
+        if (!autoReconnectGesturePending || !autoReconnectEnabled || parentDirHandle) {
+          document.removeEventListener('click', onFirstUserGesture);
+          return;
+        }
+        // Ignore if user is explicitly unchecking the auto-reconnect toggle, changing theme/font, or picking a new folder
         if (
           evt.target.closest('#chkAutoReconnect') ||
           evt.target.closest('#chkAutoReconnectBar') ||
           evt.target.closest('#btnLinkFile') ||
           evt.target.closest('#menuSelectAgentFolder') ||
-          evt.target.closest('#btnResetAgentDir')
+          evt.target.closest('#btnResetAgentDir') ||
+          evt.target.closest('#headerThemeGroup') ||
+          evt.target.closest('#menuThemeGroup') ||
+          evt.target.closest('.menu-fontsize-control')
         ) {
           return;
         }
+        document.removeEventListener('click', onFirstUserGesture);
         autoReconnectGesturePending = false;
         await attemptReconnectFolders({ requestPermissionIfNeeded: true, silent: true });
       };
-      document.addEventListener('click', onFirstUserGesture, { once: true });
+      document.addEventListener('click', onFirstUserGesture);
     }
   }
 }
@@ -927,7 +1113,7 @@ if (btnResetAgentDir) {
     await deleteHandleFromIDB(IDB_LAST_WORKBOOK_KEY);
     workbookPickerWrap.style.display = 'none';
     btnReconnect.style.display = 'none';
-    btnLinkFile.style.display = 'inline-block';
+    btnLinkFile.style.display = 'inline-flex';
     btnNewEntry.style.display = 'none';
     btnRollover.style.display = 'none';
     if (bottomEditorDock) bottomEditorDock.style.display = 'none';
@@ -935,7 +1121,7 @@ if (btnResetAgentDir) {
     schemaBanner.style.display = 'none';
     setStatus('No Folder Linked', '');
     updateAgentDirUI();
-    listBody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:var(--text-muted); padding: 30px;">Click "Select Agent Folder" to connect your tracker directory.</td></tr>';
+    listBody.innerHTML = '<tr><td colspan="12" class="empty-table-cell">Click "Select Agent Folder" to connect your tracker directory.</td></tr>';
     showToast('Cleared saved Tracker Workbooks folder.', 'info');
   });
 }
@@ -1917,7 +2103,8 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     }
   });
 
-  // Pass 2: Index Daily MM-DD-YYYY Tabs (and if none exist yet but "Rename to Current Date" has entries, index it too)
+  // Pass 2: Sort Daily MM-DD-YYYY Tabs oldest -> newest before indexing so un-keyed cross-day rows inherit prior Tracking IDs
+  dailySheetObjs.sort((a, b) => parseDateTab(a.rawName) - parseDateTab(b.rawName));
   dailySheetObjs.forEach(({ worksheet, rawName }) => {
     indexWorksheetRows(worksheet, rawName);
   });
@@ -1953,7 +2140,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   searchInput.disabled = dateSheets.length === 0;
 
   btnNewEntry.style.display = 'inline-flex';
-  btnRollover.style.display = 'inline-block';
+  btnRollover.style.display = 'inline-flex';
   btnRepairSchema.disabled = false;
   btnAddBlankTab.disabled = false;
   btnRenameTab.disabled = dateSheets.length === 0;
@@ -2705,6 +2892,225 @@ if (dockBroker && dockMaster && dockBidder) {
   dockMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder));
 }
 
+// --- UNIQUE REQUEST IDENTITY & CHRONOLOGICAL ACTION NOTES MERGING ---
+const IGNORED_TICKET_PLACEHOLDERS = new Set([
+  'n/a', 'na', 'none', 'null', 'tbd', 'pending', '-', '—', '--', '0', 'unknown'
+]);
+
+function normalizeTicketId(ticket) {
+  const clean = String(ticket || '').trim().toLowerCase().replace(/^#+\s*/, '');
+  if (!clean || IGNORED_TICKET_PLACEHOLDERS.has(clean)) return '';
+  return clean;
+}
+
+function normalizeMatchText(str) {
+  return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeLotsSignature(lots) {
+  if (!lots) return '';
+  const tokens = String(lots)
+    .split(/[,;/|\s]+/)
+    .map(s => s.trim().toLowerCase())
+    .filter(s => s.length > 0 && s !== '—')
+    .sort();
+  return tokens.join(',');
+}
+
+function normalizeDateTabString(tabName) {
+  const parts = String(tabName || '').trim().split('-').map(s => s.trim());
+  if (parts.length !== 3) return String(tabName || '').trim();
+  let [m, d, y] = parts;
+  if (y.length === 2) y = '20' + y;
+  return `${m.padStart(2, '0')}-${d.padStart(2, '0')}-${y}`;
+}
+
+/**
+ * Determines whether two rows across daily sheets represent the same unique
+ * support request—even if an older sheet had no Column K Tracking ID or received
+ * a separate backfilled UUID before rollover.
+ */
+function areRowsSameUniqueRequest(rowA, rowB) {
+  if (!rowA || !rowB) return false;
+
+  const keyA = String(rowA.key || '').trim().toLowerCase();
+  const keyB = String(rowB.key || '').trim().toLowerCase();
+  if (keyA && keyB && keyA === keyB) return true;
+
+  const ticketA = normalizeTicketId(rowA.ticket);
+  const ticketB = normalizeTicketId(rowB.ticket);
+
+  // Explicit, different non-empty Ticket Numbers indicate distinct requests
+  if (ticketA && ticketB && ticketA !== ticketB) {
+    return false;
+  }
+
+  const subjA = normalizeMatchText(rowA.subject);
+  const subjB = normalizeMatchText(rowB.subject);
+  const masterA = normalizeMatchText(rowA.master);
+  const masterB = normalizeMatchText(rowB.master);
+  const brokerA = normalizeMatchText(rowA.broker);
+  const brokerB = normalizeMatchText(rowB.broker);
+  const acctA = masterA || brokerA;
+  const acctB = masterB || brokerB;
+  const bidderA = normalizeMatchText(rowA.bidder);
+  const bidderB = normalizeMatchText(rowB.bidder);
+  const actionA = normalizeMatchText(rowA.action);
+  const actionB = normalizeMatchText(rowB.action);
+  const yardA = normalizeMatchText(rowA.yard);
+  const yardB = normalizeMatchText(rowB.yard);
+  const lotsA = normalizeLotsSignature(rowA.lots);
+  const lotsB = normalizeLotsSignature(rowB.lots);
+
+  const accountsMatch =
+    (masterA && masterB && masterA === masterB) ||
+    (brokerA && brokerB && brokerA === brokerB) ||
+    (!acctA && !acctB);
+
+  // Case A: Same valid Ticket Number + compatible Lot Numbers & Account
+  if (ticketA && ticketB && ticketA === ticketB) {
+    const lotsCompatible = (lotsA === lotsB) || !lotsA || !lotsB;
+    if (lotsCompatible && (accountsMatch || !acctA || !acctB)) {
+      return true;
+    }
+  }
+
+  // Case B: Exact core field match (Subject + Account + Bidder + Action + Yard + Lots)
+  const populatedCount = [subjA, acctA, bidderA, actionA, lotsA].filter(Boolean).length;
+  if (
+    populatedCount >= 2 &&
+    subjA === subjB &&
+    accountsMatch &&
+    bidderA === bidderB &&
+    actionA === actionB &&
+    yardA === yardB &&
+    lotsA === lotsB
+  ) {
+    return true;
+  }
+
+  // Case C: Same Subject + same Account + same non-empty Lot Numbers
+  if (
+    subjA && subjA === subjB &&
+    acctA && acctB && accountsMatch &&
+    lotsA && lotsA === lotsB &&
+    (!bidderA || !bidderB || bidderA === bidderB)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function parseTimestampTaggedNoteLine(rawLine) {
+  const trimmed = String(rawLine || '').trim();
+  if (!trimmed || trimmed === '—') return null;
+
+  const match = trimmed.match(/^\[(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}(?:\s+[^\]]*)?)\]\s*(.*)$/);
+  if (match) {
+    const rawStamp = match[1].trim();
+    const coreText = match[2].trim();
+    if (!coreText) return null;
+    const datePartMatch = rawStamp.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(.*)$/);
+    let normDate = rawStamp.toLowerCase();
+    let hasTime = false;
+    if (datePartMatch) {
+      let [, m, d, y, rest] = datePartMatch;
+      if (y.length === 2) y = '20' + y;
+      normDate = `${m.padStart(2, '0')}-${d.padStart(2, '0')}-${y}`;
+      hasTime = Boolean(rest && rest.trim().length > 0);
+    }
+    return {
+      hasExplicitStamp: true,
+      rawStamp,
+      normDate,
+      hasTime,
+      coreText,
+      normCore: normalizeMatchText(coreText)
+    };
+  }
+
+  return {
+    hasExplicitStamp: false,
+    rawStamp: null,
+    normDate: null,
+    hasTime: false,
+    coreText: trimmed,
+    normCore: normalizeMatchText(trimmed)
+  };
+}
+
+/**
+ * Chronologically appends and deduplicates Action Notes across all daily entries
+ * for a unique request so rolling over carries forward every day's notes without
+ * duplicating lines already carried over on intermediate days.
+ */
+function mergeChronologicalActionNotes(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return '';
+
+  const sortedEntries = [...entries].sort((a, b) => {
+    const diff = parseDateTab(a.sheetName) - parseDateTab(b.sheetName);
+    return diff !== 0 ? diff : (a.rowNumber || 0) - (b.rowNumber || 0);
+  });
+
+  const collected = []; // [{ normDate, hasTime, normCore, formatted }]
+
+  sortedEntries.forEach(entry => {
+    const rawNotes = String(entry.notes || '').trim();
+    if (!rawNotes || rawNotes === '—') return;
+
+    const entryNormDate = normalizeDateTabString(entry.sheetName);
+    const lines = rawNotes.split(/\r?\n/);
+
+    lines.forEach(line => {
+      const parsed = parseTimestampTaggedNoteLine(line);
+      if (!parsed) return;
+
+      const effectiveDate = parsed.normDate || entryNormDate;
+      const formattedLine = parsed.hasExplicitStamp
+        ? `[${parsed.rawStamp}] ${parsed.coreText}`
+        : (effectiveDate ? `[${effectiveDate}] ${parsed.coreText}` : parsed.coreText);
+
+      const existingIdx = collected.findIndex(item => {
+        if (item.normCore !== parsed.normCore) return false;
+        if (!parsed.hasExplicitStamp) return true;
+        if (item.normDate === effectiveDate) return true;
+        return false;
+      });
+
+      if (existingIdx !== -1) {
+        if (parsed.hasTime && !collected[existingIdx].hasTime) {
+          collected[existingIdx].hasTime = true;
+          collected[existingIdx].formatted = formattedLine;
+        }
+        return;
+      }
+
+      collected.push({
+        normDate: effectiveDate,
+        hasTime: parsed.hasTime,
+        normCore: parsed.normCore,
+        formatted: formattedLine
+      });
+    });
+  });
+
+  return collected.map(c => c.formatted).join('\n');
+}
+
+function extractNoteCoresSet(rawNotes) {
+  const set = new Set();
+  const trimmed = String(rawNotes || '').trim();
+  if (!trimmed || trimmed === '—') return set;
+  trimmed.split(/\r?\n/).forEach(line => {
+    const parsed = parseTimestampTaggedNoteLine(line);
+    if (parsed && parsed.normCore) {
+      set.add(parsed.normCore);
+    }
+  });
+  return set;
+}
+
 // --- INDEX WORKSHEET ROWS & LEGACY GUID BACKFILL ---
 function indexWorksheetRows(worksheet, sheetName) {
   const colMap = getWorksheetColumnMap(worksheet);
@@ -2714,6 +3120,21 @@ function indexWorksheetRows(worksheet, sheetName) {
   }
 
   const defaultStatusVal = getDefaultStatus();
+
+  // Pre-scan explicit Tracking IDs already present on this sheet so backfilled rows never collide on the same sheet
+  const usedKeysOnSheet = new Set();
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const existingKey = cellText(row, colMap.trackingCol).toLowerCase();
+    if (existingKey) {
+      usedKeysOnSheet.add(existingKey);
+    } else if (colMap.isTemplateLayout) {
+      const col11Text = cellText(row, 11);
+      if (UUID_REGEX.test(col11Text)) {
+        usedKeysOnSheet.add(col11Text.toLowerCase());
+      }
+    }
+  });
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
@@ -2780,14 +3201,35 @@ function indexWorksheetRows(worksheet, sheetName) {
 
     if (!key) {
       const cacheKey = `${workingFileHandle ? workingFileHandle.name : 'wb'}::${sheetName}::${rowNumber}`;
-      if (legacyBackfillMap.has(cacheKey)) {
+      const candidateRow = { subject, ticket, broker, master, bidder, action, yard, lots, key: '' };
+
+      // Check prior indexed daily sheets (newest prior first) so carried-over rows without Col K inherit the same Tracking ID
+      let inheritedPriorKey = '';
+      for (let i = allRows.length - 1; i >= 0; i--) {
+        const prior = allRows[i];
+        if (prior.sheetName === sheetName) continue;
+        if (usedKeysOnSheet.has(prior.key)) continue;
+        if (areRowsSameUniqueRequest(prior, candidateRow)) {
+          inheritedPriorKey = prior.key;
+          break;
+        }
+      }
+
+      if (inheritedPriorKey) {
+        key = inheritedPriorKey;
+        legacyBackfillMap.set(cacheKey, key);
+      } else if (legacyBackfillMap.has(cacheKey) && !usedKeysOnSheet.has(legacyBackfillMap.get(cacheKey))) {
         key = legacyBackfillMap.get(cacheKey);
       } else {
         key = generateTrackingGuid();
         legacyBackfillMap.set(cacheKey, key);
       }
+
+      usedKeysOnSheet.add(key);
       row.getCell(colMap.trackingCol).value = key;
       row.commit();
+    } else {
+      usedKeysOnSheet.add(key);
     }
 
     allRows.push({
@@ -3231,7 +3673,7 @@ function renderList() {
   listBody.innerHTML = '';
   const colSpan = isDeleteMode ? 12 : 11;
   if (sorted.length === 0) {
-    listBody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center; color:var(--text-muted); padding: 24px;">No matching requests found.</td></tr>`;
+    listBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell">No matching requests found.</td></tr>`;
     const shadowRowEmpty = createShadowNewRowElement(colSpan, currentSheet);
     if (shadowRowEmpty) {
       listBody.appendChild(shadowRowEmpty);
@@ -3314,7 +3756,7 @@ function renderList() {
       ${deleteCheckboxCell}
       <td style="white-space:nowrap;">
         <button type="button" class="clickable-date-tab" data-date-tab="${escapeHtml(item.sheetName)}" title="Click to switch to daily tab ${escapeHtml(item.sheetName)}">
-          📅 ${escapeHtml(item.sheetName)}
+          ${escapeHtml(item.sheetName)}
         </button>
       </td>
       <td>
@@ -3325,11 +3767,11 @@ function renderList() {
       <td>${subjectHtml}</td>
       <td>${ticketHtml}</td>
       <td>${brokerHtml}</td>
-      <td style="font-family:monospace; font-size:12px; white-space:nowrap;">
+      <td class="cell-mono-sm">
         M: ${masterHtml}<br>B: ${bidderHtml}
       </td>
       <td>${actionHtml}</td>
-      <td style="font-size:12px;">
+      <td class="cell-sm">
         Y: ${yardHtml}<br>L: ${lotsHtml}
       </td>
       <td class="notes-cell">
@@ -3343,7 +3785,7 @@ function renderList() {
       </td>
       <td>
         <div class="row-actions-group">
-          <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Ticket Details &amp; Aggregated Timestamped Notes">📋 Details</button>
+          <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Ticket Details &amp; Aggregated Timestamped Notes">Details</button>
           <button type="button" class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="Load into Bottom Editor (Double-click for Modal)">Edit</button>
         </div>
       </td>
@@ -3365,9 +3807,15 @@ function setDeleteMode(enabled) {
   closeToolsMenu();
   isDeleteMode = Boolean(enabled);
   selectedForDelete.clear();
-  btnDeleteMode.innerHTML = isDeleteMode
-    ? '<span>✕ Exit Batch Delete Mode</span>'
-    : '<span>☑️ Batch Delete Requests Mode</span>';
+  if (deleteModeLabel) {
+    deleteModeLabel.textContent = isDeleteMode
+      ? 'Exit Batch Delete Mode'
+      : 'Batch Delete Requests Mode';
+  } else {
+    btnDeleteMode.textContent = isDeleteMode
+      ? 'Exit Batch Delete Mode'
+      : 'Batch Delete Requests Mode';
+  }
   deleteBanner.style.display = isDeleteMode ? 'flex' : 'none';
   thDeleteSelect.style.display = isDeleteMode ? 'table-cell' : 'none';
   updateDeleteSelectionUI();
@@ -3377,7 +3825,7 @@ function setDeleteMode(enabled) {
 function updateDeleteSelectionUI() {
   const count = selectedForDelete.size;
   deleteSelectedCountEl.textContent = String(count);
-  btnConfirmDeleteSelected.textContent = `🗑️ Delete Selected (${count})`;
+  btnConfirmDeleteSelected.textContent = `Delete Selected (${count})`;
   btnConfirmDeleteSelected.disabled = count === 0;
   syncSelectAllCheckboxes();
   updateStatusBarTelemetry();
@@ -3743,7 +4191,7 @@ function setBottomDockNewMode(focusInput = false) {
   const activeTab = sheetSelect.value || 'Daily Tab';
 
   if (dockModeBadge) {
-    dockModeBadge.textContent = '➕ New Request Mode';
+    dockModeBadge.textContent = '＋ New Request';
     dockModeBadge.classList.add('new-mode');
     dockModeBadge.classList.remove('edit-mode');
   }
@@ -3755,7 +4203,7 @@ function setBottomDockNewMode(focusInput = false) {
     dockKeyBadge.textContent = '';
   }
   if (dockHintText) {
-    dockHintText.textContent = '💡 Tip: Click any request row in the table above to load it here for instant editing.';
+    dockHintText.textContent = 'Tip: Click any request row in the table above to load it here for instant editing.';
   }
   if (btnDockTicketDetails) {
     btnDockTicketDetails.style.display = 'none';
@@ -3764,7 +4212,7 @@ function setBottomDockNewMode(focusInput = false) {
     btnDockCancelEdit.style.display = 'none';
   }
   if (btnDockSave) {
-    btnDockSave.textContent = `💾 Save New Request to ${activeTab}`;
+    btnDockSave.textContent = `Save New Request to ${activeTab}`;
   }
 
   if (dockEntryForm) {
@@ -3797,7 +4245,7 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
   dockEditingTarget = { sheetName, rowNumber, key: item.key };
 
   if (dockModeBadge) {
-    dockModeBadge.textContent = '✏️ Editing Selected Row';
+    dockModeBadge.textContent = 'Editing Row';
     dockModeBadge.classList.remove('new-mode');
     dockModeBadge.classList.add('edit-mode');
   }
@@ -3811,7 +4259,7 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     dockKeyBadge.title = `Immutable Tracking ID (Excluded from editable inputs): ${item.key}`;
   }
   if (dockHintText) {
-    dockHintText.textContent = `✏️ Editing Row ${rowNumber} on ${sheetName}. Unique Tracking ID is preserved automatically on save.`;
+    dockHintText.textContent = `Editing Row ${rowNumber} on ${sheetName}. Unique Tracking ID is preserved automatically on save.`;
   }
   if (btnDockTicketDetails) {
     btnDockTicketDetails.style.display = 'inline-block';
@@ -3820,7 +4268,7 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     btnDockCancelEdit.style.display = 'inline-block';
   }
   if (btnDockSave) {
-    btnDockSave.textContent = `💾 Save Changes (${sheetName} • Row ${rowNumber})`;
+    btnDockSave.textContent = `Save Changes (${sheetName} • Row ${rowNumber})`;
   }
 
   if (dockSubject) dockSubject.value = item.subject;
@@ -4096,16 +4544,30 @@ if (dockEntryForm) {
 function findTicketHistoryEntries(seedItem) {
   if (!seedItem) return [];
   const normKey = seedItem.key ? seedItem.key.trim().toLowerCase() : '';
-  const normTicket = seedItem.ticket ? seedItem.ticket.trim().toLowerCase() : '';
 
-  const matches = allRows.filter(r => {
-    if (normKey && r.key.trim().toLowerCase() === normKey) return true;
-    if (normTicket && r.ticket && r.ticket.trim().toLowerCase() === normTicket) return true;
-    return false;
+  const exactKeyMatches = normKey
+    ? allRows.filter(r => r.key && r.key.trim().toLowerCase() === normKey)
+    : [];
+
+  const matchedSheets = new Set(exactKeyMatches.map(r => r.sheetName));
+  const combined = [...exactKeyMatches];
+
+  const candidateRows = [...allRows].sort((a, b) => {
+    const diff = parseDateTab(a.sheetName) - parseDateTab(b.sheetName);
+    return diff !== 0 ? diff : a.rowNumber - b.rowNumber;
+  });
+
+  candidateRows.forEach(r => {
+    if (normKey && r.key && r.key.trim().toLowerCase() === normKey) return;
+    if (matchedSheets.has(r.sheetName)) return;
+    if (areRowsSameUniqueRequest(seedItem, r)) {
+      matchedSheets.add(r.sheetName);
+      combined.push(r);
+    }
   });
 
   // Sort chronologically oldest to newest
-  return matches.sort((a, b) => {
+  return combined.sort((a, b) => {
     const diff = parseDateTab(a.sheetName) - parseDateTab(b.sheetName);
     return diff !== 0 ? diff : a.rowNumber - b.rowNumber;
   });
@@ -4118,7 +4580,7 @@ function formatNoteHtmlWithTimestamps(rawNote) {
   const escaped = escapeHtml(rawNote);
   return escaped.replace(
     /\[(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}[^\]]*)\]/g,
-    '<span class="timeline-timestamp-tag">🕒 $1</span>'
+    '<span class="timeline-timestamp-tag">$1</span>'
   );
 }
 
@@ -4148,7 +4610,7 @@ function renderTicketDetailsModal(seedItem) {
     : history.length;
 
   if (ticketDetailsTitle) {
-    ticketDetailsTitle.textContent = `📋 ${latest.subject || 'Ticket Details'}`;
+    ticketDetailsTitle.textContent = latest.subject || 'Ticket Details';
   }
   if (ticketDetailsSubtitle) {
     ticketDetailsSubtitle.textContent = `Tracked across ${history.length} daily tab${history.length === 1 ? '' : 's'} (${spanDays} day span • First logged ${oldest.sheetName})`;
@@ -4158,7 +4620,7 @@ function renderTicketDetailsModal(seedItem) {
     ticketDetailsKeyBadge.title = `Tracking ID: ${latest.key}`;
   }
   if (ticketTimelineHeader) {
-    ticketTimelineHeader.textContent = `🕒 Aggregated Notes & Daily Timeline (${history.length} Tab${history.length === 1 ? '' : 's'} • ${spanDays} Day Span)`;
+    ticketTimelineHeader.textContent = `Aggregated Notes & Daily Timeline (${history.length} Tab${history.length === 1 ? '' : 's'} • ${spanDays} Day Span)`;
   }
   if (ticketQuickNoteTargetBadge) {
     ticketQuickNoteTargetBadge.textContent = `Target: ${latest.sheetName} (Row ${latest.rowNumber})`;
@@ -4179,7 +4641,7 @@ function renderTicketDetailsModal(seedItem) {
       </div>
       <div class="ticket-meta-card">
         <div class="ticket-meta-card-label">Original Creation Tab</div>
-        <div class="ticket-meta-card-val">📅 ${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
+        <div class="ticket-meta-card-val">${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
       </div>
       <div class="ticket-meta-card">
         <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
@@ -4211,12 +4673,12 @@ function renderTicketDetailsModal(seedItem) {
       div.innerHTML = `
         <div class="timeline-entry-header">
           <div>
-            <strong>📅 ${escapeHtml(entry.sheetName)}</strong>
-            <span style="font-size:11px; color:var(--text-muted); font-weight:500; margin-left:6px;">(Row ${entry.rowNumber} • ${stepLabel})</span>
+            <strong>${escapeHtml(entry.sheetName)}</strong>
+            <span style="font-size:0.6875rem; color:var(--text-muted); font-weight:500; margin-left:6px;">(Row ${entry.rowNumber} • ${stepLabel})</span>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(entry.status)}</span>
-            <button type="button" class="btn-edit btn-timeline-load-dock" data-sheet="${escapeHtml(entry.sheetName)}" data-row="${entry.rowNumber}" style="padding:3px 8px; font-size:11px;">Edit Row</button>
+            <button type="button" class="btn-edit btn-sm btn-timeline-load-dock" data-sheet="${escapeHtml(entry.sheetName)}" data-row="${entry.rowNumber}">Edit Row</button>
           </div>
         </div>
         <div class="timeline-entry-body">${formatNoteHtmlWithTimestamps(entry.notes)}</div>
@@ -4403,7 +4865,7 @@ async function openViewOnlyTrackerModal() {
     });
 
     if (viewOnlyTitle) {
-      viewOnlyTitle.textContent = `👁️ View-Only Inspector: ${mirrorFileName}`;
+      viewOnlyTitle.textContent = `View-Only Inspector: ${mirrorFileName}`;
     }
     if (viewOnlyPathSubtitle) {
       const modTimeStr = file.lastModified
@@ -4413,8 +4875,8 @@ async function openViewOnlyTrackerModal() {
     }
     if (viewOnlySyncBadge) {
       viewOnlySyncBadge.textContent = pendingMirrorBuffer
-        ? '⚠️ Pending Mirror Retry'
-        : 'Read-Only ArrayBuffer';
+        ? 'Pending Mirror Retry'
+        : 'Read-Only Snapshot';
       viewOnlySyncBadge.className = pendingMirrorBuffer
         ? 'badge badge-pending'
         : 'badge badge-complete';
@@ -4483,7 +4945,7 @@ function renderViewOnlyTable() {
 
   viewOnlyBody.innerHTML = '';
   if (filtered.length === 0) {
-    viewOnlyBody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:20px;">No matching requests in View-Only snapshot.</td></tr>`;
+    viewOnlyBody.innerHTML = `<tr><td colspan="9" class="empty-table-cell">No matching requests in View-Only snapshot.</td></tr>`;
     return;
   }
 
@@ -4491,14 +4953,14 @@ function renderViewOnlyTable() {
     const tr = document.createElement('tr');
     const isDone = isCompletedStatus(item.status);
     tr.innerHTML = `
-      <td style="white-space:nowrap; font-family:monospace;">📅 ${escapeHtml(item.sheetName)}</td>
+      <td class="cell-mono-sm" style="white-space:nowrap;">${escapeHtml(item.sheetName)}</td>
       <td>${escapeHtml(item.subject || '—')}</td>
-      <td style="font-family:monospace;">${escapeHtml(item.ticket || '—')}</td>
+      <td class="cell-mono-sm">${escapeHtml(item.ticket || '—')}</td>
       <td>${escapeHtml(item.broker || '—')}</td>
-      <td style="font-family:monospace; font-size:12px;">M: ${escapeHtml(item.master || '—')}<br>B: ${escapeHtml(item.bidder || '—')}</td>
+      <td class="cell-mono-sm">M: ${escapeHtml(item.master || '—')}<br>B: ${escapeHtml(item.bidder || '—')}</td>
       <td>${escapeHtml(item.action || '—')}</td>
-      <td style="font-size:12px;">Y: ${escapeHtml(item.yard || '—')}<br>L: ${escapeHtml(item.lots || '—')}</td>
-      <td style="max-width:260px; white-space:pre-wrap; font-size:12px;">${escapeHtml(item.notes || '—')}</td>
+      <td class="cell-sm">Y: ${escapeHtml(item.yard || '—')}<br>L: ${escapeHtml(item.lots || '—')}</td>
+      <td class="cell-sm" style="max-width:260px; white-space:pre-wrap;">${escapeHtml(item.notes || '—')}</td>
       <td><span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(item.status)}</span></td>
     `;
     viewOnlyBody.appendChild(tr);
@@ -4603,7 +5065,7 @@ function openRolloverModal() {
 
     rolloverFutureBanner.style.display = 'block';
     rolloverFutureBanner.innerHTML = `
-      <strong>📅 Future-Dated Tab Detected:</strong> Your workbook's latest sheet is
+      <strong>Future-Dated Tab Detected:</strong> Your workbook's latest sheet is
       <code>${escapeHtml(latestSheet)}</code> (${latestCount} entry${latestCount === 1 ? '' : 'ies'}),
       which is ahead of today's date (<code>${escapeHtml(todayStr)}</code>).
       Select whether to sync into <strong>${escapeHtml(latestSheet)}</strong>, roll forward to
@@ -4648,6 +5110,68 @@ function openRolloverModal() {
 rolloverTargetDate.addEventListener('input', updateRolloverModalPreview);
 chkIncludeFutureTabs.addEventListener('change', updateRolloverModalPreview);
 
+function buildConsolidatedRolloverItem(entries, baseRow) {
+  const mergedNotes = mergeChronologicalActionNotes(entries);
+  const canonicalRow = entries[entries.length - 1] || baseRow;
+  const pickLatestIfUnkeyedMerge = (primaryVal, fieldName) => {
+    if (primaryVal && String(primaryVal).trim() !== '') return primaryVal;
+    const allSameKey = entries.every(
+      e => e.key && baseRow.key && e.key.trim().toLowerCase() === baseRow.key.trim().toLowerCase()
+    );
+    if (allSameKey) return primaryVal;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const candidate = entries[i][fieldName];
+      if (candidate && String(candidate).trim() !== '') return candidate;
+    }
+    return primaryVal;
+  };
+
+  return {
+    ...baseRow,
+    key: canonicalRow.key || baseRow.key,
+    subject: pickLatestIfUnkeyedMerge(baseRow.subject, 'subject'),
+    ticket: pickLatestIfUnkeyedMerge(baseRow.ticket, 'ticket'),
+    broker: pickLatestIfUnkeyedMerge(baseRow.broker, 'broker'),
+    master: pickLatestIfUnkeyedMerge(baseRow.master, 'master'),
+    bidder: pickLatestIfUnkeyedMerge(baseRow.bidder, 'bidder'),
+    action: pickLatestIfUnkeyedMerge(baseRow.action, 'action'),
+    yard: pickLatestIfUnkeyedMerge(baseRow.yard, 'yard'),
+    lots: pickLatestIfUnkeyedMerge(baseRow.lots, 'lots'),
+    notes: mergedNotes,
+    _entries: entries,
+    _sourceTabCount: entries.length,
+    _firstSheet: entries[0] ? entries[0].sheetName : baseRow.sheetName
+  };
+}
+
+function unifyHistoricalGroupTrackingIds(entries, canonicalKey) {
+  if (!Array.isArray(entries) || !canonicalKey || !workbook) return;
+  const normCanonical = canonicalKey.trim().toLowerCase();
+
+  entries.forEach(histRow => {
+    if (!histRow || !histRow.sheetName || !histRow.rowNumber) return;
+    if (histRow.key && histRow.key.trim().toLowerCase() === normCanonical) return;
+
+    const ws = workbook.getWorksheet(histRow.sheetName);
+    if (!ws) return;
+    const colMap = getWorksheetColumnMap(ws);
+
+    // Ensure no other distinct row on the same sheet already holds canonicalKey
+    let collision = false;
+    ws.eachRow({ includeEmpty: false }, (r, rNum) => {
+      if (rNum === 1 || rNum === histRow.rowNumber) return;
+      if (cellText(r, colMap.trackingCol).trim().toLowerCase() === normCanonical) {
+        collision = true;
+      }
+    });
+    if (collision) return;
+
+    const excelRow = ws.getRow(histRow.rowNumber);
+    excelRow.getCell(colMap.trackingCol).value = canonicalKey;
+    excelRow.commit();
+  });
+}
+
 function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
   if (!DATE_TAB_REGEX.test(targetTabName)) {
     return { valid: false };
@@ -4668,61 +5192,132 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     ? [...priorSheets, ...futureSheets]
     : priorSheets;
 
-  const latestByKey = new Map();
-  const lastOpenByKey = new Map();
+  // Consolidate each unique request across all source daily tabs chronologically
+  // so only ONE consolidated item per unique request rolls forward with all prior notes appended.
+  const requestGroups = [];
+  let nextGroupId = 1;
 
   sourceSheets.forEach(sheetName => {
     const sheetRows = allRows
       .filter(r => r.sheetName === sheetName)
       .sort((a, b) => a.rowNumber - b.rowNumber);
 
+    const matchedGroupIdsOnSheet = new Set();
+
     sheetRows.forEach(row => {
-      const normKey = row.key.toLowerCase();
-      latestByKey.set(normKey, row);
-      if (!isCompletedStatus(row.status)) {
-        lastOpenByKey.set(normKey, row);
+      const normKey = row.key.trim().toLowerCase();
+
+      // 1. Exact Tracking ID match across sheets
+      let matchedGroup = requestGroups.find(g =>
+        g.entries.some(e => e.key.trim().toLowerCase() === normKey)
+      );
+
+      // 2. Fallback unique-request identity match across different days (1-to-1 per sheet)
+      if (!matchedGroup) {
+        for (let i = requestGroups.length - 1; i >= 0; i--) {
+          const candidate = requestGroups[i];
+          if (matchedGroupIdsOnSheet.has(candidate.id)) continue;
+          if (
+            areRowsSameUniqueRequest(candidate.latestRow, row) ||
+            areRowsSameUniqueRequest(candidate.entries[0], row)
+          ) {
+            matchedGroup = candidate;
+            break;
+          }
+        }
+      }
+
+      if (matchedGroup) {
+        matchedGroupIdsOnSheet.add(matchedGroup.id);
+        matchedGroup.entries.push(row);
+        matchedGroup.latestRow = row;
+        if (!isCompletedStatus(row.status)) {
+          matchedGroup.lastOpenRow = row;
+        }
+      } else {
+        const newGroup = {
+          id: nextGroupId++,
+          entries: [row],
+          latestRow: row,
+          lastOpenRow: isCompletedStatus(row.status) ? null : row
+        };
+        matchedGroupIdsOnSheet.add(newGroup.id);
+        requestGroups.push(newGroup);
       }
     });
   });
 
-  const existingTargetRows = allRows.filter(r => r.sheetName === targetTabName);
-  const existingOnTargetByKey = new Map();
-  existingTargetRows.forEach(r => {
-    existingOnTargetByKey.set(r.key.toLowerCase(), r);
-  });
+  const existingTargetRows = allRows
+    .filter(r => r.sheetName === targetTabName)
+    .sort((a, b) => a.rowNumber - b.rowNumber);
+
+  const matchedTargetRowNums = new Set();
 
   const toRollOver = [];
   const alreadyOnTarget = [];
   const supersededByComplete = [];
 
-  latestByKey.forEach((latestRow, normKey) => {
+  requestGroups.forEach(group => {
+    const latestRow = group.latestRow;
     const isLatestComplete = isCompletedStatus(latestRow.status);
+    const consolidatedLatest = buildConsolidatedRolloverItem(group.entries, latestRow);
 
-    if (existingOnTargetByKey.has(normKey)) {
-      const targetRow = existingOnTargetByKey.get(normKey);
+    // Check whether this unique request is already present on targetTabName
+    let targetRow = existingTargetRows.find(t =>
+      group.entries.some(e => e.key.trim().toLowerCase() === t.key.trim().toLowerCase())
+    );
+    if (!targetRow) {
+      targetRow = existingTargetRows.find(t =>
+        !matchedTargetRowNums.has(t.rowNumber) &&
+        (areRowsSameUniqueRequest(latestRow, t) || areRowsSameUniqueRequest(group.entries[0], t))
+      );
+    }
+
+    if (targetRow) {
+      matchedTargetRowNums.add(targetRow.rowNumber);
       const isTargetComplete = isCompletedStatus(targetRow.status);
+      const priorCores = extractNoteCoresSet(consolidatedLatest.notes);
+      const targetCores = extractNoteCoresSet(targetRow.notes);
+      let hasMissingPriorNotes = false;
+      for (const core of priorCores) {
+        if (!targetCores.has(core)) {
+          hasMissingPriorNotes = true;
+          break;
+        }
+      }
+      const mergedTargetNotes = hasMissingPriorNotes
+        ? mergeChronologicalActionNotes([...group.entries, targetRow])
+        : targetRow.notes;
+
       alreadyOnTarget.push({
-        latestRow,
+        latestRow: consolidatedLatest,
         targetRow,
-        reopenedOnSource: isTargetComplete && !isLatestComplete
+        reopenedOnSource: isTargetComplete && !isLatestComplete,
+        hasMissingPriorNotes,
+        mergedTargetNotes,
+        groupEntries: group.entries
       });
     } else if (!isLatestComplete) {
-      toRollOver.push(latestRow);
-    } else if (lastOpenByKey.has(normKey)) {
+      toRollOver.push(consolidatedLatest);
+    } else if (group.lastOpenRow) {
+      const consolidatedOpen = buildConsolidatedRolloverItem(group.entries, group.lastOpenRow);
       supersededByComplete.push({
-        openRow: lastOpenByKey.get(normKey),
-        completedRow: latestRow
+        openRow: consolidatedOpen,
+        completedRow: latestRow,
+        groupEntries: group.entries
       });
     }
   });
 
   existingTargetRows.forEach(targetRow => {
-    const normKey = targetRow.key.toLowerCase();
-    if (!latestByKey.has(normKey)) {
+    if (!matchedTargetRowNums.has(targetRow.rowNumber)) {
       alreadyOnTarget.push({
         latestRow: targetRow,
         targetRow,
-        reopenedOnSource: false
+        reopenedOnSource: false,
+        hasMissingPriorNotes: false,
+        mergedTargetNotes: targetRow.notes,
+        groupEntries: []
       });
     }
   });
@@ -4748,7 +5343,7 @@ function updateRolloverModalPreview() {
 
   if (!DATE_TAB_REGEX.test(targetVal)) {
     rolloverFutureOptionWrap.style.display = 'none';
-    rolloverPreviewBox.innerHTML = `<div style="color:var(--warning);">Please enter a valid target date in exact <code>MM-DD-YYYY</code> format.</div>`;
+    rolloverPreviewBox.innerHTML = `<div style="color:var(--warning-text);">Please enter a valid target date in exact <code>MM-DD-YYYY</code> format.</div>`;
     return;
   }
 
@@ -4766,7 +5361,7 @@ function updateRolloverModalPreview() {
 
   const tabStateBadge = plan.targetExists
     ? `<span class="badge badge-complete">Existing Tab (${plan.alreadyOnTarget.length} request${plan.alreadyOnTarget.length === 1 ? '' : 's'} currently on sheet)</span>`
-    : `<span class="badge badge-pending">New Tab (Will be created & cloned from template)</span>`;
+    : `<span class="badge badge-pending">New Tab (Will be created &amp; cloned from template)</span>`;
 
   let html = `
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding-bottom:8px; border-bottom:1px solid var(--border);">
@@ -4776,17 +5371,22 @@ function updateRolloverModalPreview() {
   `;
 
   html += `<div>
-    <div class="preview-section-title">✅ Unfinished Requests to Roll Over (${plan.toRollOver.length})</div>`;
+    <div class="preview-section-title">Unfinished Unique Requests to Roll Over (${plan.toRollOver.length})</div>`;
   if (plan.toRollOver.length === 0) {
-    html += `<div style="color:var(--text-muted); font-size:12.5px;">No new unfinished requests found across source sheets.</div>`;
+    html += `<div style="color:var(--text-muted); font-size:0.78125rem;">No new unfinished requests found across source sheets.</div>`;
   } else {
     html += `<div class="preview-list">`;
     plan.toRollOver.forEach(item => {
+      const spanInfo = item._sourceTabCount > 1
+        ? `From ${escapeHtml(item._firstSheet)} → ${escapeHtml(item.sheetName)} (${item._sourceTabCount} days consolidated)`
+        : `From ${escapeHtml(item.sheetName)}`;
+      const noteLineCount = item.notes ? item.notes.split(/\r?\n/).filter(Boolean).length : 0;
+      const notesMeta = noteLineCount > 0 ? ` • ${noteLineCount} note line${noteLineCount === 1 ? '' : 's'} appended` : '';
       html += `
         <div class="preview-item">
           <div class="preview-item-main">
             <strong>${escapeHtml(item.subject)}</strong>
-            <span class="preview-item-sub">${escapeHtml(item.broker)} • From ${escapeHtml(item.sheetName)} • ID: ${escapeHtml(item.key.slice(0, 8))}...</span>
+            <span class="preview-item-sub">${escapeHtml(item.broker || 'No Broker')} • ${spanInfo}${notesMeta} • ID: ${escapeHtml(item.key.slice(0, 8))}...</span>
           </div>
           <span class="badge badge-pending">${escapeHtml(item.status)}</span>
         </div>
@@ -4798,14 +5398,15 @@ function updateRolloverModalPreview() {
 
   if (plan.alreadyOnTarget.length > 0) {
     html += `<div>
-      <div class="preview-section-title">📌 Already Present on ${escapeHtml(targetVal)} (${plan.alreadyOnTarget.length})</div>
+      <div class="preview-section-title">Already Present on ${escapeHtml(targetVal)} (${plan.alreadyOnTarget.length})</div>
       <div class="preview-list">`;
-    plan.alreadyOnTarget.forEach(({ targetRow, latestRow, reopenedOnSource }) => {
+    plan.alreadyOnTarget.forEach(({ targetRow, latestRow, reopenedOnSource, hasMissingPriorNotes }) => {
+      const syncNoteLabel = hasMissingPriorNotes ? ' • +Append missing prior notes' : '';
       html += `
         <div class="preview-item">
           <div class="preview-item-main">
             <strong>${escapeHtml(targetRow.subject)}</strong>
-            <span class="preview-item-sub">${escapeHtml(targetRow.broker)} • Row ${targetRow.rowNumber} on ${escapeHtml(targetVal)}</span>
+            <span class="preview-item-sub">${escapeHtml(targetRow.broker || 'No Broker')} • Row ${targetRow.rowNumber} on ${escapeHtml(targetVal)}${syncNoteLabel}</span>
           </div>
           <span class="badge ${isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending'}">
             ${escapeHtml(targetRow.status)}${reopenedOnSource ? ` → Reopen (${escapeHtml(latestRow.status)})` : ''}
@@ -4818,10 +5419,10 @@ function updateRolloverModalPreview() {
 
   if (plan.supersededByComplete.length > 0) {
     html += `<div>
-      <div class="preview-section-title" style="color:#fbbf24;">
-        ⚠️ Open on Older Tab, but Marked "Closed / Complete" on Later Tab (${plan.supersededByComplete.length})
+      <div class="preview-section-title warning-title">
+        Open on Older Tab, Marked Closed / Complete on Later Tab (${plan.supersededByComplete.length})
       </div>
-      <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+      <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">
         These requests had an open status on an earlier sheet, but were marked <strong>${escapeHtml(plan.supersededByComplete[0].completedRow.status)}</strong> on a newer sheet. Check any item below to reopen and carry it over into <code>${escapeHtml(targetVal)}</code>:
       </div>
       <div class="preview-list">`;
@@ -4833,7 +5434,7 @@ function updateRolloverModalPreview() {
             <div class="preview-item-main">
               <strong>${escapeHtml(openRow.subject)}</strong>
               <span class="preview-item-sub">
-                ${escapeHtml(openRow.broker)} • Was <strong>${escapeHtml(openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>${escapeHtml(completedRow.status)}</strong> on ${escapeHtml(completedRow.sheetName)}
+                ${escapeHtml(openRow.broker || 'No Broker')} • Was <strong>${escapeHtml(openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>${escapeHtml(completedRow.status)}</strong> on ${escapeHtml(completedRow.sheetName)}
               </span>
             </div>
           </div>
@@ -4918,34 +5519,45 @@ rolloverForm.addEventListener('submit', async (e) => {
       targetSheet.getColumn(targetColMap.emailSubjCol).hidden = false;
     }
 
-    const existingTargetRows = allRows.filter(r => r.sheetName === targetTabName);
-    const existingOnTargetByKey = new Map();
-    existingTargetRows.forEach(r => {
-      existingOnTargetByKey.set(r.key.toLowerCase(), r);
-    });
+    const existingTargetList = [...allRows.filter(r => r.sheetName === targetTabName)];
 
     let writeRowIdx = getNextEmptyRow(targetSheet);
     let addedCount = 0;
-    let alreadyPresentCount = existingTargetRows.length;
+    let alreadyPresentCount = existingTargetList.length;
     let reopenedCount = 0;
+    let notesSyncedCount = 0;
 
     for (const item of itemsToCarry) {
       const normKey = item.key.toLowerCase();
-      if (!existingOnTargetByKey.has(normKey)) {
+      const duplicateOnTarget = existingTargetList.some(
+        t => t.key.toLowerCase() === normKey || areRowsSameUniqueRequest(t, item)
+      );
+      if (!duplicateOnTarget) {
         const rNum = writeRowIdx++;
         const r = targetSheet.getRow(rNum);
         writeItemToWorksheetRow(r, rNum, item, targetColMap);
-        existingOnTargetByKey.set(normKey, item);
+        existingTargetList.push(item);
+        unifyHistoricalGroupTrackingIds(item._entries, item.key);
         addedCount++;
       }
     }
 
     for (const entry of plan.alreadyOnTarget) {
-      if (entry.reopenedOnSource) {
+      if (entry.groupEntries && entry.groupEntries.length > 0) {
+        unifyHistoricalGroupTrackingIds(entry.groupEntries, entry.targetRow.key);
+      }
+
+      if (entry.reopenedOnSource || entry.hasMissingPriorNotes) {
         const excelRow = targetSheet.getRow(entry.targetRow.rowNumber);
-        excelRow.getCell(targetColMap.statusCol).value = entry.latestRow.status;
+        if (entry.reopenedOnSource) {
+          excelRow.getCell(targetColMap.statusCol).value = entry.latestRow.status;
+          reopenedCount++;
+        }
+        if (entry.hasMissingPriorNotes && entry.mergedTargetNotes) {
+          excelRow.getCell(targetColMap.notesCol).value = entry.mergedTargetNotes;
+          notesSyncedCount++;
+        }
         excelRow.commit();
-        reopenedCount++;
       }
     }
 
@@ -4956,9 +5568,11 @@ rolloverForm.addEventListener('submit', async (e) => {
       await loadWorkbookFromDisk(targetTabName, {
         preserveStatus: saveResult === 'mirror-locked'
       });
-      const reopenSuffix = reopenedCount > 0 ? `, ${reopenedCount} reopened` : '';
+      const detailsParts = [`${alreadyPresentCount} already present`];
+      if (notesSyncedCount > 0) detailsParts.push(`${notesSyncedCount} enriched with prior notes`);
+      if (reopenedCount > 0) detailsParts.push(`${reopenedCount} reopened`);
       const actionLabel = createdNewSheet ? `Created & synced ${targetTabName}` : `Synced ${targetTabName}`;
-      const msg = `${actionLabel}: Added ${addedCount} newly rolled-over request(s) (${alreadyPresentCount} already present on sheet${reopenSuffix}).`;
+      const msg = `${actionLabel}: Rolled over ${addedCount} unique request(s) (${detailsParts.join(', ')}).`;
       showToast(msg, 'success');
     }
   } catch (err) {
@@ -5275,19 +5889,19 @@ function setStatus(text, stateClass) {
 function updateStatusBarTelemetry() {
   if (statusFolderInfo) {
     if (!parentDirHandle) {
-      statusFolderInfo.textContent = '📂 Folder: Not connected';
+      statusFolderInfo.textContent = 'Folder: Not connected';
     } else {
       const supName = supervisorDirHandle ? supervisorDirHandle.name : 'Same as Agent';
-      statusFolderInfo.textContent = `📂 Agent: ${parentDirHandle.name} • 👁️ Mirror: ${supName}`;
+      statusFolderInfo.textContent = `Agent: ${parentDirHandle.name} • Mirror: ${supName}`;
     }
   }
 
   if (statusRowStats) {
     if (!workbook) {
-      statusRowStats.textContent = '📊 0 requests';
+      statusRowStats.textContent = '0 requests';
     } else {
       const openTotal = allRows.filter(r => !isCompletedStatus(r.status)).length;
-      statusRowStats.textContent = `📊 Showing ${currentlyVisibleRows.length} of ${allRows.length} requests (${openTotal} open across ${dateSheets.length} tab${dateSheets.length === 1 ? '' : 's'})`;
+      statusRowStats.textContent = `Showing ${currentlyVisibleRows.length} of ${allRows.length} requests (${openTotal} open across ${dateSheets.length} tab${dateSheets.length === 1 ? '' : 's'})`;
     }
   }
 }
@@ -5315,7 +5929,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
-const APP_VERSION = 'v1.11.2';
+const APP_VERSION = 'v1.12.0';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -5327,7 +5941,7 @@ if ('serviceWorker' in navigator) {
           if (newWorker) {
             newWorker.addEventListener('statechange', () => {
               if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                showToast(`✨ TrackerUI updated from GitHub! Reload to apply latest version.`, 'info');
+                showToast('TrackerUI updated. Reload to apply the latest version.', 'info');
               }
             });
           }
