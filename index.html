@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.13.0</title>
+  <title>TrackerUI v1.13.1</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=1.13.1">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.13.0)">v1.13.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.13.1 — Click to check for updates &amp; refresh app cache">v1.13.1</span>
     </div>
 
     <div class="header-actions">
@@ -305,9 +305,9 @@
             </button>
           </div>
 
-          <!-- 5. Row Management -->
+          <!-- 5. Row Management & App Cache -->
           <div class="menu-section">
-            <div class="menu-section-title">Row Management</div>
+            <div class="menu-section-title">Row Management &amp; App Cache</div>
             <button type="button" id="btnDeleteMode" class="menu-item menu-item-danger" disabled>
               <span class="menu-item-left">
                 <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -317,11 +317,32 @@
                 <span id="deleteModeLabel">Batch Delete Requests Mode</span>
               </span>
             </button>
+            <button type="button" id="btnCheckForUpdates" class="menu-item" title="Clear cached PWA scripts/styles and reload fresh from the server">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6"></path>
+                  <polyline points="16.5 2.8 16.5 6.2 13.1 6.2"></polyline>
+                </svg>
+                <span>Check for Updates &amp; Clear Cache</span>
+              </span>
+              <span class="menu-item-meta">v1.13.1</span>
+            </button>
           </div>
         </div>
       </div>
     </div>
   </header>
+
+  <!-- PWA Update Ready Notification Banner -->
+  <div id="pwaUpdateBanner" class="pwa-update-banner" style="display:none;" role="status" aria-live="polite">
+    <div class="pwa-update-banner-text">
+      <strong>Update Ready:</strong> A newer version of TrackerUI was downloaded in the background. Reload now to keep UI and code in sync.
+    </div>
+    <div class="pwa-update-banner-actions">
+      <button type="button" id="btnPwaReloadNow" class="btn-primary btn-sm">Reload Now</button>
+      <button type="button" id="btnPwaDismissUpdate" class="btn-sm">Later</button>
+    </div>
+  </div>
 
   <!-- Persistent File Paths & Auto-Reconnect Status Strip -->
   <div id="filePathsBar" class="file-paths-bar">
@@ -826,11 +847,11 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.13.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.13.1</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/mockMasterAccounts.js?v=1.13.1"></script>
+  <script src="js/app.js?v=1.13.1"></script>
 </body>
 </html>

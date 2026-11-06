@@ -28,6 +28,7 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 | **Auto-Fill Graceful Degradation & Mock Testing Data (`mockMasterAccounts.js`)** | `--Project--- TrackerUI.md` (§2, L14–18) | ✅ Implemented | `v1.13.0` | Guarded `setBrokerCellWithFormula()` against writing `'Master Accounts'` `_xlfn.XLOOKUP` formulas when that sheet is absent; created standalone `js/mockMasterAccounts.js` dummy dataset (10 sample accounts including `"Auto Import Tbilisi LLC"`, Yard `110`); added `localhost` auto-fallback when no `Master Accounts` tab exists plus an explicit `#chkDevMockAccounts` toggle inside **Tools & Setup → Workbook & Schema**. |
 | **Rollover from Previous Sheet & `"Completed"` Status Filtering** | `--Project--- TrackerUI.md` (L25, L27) | ✅ Implemented | `v1.13.0` | Fixed `isCompletedStatus()` (`COMPLETED_STATUS_SET`) to recognize `'completed'` (with trailing `'d'`), `'resolved'`, `'done'`, and `'cancelled'`/`'canceled'` so completed items never roll over. Added **Source Sheet Scope** (`Previous Sheet Only` vs. `All Prior Sheets`) in `#rolloverModal`, `#btnRolloverPrevSheet` in **Tools & Setup**, a carry-over option in **New Day Tab** (`#btnAddBlankTab`), and a one-click rollover CTA on empty daily tabs. |
 | **Fix Dark Mode `#workbookSelect` White-on-White Dropdown Text** | `--Project--- TrackerUI.md` (L29) | ✅ Implemented | `v1.13.0` | Styled `.workbook-picker-wrap select` with `background-color: var(--surface-muted); color: var(--text)` and added global `select option, select optgroup { background-color: var(--surface); color: var(--text); }` in `css/styles.css` so native Windows Chromium `<option>` menus remain legible without hovering. |
+| **PWA Cache-Busting, Auto-Update Banner & Self-Healing Cache Reset** | User Request | ✅ Implemented | `v1.13.1` | Updated `sw.js` (`tracker-ui-v17`) to bypass HTTP disk cache during install (`{ cache: 'reload' }`) and revalidate same-origin assets (`{ cache: 'no-cache' }`); registered `./sw.js` with `{ updateViaCache: 'none' }` and automatic `focus`/`visibilitychange` update checks; added version query strings (`?v=1.13.1`), `#pwaUpdateBanner`, and `#btnCheckForUpdates` (`Check for Updates & Clear Cache`) in **Tools & Setup**. |
 
 ---
 
@@ -65,7 +66,14 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 
 ## 2. Version Release History
 
-### `v1.13.0` (Current)
+### `v1.13.1` (Current)
+- **PWA Cache-Busting, Background Update Banner & Self-Healing Cache Reset**:
+  - Updated [`sw.js`](sw.js) (`CACHE_NAME = 'tracker-ui-v17'`) to fetch local app shell assets with `{ cache: 'reload' }` during installation and `{ cache: 'no-cache' }` on same-origin GET requests so Chrome never copies stale JavaScript/CSS from its HTTP disk cache into the Service Worker cache.
+  - Added `{ ignoreSearch: true }` offline fallback matching in [`sw.js`](sw.js) alongside versioned asset URLs (`css/styles.css?v=1.13.1`, `js/mockMasterAccounts.js?v=1.13.1`, `js/app.js?v=1.13.1`) in [`index.html`](index.html) so HTML and JS can never desynchronize.
+  - Registered `./sw.js` with `{ updateViaCache: 'none' }` in [`js/app.js`](js/app.js) and added throttled `focus` / `visibilitychange` update checks (`checkServiceWorkerUpdateOnResume`) so installed desktop PWAs automatically detect new deployments when brought to the foreground.
+  - Added a top **Update Ready** banner (`#pwaUpdateBanner` with **Reload Now**) plus a one-click **Check for Updates & Clear Cache** action (`#btnCheckForUpdates` in **Tools & Setup** and clickable `#appVersionTag` badge) via `forceClearAppCacheAndReload()`.
+
+### `v1.13.0`
 - **Batch Status Update Architecture (`#batchActionDock` & Permanent Selection Checkboxes)**:
   - Made the left-edge selection checkbox column (`#thDeleteSelect` / `.chk-delete-row`) permanent on the request table so rows can be multi-selected at any time without entering a separate mode.
   - Added a floating bottom **Batch Action Dock** (`#batchActionDock`) rendered whenever ≥1 rows are checked, providing bulk status selection (`#batchStatusSelect`), **Apply Status** (`#btnApplyBatchStatus`), **Delete** (`#btnBatchDeleteSelected`), and **Clear** (`#btnClearBatchSelection`).

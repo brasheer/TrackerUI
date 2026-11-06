@@ -286,6 +286,40 @@ header {
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
   user-select: none;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.version-tag:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+/* PWA Background Update Notification Banner */
+.pwa-update-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.42rem 1.25rem;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent-border);
+  color: var(--text);
+  font-size: 0.78125rem;
+  z-index: 38;
+}
+
+.pwa-update-banner-text strong {
+  color: var(--accent);
+  margin-right: 0.25rem;
+}
+
+.pwa-update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .header-actions {

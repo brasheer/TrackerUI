@@ -229,6 +229,11 @@ const btnRenameTab = document.getElementById('btnRenameTab');
 const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
 const deleteModeLabel = document.getElementById('deleteModeLabel');
+const btnCheckForUpdates = document.getElementById('btnCheckForUpdates');
+const appVersionTag = document.getElementById('appVersionTag');
+const pwaUpdateBanner = document.getElementById('pwaUpdateBanner');
+const btnPwaReloadNow = document.getElementById('btnPwaReloadNow');
+const btnPwaDismissUpdate = document.getElementById('btnPwaDismissUpdate');
 
 // --- APPEARANCE ENGINE: THEME (LIGHT / DARK / AUTO) & APP-WIDE FONT SCALING ---
 const systemLightMediaQuery = typeof window.matchMedia === 'function'
@@ -6514,25 +6519,117 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
-const APP_VERSION = 'v1.13.0';
+// --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
+const APP_VERSION = 'v1.13.1';
+let activeSwRegistration = null;
+let lastSwUpdateCheckAt = 0;
+const SW_UPDATE_CHECK_THROTTLE_MS = 45000;
+
+function showPwaUpdateBanner() {
+  if (pwaUpdateBanner) {
+    pwaUpdateBanner.style.display = 'flex';
+  }
+}
+
+async function forceClearAppCacheAndReload() {
+  closeToolsMenu();
+  showToast('Refreshing application cache and loading latest version...', 'info');
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(
+        regs.map(async (r) => {
+          try {
+            await r.update();
+          } catch (_) { /* ignore */ }
+          if (r.waiting) {
+            r.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+        })
+      );
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (err) {
+    console.warn('Error clearing PWA cache:', err);
+  }
+  window.location.reload();
+}
+
+function checkServiceWorkerUpdateOnResume() {
+  if (!activeSwRegistration) return;
+  const now = Date.now();
+  if (now - lastSwUpdateCheckAt < SW_UPDATE_CHECK_THROTTLE_MS) return;
+  lastSwUpdateCheckAt = now;
+  activeSwRegistration.update().catch(() => { /* ignore offline errors */ });
+}
+
+if (btnCheckForUpdates) {
+  btnCheckForUpdates.addEventListener('click', () => {
+    forceClearAppCacheAndReload();
+  });
+}
+
+if (appVersionTag) {
+  appVersionTag.addEventListener('click', () => {
+    forceClearAppCacheAndReload();
+  });
+}
+
+if (btnPwaReloadNow) {
+  btnPwaReloadNow.addEventListener('click', () => {
+    forceClearAppCacheAndReload();
+  });
+}
+
+if (btnPwaDismissUpdate) {
+  btnPwaDismissUpdate.addEventListener('click', () => {
+    if (pwaUpdateBanner) {
+      pwaUpdateBanner.style.display = 'none';
+    }
+  });
+}
 
 if ('serviceWorker' in navigator) {
+  const hadExistingController = Boolean(navigator.serviceWorker.controller);
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadExistingController) {
+      showPwaUpdateBanner();
+    }
+  });
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
       .then((reg) => {
+        activeSwRegistration = reg;
+        lastSwUpdateCheckAt = Date.now();
         console.log(`Service Worker (${APP_VERSION}) registered with scope:`, reg.scope);
+
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          showPwaUpdateBanner();
+        }
+
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           if (newWorker) {
             newWorker.addEventListener('statechange', () => {
               if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                showToast('TrackerUI updated. Reload to apply the latest version.', 'info');
+                showPwaUpdateBanner();
               }
             });
           }
         });
       })
       .catch((err) => console.warn('Service Worker registration failed:', err));
+  });
+
+  window.addEventListener('focus', checkServiceWorkerUpdateOnResume);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkServiceWorkerUpdateOnResume();
+    }
   });
 }

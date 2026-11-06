@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tracker-ui-v16';
+const CACHE_NAME = 'tracker-ui-v17';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -12,16 +12,28 @@ const ASSETS_TO_CACHE = [
   'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'
 ];
 
-// Install: cache application shell
+// Install: fetch fresh application shell bypassing browser HTTP disk cache
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.all(
+        ASSETS_TO_CACHE.map(async (url) => {
+          const isCrossOrigin = /^https?:\/\//i.test(url) && !url.startsWith(self.location.origin);
+          const req = isCrossOrigin
+            ? new Request(url)
+            : new Request(url, { cache: 'reload' });
+          const res = await fetch(req);
+          if (res && res.ok) {
+            await cache.put(url, res);
+          }
+        })
+      );
+    })
   );
 });
 
-// Activate: cleanup obsolete caches
+// Activate: cleanup all older cache buckets and immediately claim open clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -36,35 +48,53 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: Network-first for dynamic freshness, falling back to cache offline
-self.addEventListener('fetch', (event) => {
-  // Only intercept GET requests
-  if (event.request.method !== 'GET') return;
-
-  event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        // Cache successful response clone
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      })
-      .catch(() => {
-        // Fallback to cache when offline
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // For navigation requests, fallback to index.html
-          if (event.request.mode === 'navigate') {
-            return caches.match('./index.html');
-          }
-        });
-      })
-  );
+// Listen for explicit update / cache-clear commands from the client
+self.addEventListener('message', (event) => {
+  if (!event.data) return;
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
+// Fetch: Network-first with HTTP cache revalidation for same-origin app shell
+// so HTML, CSS, and JS never get out of sync; fallback to CacheStorage when offline.
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+
+  const reqUrl = new URL(event.request.url);
+  const isSameOrigin = reqUrl.origin === self.location.origin;
+
+  event.respondWith(
+    (async () => {
+      try {
+        const fetchOptions = isSameOrigin
+          ? new Request(event.request, { cache: 'no-cache' })
+          : event.request;
+        const networkResponse = await fetch(fetchOptions);
+
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, responseToCache);
+          // Also keep canonical path (without ?v= query string) updated in cache for offline fallback
+          if (isSameOrigin && reqUrl.search) {
+            const canonicalUrl = reqUrl.origin + reqUrl.pathname;
+            await cache.put(canonicalUrl, networkResponse.clone());
+          }
+        }
+        return networkResponse;
+      } catch (err) {
+        const exactMatch = await caches.match(event.request);
+        if (exactMatch) return exactMatch;
+
+        const ignoreSearchMatch = await caches.match(event.request, { ignoreSearch: true });
+        if (ignoreSearchMatch) return ignoreSearchMatch;
+
+        if (event.request.mode === 'navigate') {
+          return caches.match('./index.html', { ignoreSearch: true });
+        }
+        throw err;
+      }
+    })()
+  );
+});
