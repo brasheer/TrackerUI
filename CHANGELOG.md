@@ -30,6 +30,7 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 | **Fix Dark Mode `#workbookSelect` White-on-White Dropdown Text** | `--Project--- TrackerUI.md` (L29) | ✅ Implemented | `v1.13.0` | Styled `.workbook-picker-wrap select` with `background-color: var(--surface-muted); color: var(--text)` and added global `select option, select optgroup { background-color: var(--surface); color: var(--text); }` in `css/styles.css` so native Windows Chromium `<option>` menus remain legible without hovering. |
 | **PWA Cache-Busting, Auto-Update Banner & Self-Healing Cache Reset** | User Request | ✅ Implemented | `v1.13.1` | Updated `sw.js` (`tracker-ui-v17`) to bypass HTTP disk cache during install (`{ cache: 'reload' }`) and revalidate same-origin assets (`{ cache: 'no-cache' }`); registered `./sw.js` with `{ updateViaCache: 'none' }` and automatic `focus`/`visibilitychange` update checks; added version query strings (`?v=1.13.1`), `#pwaUpdateBanner`, and `#btnCheckForUpdates` (`Check for Updates & Clear Cache`) in **Tools & Setup**. |
 | **In-App Workbook Scratch Sheet Tabs & Editable Spreadsheet Grid (Title Tracking)** | User Request | ✅ Implemented | `v1.14.0` | Added `#workspaceTabsBar` (`Daily Tracker` + closable custom scratch sheet tabs persisted per workbook in `localStorage`) and `#scratchSheetMenuWrap` (`Scratch Sheets ▾` picker & `+ Create New Scratch Sheet...`, hiding `template`, `validation lists`, and `Master Accounts`). Added `#scratchSheetWorkspace` featuring an Excel-style editable grid, formula/value bar, arrow/Tab/Enter keyboard navigation, multi-cell TSV clipboard paste (`Ctrl+V`), search/row filtering, carrier tracking number string preservation, 1.2s debounced auto-save + `Ctrl+S` dual-write mirroring, and sheet rename/delete. |
+| **Modular Multi-File JavaScript Architecture (Zero-Build Domain Split)** | User Request | ✅ Implemented | `v1.14.1` | Split monolithic 7,992-line `js/app.js` into 6 focused, function-named scripts (`core-ui.js`, `workbook-io.js`, `tracker-table.js`, `request-editors.js`, `scratch-sheets.js`, `rollover.js`) alongside `mockMasterAccounts.js`, preserving zero-build `localhost`/`https://`/`file://` compatibility and synced Service Worker caching (`tracker-ui-v19`). |
 
 ---
 
@@ -67,7 +68,18 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 
 ## 2. Version Release History
 
-### `v1.14.0` (Current)
+### `v1.14.1` (Current — `meerkat`)
+- **Modular Multi-File JavaScript Refactor (`js/*.js`)**:
+  - Split the 7,992-line monolithic `js/app.js` into 6 focused, function-named files for easier manual editing and significantly smaller context footprints during feature iterations:
+    - [`js/core-ui.js`](js/core-ui.js): Shared state, DOM references, Light/Auto/Dark theme & text-size scaling, modal dialog engine, Tools popover, status bar telemetry, toasts, and PWA Service Worker update checks.
+    - [`js/workbook-io.js`](js/workbook-io.js): IndexedDB folder handles, OpenXML archive preservation/repair, ExcelJS load/save, dual-write mirroring & auto-retry, schema bootstrapping, daily tab CRUD, and reference sheet auto-fill.
+    - [`js/tracker-table.js`](js/tracker-table.js): Worksheet row indexing & UUIDv4 backfill, sheet stepper/tab strip, request table rendering, global search, sorting, Like-Item filtering, batch status updates, and batch delete.
+    - [`js/request-editors.js`](js/request-editors.js): Docked bottom request editor, popup request modal, cross-tab status propagation, ticket details timeline modal, and Supervisor View-Only Mirror inspector.
+    - [`js/scratch-sheets.js`](js/scratch-sheets.js): In-app scratch sheet workspace tabs, editable spreadsheet grid, formula/value bar, keyboard navigation, and multi-cell TSV clipboard paste.
+    - [`js/rollover.js`](js/rollover.js): Unique request identity matching, chronological notes merging, smart rollover engine, and startup initialization.
+  - Updated [`index.html`](index.html) (`?v=1.14.1`), [`sw.js`](sw.js) (`CACHE_NAME = 'tracker-ui-v19'` & `ASSETS_TO_CACHE`), and [`AGENTS.md`](AGENTS.md).
+
+### `v1.14.0`
 - **In-App Workbook Scratch Sheet Tabs & Editable Spreadsheet Grid (`#workspaceTabsBar` / `#scratchSheetWorkspace`)**:
   - Added a top-level in-app **Workspace Tab Bar** (`#workspaceTabsBar`) featuring the pinned **Daily Tracker** tab alongside open custom/scratch worksheet tabs (persisted per workbook in `localStorage` and closable via `×` without removing the sheet from Excel).
   - Added the **`Scratch Sheets ▾`** picker (`#scratchSheetMenuWrap`), surfacing only custom/scratch worksheets in the active workbook while hiding internal reference and daily tabs (`template`, `validation lists`, `Master Accounts`, and `MM-DD-YYYY` sheets).

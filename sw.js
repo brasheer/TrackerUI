@@ -1,10 +1,15 @@
-const CACHE_NAME = 'tracker-ui-v18';
+const CACHE_NAME = 'tracker-ui-v19';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './css/styles.css',
   './js/mockMasterAccounts.js',
-  './js/app.js',
+  './js/core-ui.js',
+  './js/workbook-io.js',
+  './js/tracker-table.js',
+  './js/request-editors.js',
+  './js/scratch-sheets.js',
+  './js/rollover.js',
   './manifest.json',
   './assets/icons/icon.svg',
   './assets/icons/icon-192.png',

@@ -8,12 +8,19 @@ These rules apply to all AI models and coding assistants working in the `Tracker
 - **Keep CSS and JS Separated**: Maintain the modular layout:
   - `index.html`: Application shell, popover menu, banners, and modal markup only.
   - `css/styles.css`: All styles, CSS custom properties, and responsive rules.
-  - `js/app.js`: All application state, File System Access API I/O, ExcelJS manipulation, schema bootstrapping, search, delete mode, and rollover logic.
+  - `js/` Modular Script Files (loaded in order without bundlers):
+    - `js/mockMasterAccounts.js`: Dev/localhost mock account records for auto-fill testing.
+    - `js/core-ui.js`: Shared application state, DOM references, Light/Auto/Dark theme & font scaling, modal dialog engine, Tools popover, status bar telemetry, toasts, and PWA Service Worker update checks.
+    - `js/workbook-io.js`: IndexedDB directory handles, folder pickers, OpenXML archive preservation/repair, ExcelJS load/save, dual-write mirroring & auto-retry, schema bootstrapping, daily tab CRUD, and reference sheet auto-fill.
+    - `js/tracker-table.js`: Daily worksheet row indexing & UUIDv4 backfill, sheet stepper/tab strip, request table rendering, global search, sorting, Like-Item filtering, batch status updates, and batch delete.
+    - `js/request-editors.js`: Collapsible bottom editor dock, modal request editor, cross-tab status propagation, ticket details timeline modal, and Supervisor View-Only Mirror inspector.
+    - `js/scratch-sheets.js`: In-app custom scratch sheet workspace tabs, editable spreadsheet grid, formula/value bar, keyboard navigation, and multi-cell TSV clipboard paste.
+    - `js/rollover.js`: Unique request identity matching, chronological notes merging, smart multi-sheet / previous-sheet rollover engine, and startup initialization.
   - `manifest.json` & `sw.js`: PWA manifest and offline Service Worker.
   - `assets/icons/`: App icons (`icon.svg`, `icon-192.png`, `icon-512.png`).
 - **Do NOT inline** `<style>` or `<script>` blocks back into `index.html`.
 - **Do NOT introduce** build steps, bundlers (Vite, Webpack, Rollup), npm runtime dependencies, or UI frameworks. The app must run directly via VS Code Live Server (`localhost`) and GitHub Pages (`https://`).
-- **Service Worker Cache**: Whenever `index.html`, `css/styles.css`, or `js/app.js` changes, increment `CACHE_NAME` in `sw.js`.
+- **Service Worker Cache**: Whenever `index.html`, `css/styles.css`, or any file in `js/` changes, increment `CACHE_NAME` in `sw.js` (and keep `ASSETS_TO_CACHE` and `?v=` query strings in `index.html` synced).
 
 ---
 
@@ -87,6 +94,6 @@ Daily tabs must use `MM-DD-YYYY` naming and follow this exact 11-column schema:
 ## 6. Automatic Changelog & Feature Tracking (`CHANGELOG.md` & `newfeatures.txt`)
 - **Always Sync [`CHANGELOG.md`](CHANGELOG.md)**: Whenever a feature, bug fix, or suggestion (whether from [`newfeatures.txt`](newfeatures.txt) or a direct user request) is implemented, partially implemented, or decided against:
   1. Update the **Feature & Suggestion Status Matrix** in [`CHANGELOG.md`](CHANGELOG.md) (`✅ Implemented`, `⏳ Partially Implemented`, `📋 Planned / Backlog`, or `🚫 Decided Against / Superseded` with the rationale).
-  2. When bumping the app version (e.g., in `index.html`, `js/app.js`, and `sw.js`), add a new release entry under **Version Release History** in [`CHANGELOG.md`](CHANGELOG.md).
+  2. When bumping the app version (e.g., in `index.html`, `js/core-ui.js`, and `sw.js`), add a new release entry under **Version Release History** in [`CHANGELOG.md`](CHANGELOG.md).
 - **Status Reporting**: When the user asks for feature status or after completing a feature from [`newfeatures.txt`](newfeatures.txt), automatically list which items are newly implemented, remaining in progress/backlog, or decided against.
 
