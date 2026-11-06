@@ -29,6 +29,7 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 | **Rollover from Previous Sheet & `"Completed"` Status Filtering** | `--Project--- TrackerUI.md` (L25, L27) | ✅ Implemented | `v1.13.0` | Fixed `isCompletedStatus()` (`COMPLETED_STATUS_SET`) to recognize `'completed'` (with trailing `'d'`), `'resolved'`, `'done'`, and `'cancelled'`/`'canceled'` so completed items never roll over. Added **Source Sheet Scope** (`Previous Sheet Only` vs. `All Prior Sheets`) in `#rolloverModal`, `#btnRolloverPrevSheet` in **Tools & Setup**, a carry-over option in **New Day Tab** (`#btnAddBlankTab`), and a one-click rollover CTA on empty daily tabs. |
 | **Fix Dark Mode `#workbookSelect` White-on-White Dropdown Text** | `--Project--- TrackerUI.md` (L29) | ✅ Implemented | `v1.13.0` | Styled `.workbook-picker-wrap select` with `background-color: var(--surface-muted); color: var(--text)` and added global `select option, select optgroup { background-color: var(--surface); color: var(--text); }` in `css/styles.css` so native Windows Chromium `<option>` menus remain legible without hovering. |
 | **PWA Cache-Busting, Auto-Update Banner & Self-Healing Cache Reset** | User Request | ✅ Implemented | `v1.13.1` | Updated `sw.js` (`tracker-ui-v17`) to bypass HTTP disk cache during install (`{ cache: 'reload' }`) and revalidate same-origin assets (`{ cache: 'no-cache' }`); registered `./sw.js` with `{ updateViaCache: 'none' }` and automatic `focus`/`visibilitychange` update checks; added version query strings (`?v=1.13.1`), `#pwaUpdateBanner`, and `#btnCheckForUpdates` (`Check for Updates & Clear Cache`) in **Tools & Setup**. |
+| **In-App Workbook Scratch Sheet Tabs & Editable Spreadsheet Grid (Title Tracking)** | User Request | ✅ Implemented | `v1.14.0` | Added `#workspaceTabsBar` (`Daily Tracker` + closable custom scratch sheet tabs persisted per workbook in `localStorage`) and `#scratchSheetMenuWrap` (`Scratch Sheets ▾` picker & `+ Create New Scratch Sheet...`, hiding `template`, `validation lists`, and `Master Accounts`). Added `#scratchSheetWorkspace` featuring an Excel-style editable grid, formula/value bar, arrow/Tab/Enter keyboard navigation, multi-cell TSV clipboard paste (`Ctrl+V`), search/row filtering, carrier tracking number string preservation, 1.2s debounced auto-save + `Ctrl+S` dual-write mirroring, and sheet rename/delete. |
 
 ---
 
@@ -66,7 +67,16 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 
 ## 2. Version Release History
 
-### `v1.13.1` (Current)
+### `v1.14.0` (Current)
+- **In-App Workbook Scratch Sheet Tabs & Editable Spreadsheet Grid (`#workspaceTabsBar` / `#scratchSheetWorkspace`)**:
+  - Added a top-level in-app **Workspace Tab Bar** (`#workspaceTabsBar`) featuring the pinned **Daily Tracker** tab alongside open custom/scratch worksheet tabs (persisted per workbook in `localStorage` and closable via `×` without removing the sheet from Excel).
+  - Added the **`Scratch Sheets ▾`** picker (`#scratchSheetMenuWrap`), surfacing only custom/scratch worksheets in the active workbook while hiding internal reference and daily tabs (`template`, `validation lists`, `Master Accounts`, and `MM-DD-YYYY` sheets).
+  - Added **Create New Scratch Sheet...** (`#btnNewScratchSheetFromBar` & `#menuNewScratchSheet` in **Tools & Setup**) with choice of a **Title Tracking Starter Layout** (`Lot #`, `Yard #`, `Broker / Master #`, `Title Status`, `Carrier / Tracking #`, `Date Updated`, `Notes`) or a blank grid, plus scratch sheet **Rename** and **Delete Sheet** actions.
+  - Built an Excel-style **Editable Spreadsheet Grid** (`#scratchSheetWorkspace`): supports inline double-click/type-to-edit cells, coordinate & `fx` formula/value bar (`#scratchFormulaInput`), `Arrow` / `Tab` / `Enter` / `F2` / `Delete` navigation, multi-row/column TSV clipboard paste (`Ctrl+V` from Excel/emails/carrier portals), live cell search + row filter, `+10 Rows` / `+ Col` expansion, automatic string preservation for 11+ digit carrier tracking numbers (preventing scientific notation), and 1.2s debounced auto-save + `Ctrl+S` dual-write mirroring via `saveWorkbookToDisk()`.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v18'` in `sw.js` and updated asset version query strings to `?v=1.14.0`.
+
+### `v1.13.1`
 - **PWA Cache-Busting, Background Update Banner & Self-Healing Cache Reset**:
   - Updated [`sw.js`](sw.js) (`CACHE_NAME = 'tracker-ui-v17'`) to fetch local app shell assets with `{ cache: 'reload' }` during installation and `{ cache: 'no-cache' }` on same-origin GET requests so Chrome never copies stale JavaScript/CSS from its HTTP disk cache into the Service Worker cache.
   - Added `{ ignoreSearch: true }` offline fallback matching in [`sw.js`](sw.js) alongside versioned asset URLs (`css/styles.css?v=1.13.1`, `js/mockMasterAccounts.js?v=1.13.1`, `js/app.js?v=1.13.1`) in [`index.html`](index.html) so HTML and JS can never desynchronize.

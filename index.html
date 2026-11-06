@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.13.1</title>
+  <title>TrackerUI v1.14.0</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.13.1">
+  <link rel="stylesheet" href="css/styles.css?v=1.14.0">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.13.1 — Click to check for updates &amp; refresh app cache">v1.13.1</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.14.0 — Click to check for updates &amp; refresh app cache">v1.14.0</span>
     </div>
 
     <div class="header-actions">
@@ -256,6 +256,16 @@
                 <span>Bootstrap / Repair Workbook Schema</span>
               </span>
             </button>
+            <button type="button" id="menuNewScratchSheet" class="menu-item" disabled title="Create a custom scratch worksheet (e.g., Title Tracking) and open it in an app tab">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="14" height="14" rx="2"></rect>
+                  <line x1="3" y1="8" x2="17" y2="8"></line>
+                  <line x1="8" y1="8" x2="8" y2="17"></line>
+                </svg>
+                <span>Create New Scratch Sheet...</span>
+              </span>
+            </button>
             <label class="menu-checkbox-item" id="devMockMenuRow" title="Populate Broker / Master # / Bidder # / Yard # auto-fill using dummy mockMasterAccounts.js test data instead of requiring a Master Accounts Excel sheet">
               <input type="checkbox" id="chkDevMockAccounts">
               <span>Use Mock Master Accounts (Dev Test)</span>
@@ -325,7 +335,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta">v1.13.1</span>
+              <span class="menu-item-meta">v1.14.0</span>
             </button>
           </div>
         </div>
@@ -367,6 +377,41 @@
     </div>
   </div>
 
+  <!-- In-App Workspace Tab Bar (Daily Tracker + Open Workbook Scratch Sheet Tabs) -->
+  <div id="workspaceTabsBar" class="workspace-tabs-bar" style="display:none;" role="tablist" aria-label="Open workbook workspace tabs">
+    <div id="workspaceTabsList" class="workspace-tabs-list"></div>
+    <div class="workspace-tabs-actions">
+      <div id="scratchSheetMenuWrap" class="scratch-menu-wrap">
+        <button type="button" id="btnOpenScratchMenu" class="btn-open-scratch-menu btn-with-icon" aria-haspopup="true" aria-expanded="false" title="Open an existing scratch sheet or create a new scratch sheet in this workbook">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="14" height="14" rx="2"></rect>
+            <line x1="3" y1="8" x2="17" y2="8"></line>
+            <line x1="8" y1="8" x2="8" y2="17"></line>
+          </svg>
+          <span>Scratch Sheets</span>
+          <span id="scratchAvailableCountBadge" class="scratch-count-badge">0</span>
+          <svg class="ui-icon chevron-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 8 10 12 14 8"></polyline>
+          </svg>
+        </button>
+        <div id="scratchSheetDropdown" class="scratch-menu-dropdown" role="menu">
+          <div class="scratch-menu-header">
+            <span>Workbook Scratch Sheets</span>
+            <span class="scratch-menu-sub">Excludes reference &amp; daily tabs</span>
+          </div>
+          <div id="scratchSheetMenuList" class="scratch-menu-list"></div>
+          <div class="scratch-menu-footer">
+            <button type="button" id="btnNewScratchSheetFromBar" class="btn-primary btn-sm btn-full-width">
+              ＋ Create New Scratch Sheet...
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Primary Workspace View 1: Daily Request Tracker -->
+  <main id="dailyTrackerWorkspace" class="daily-tracker-workspace">
   <div class="controls">
     <button type="button" id="btnNewEntry" class="btn-primary btn-new-request-bar" style="display:none;" title="Prepare a new support request in the bottom editor (or double-click Edit for popup)">
       <span class="plus-icon">＋</span> New Request
@@ -594,6 +639,46 @@
         </div>
       </div>
     </form>
+  </section>
+  </main>
+
+  <!-- Secondary Workspace View 2: Editable Workbook Scratch Sheet Tab -->
+  <section id="scratchSheetWorkspace" class="scratch-workspace" style="display:none;" aria-label="Scratch Sheet Editor">
+    <div class="scratch-toolbar">
+      <div class="scratch-toolbar-left">
+        <span id="scratchActiveSheetBadge" class="scratch-sheet-badge">Scratch Sheet</span>
+        <span id="scratchStatsMeta" class="scratch-stats-meta">0 rows • 0 cols</span>
+        <span id="scratchSaveStateBadge" class="scratch-save-badge saved">Saved</span>
+      </div>
+      <div class="scratch-toolbar-right">
+        <div class="scratch-search-group">
+          <input type="text" id="scratchSearchInput" class="scratch-search-input" placeholder="Find Lot #, tracking #, or text...">
+          <span id="scratchSearchMatchCount" class="scratch-match-pill" style="display:none;">0 matches</span>
+          <label class="scratch-filter-toggle" title="Only show rows matching the search query">
+            <input type="checkbox" id="chkScratchFilterRows">
+            <span>Filter rows</span>
+          </label>
+        </div>
+        <button type="button" id="btnScratchAddRows" class="btn-sm" title="Add 10 blank rows to the grid">＋ 10 Rows</button>
+        <button type="button" id="btnScratchAddCol" class="btn-sm" title="Add 1 column to the right">＋ Col</button>
+        <button type="button" id="btnScratchRenameSheet" class="btn-sm" title="Rename this scratch sheet in the Excel workbook">Rename</button>
+        <button type="button" id="btnScratchDeleteSheet" class="btn-danger-outline btn-sm" title="Delete this scratch sheet from the Excel workbook">Delete Sheet</button>
+        <button type="button" id="btnScratchSaveNow" class="btn-primary btn-sm" title="Save scratch sheet changes to workbook &amp; mirror now (Ctrl+S)">Save Sheet</button>
+      </div>
+    </div>
+
+    <div class="scratch-formula-bar">
+      <span id="scratchCellCoord" class="scratch-cell-coord" title="Selected cell coordinate">A1</span>
+      <span class="scratch-fx-label" aria-hidden="true">fx</span>
+      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="Click any cell below to edit (or paste rows/columns with Ctrl+V)..." autocomplete="off">
+    </div>
+
+    <div id="scratchGridWrap" class="scratch-grid-wrap" tabindex="0">
+      <table id="scratchGridTable" class="scratch-grid-table">
+        <thead id="scratchGridHead"></thead>
+        <tbody id="scratchGridBody"></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- Edit / Create Modal (Secondary Popup Editor) -->
@@ -847,11 +932,11 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.13.1</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.14.0</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.13.1"></script>
-  <script src="js/app.js?v=1.13.1"></script>
+  <script src="js/mockMasterAccounts.js?v=1.14.0"></script>
+  <script src="js/app.js?v=1.14.0"></script>
 </body>
 </html>
