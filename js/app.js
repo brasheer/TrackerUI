@@ -33,15 +33,33 @@ let mirrorRetryCount = 0;
 const MIRROR_RETRY_INTERVAL_SEC = 15;
 const MIRROR_MAX_AUTO_RETRIES = 20;
 
-// Delete Mode State
+// Row Selection & Batch / Delete Mode State
 let isDeleteMode = false;
 let currentlyVisibleRows = [];
-const selectedForDelete = new Set(); // Stores "${sheetName}::${rowNumber}"
+const selectedForDelete = new Set(); // Stores "${sheetName}::${rowNumber}" for permanent row selection (Batch Status & Batch Delete)
+let rolloverSourceMode = 'previous'; // 'previous' (Immediately preceding sheet only) | 'all' (All prior daily tabs)
 
-// Dynamic Reference Data
-let masterAccountsMap = []; // [{ broker, master, bidder }]
+// Dynamic Reference Data & Dev Mock Mode
+let masterAccountsMap = []; // [{ broker, master, bidder, yard? }]
+let hasMasterAccountsSheet = false;
 let validationActions = [];
 let validationStatuses = [];
+
+const DEV_MOCK_STORAGE_KEY = 'trackerui_dev_mock_accounts';
+function isLocalhostDevEnvironment() {
+  if (typeof window === 'undefined' || !window.location) return false;
+  const host = String(window.location.hostname || '').toLowerCase();
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '[::1]' ||
+    window.location.protocol === 'file:'
+  );
+}
+const storedDevMockPref = localStorage.getItem(DEV_MOCK_STORAGE_KEY);
+let useDevMockAccounts = storedDevMockPref !== null
+  ? storedDevMockPref === 'true'
+  : isLocalhostDevEnvironment();
 
 // Stable in-memory backfill cache so legacy rows without Col K keep the same UUID before & during save
 const legacyBackfillMap = new Map();
@@ -75,10 +93,25 @@ const KNOWN_STATUS_VALUES = new Set([
   'waiting on buyer',
   'escalated',
   'complete',
+  'completed',
   'new',
   'waiting',
   'overdue',
-  'closed'
+  'closed',
+  'resolved',
+  'done',
+  'cancelled',
+  'canceled'
+]);
+
+const COMPLETED_STATUS_SET = new Set([
+  'complete',
+  'completed',
+  'closed',
+  'resolved',
+  'done',
+  'cancelled',
+  'canceled'
 ]);
 
 const STANDARD_HEADERS = [
@@ -108,7 +141,13 @@ function isTemplatePlaceholderTab(sheetName) {
 
 function isCompletedStatus(status) {
   const norm = String(status || '').trim().toLowerCase();
-  return norm === 'complete' || norm === 'closed';
+  if (!norm) return false;
+  if (COMPLETED_STATUS_SET.has(norm)) return true;
+  return (
+    norm.startsWith('complete') ||
+    norm.startsWith('closed') ||
+    norm.startsWith('resolved')
+  );
 }
 
 function getDefaultStatus() {
@@ -182,7 +221,10 @@ const chkAutoReconnect = document.getElementById('chkAutoReconnect');
 const chkAutoReconnectBar = document.getElementById('chkAutoReconnectBar');
 const btnNewWorkbook = document.getElementById('btnNewWorkbook');
 const btnRepairSchema = document.getElementById('btnRepairSchema');
+const chkDevMockAccounts = document.getElementById('chkDevMockAccounts');
+const devMockStateBadge = document.getElementById('devMockStateBadge');
 const btnAddBlankTab = document.getElementById('btnAddBlankTab');
+const btnRolloverPrevSheet = document.getElementById('btnRolloverPrevSheet');
 const btnRenameTab = document.getElementById('btnRenameTab');
 const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
@@ -354,7 +396,7 @@ const statusFolderInfo = document.getElementById('statusFolderInfo');
 const statusRowStats = document.getElementById('statusRowStats');
 const statusTimestamp = document.getElementById('statusTimestamp');
 
-// Delete Mode DOM Elements
+// Row Selection, Batch Action Dock & Delete Mode DOM Elements
 const deleteBanner = document.getElementById('deleteBanner');
 const thDeleteSelect = document.getElementById('thDeleteSelect');
 const chkSelectAllHeader = document.getElementById('chkSelectAllHeader');
@@ -362,6 +404,13 @@ const chkSelectAllBanner = document.getElementById('chkSelectAllBanner');
 const deleteSelectedCountEl = document.getElementById('deleteSelectedCount');
 const btnConfirmDeleteSelected = document.getElementById('btnConfirmDeleteSelected');
 const btnCancelDeleteMode = document.getElementById('btnCancelDeleteMode');
+
+const batchActionDock = document.getElementById('batchActionDock');
+const batchSelectedCountEl = document.getElementById('batchSelectedCount');
+const batchStatusSelect = document.getElementById('batchStatusSelect');
+const btnApplyBatchStatus = document.getElementById('btnApplyBatchStatus');
+const btnBatchDeleteSelected = document.getElementById('btnBatchDeleteSelected');
+const btnClearBatchSelection = document.getElementById('btnClearBatchSelection');
 
 // Modal Form Fields
 const fSubject = document.getElementById('fSubject');
@@ -435,6 +484,11 @@ const rolloverTodayBadge = document.getElementById('rolloverTodayBadge');
 const rolloverFutureBanner = document.getElementById('rolloverFutureBanner');
 const rolloverTargetDate = document.getElementById('rolloverTargetDate');
 const rolloverPresetBtns = document.getElementById('rolloverPresetBtns');
+const rolloverSourceWrap = document.getElementById('rolloverSourceWrap');
+const rolloverSourceGroup = document.getElementById('rolloverSourceGroup');
+const btnRolloverSourcePrev = document.getElementById('btnRolloverSourcePrev');
+const btnRolloverSourceAll = document.getElementById('btnRolloverSourceAll');
+const rolloverSourceDesc = document.getElementById('rolloverSourceDesc');
 const rolloverFutureOptionWrap = document.getElementById('rolloverFutureOptionWrap');
 const chkIncludeFutureTabs = document.getElementById('chkIncludeFutureTabs');
 const chkIncludeFutureText = document.getElementById('chkIncludeFutureText');
@@ -1116,6 +1170,9 @@ if (btnResetAgentDir) {
     btnLinkFile.style.display = 'inline-flex';
     btnNewEntry.style.display = 'none';
     btnRollover.style.display = 'none';
+    if (btnRolloverPrevSheet) btnRolloverPrevSheet.disabled = true;
+    selectedForDelete.clear();
+    if (batchActionDock) batchActionDock.style.display = 'none';
     if (bottomEditorDock) bottomEditorDock.style.display = 'none';
     sheetTabsBar.style.display = 'none';
     schemaBanner.style.display = 'none';
@@ -2055,6 +2112,40 @@ function sanitizeXlsxBufferForExcelJS(arrayBuffer) {
   return bytes.buffer;
 }
 
+function getMasterAccountsWorksheet(wb = workbook) {
+  if (!wb || typeof wb.eachSheet !== 'function') return null;
+  let found = null;
+  wb.eachSheet((ws) => {
+    const lower = String(ws.name || '').trim().toLowerCase();
+    if (lower === 'master accounts' || lower === 'master account') {
+      found = ws;
+    }
+  });
+  return found;
+}
+
+function getMockMasterAccountsList() {
+  if (typeof window !== 'undefined' && Array.isArray(window.MOCK_MASTER_ACCOUNTS)) {
+    return window.MOCK_MASTER_ACCOUNTS.map(item => ({
+      broker: String(item.broker || '').trim(),
+      master: String(item.master || '').trim().toUpperCase(),
+      bidder: String(item.bidder || '').trim().toUpperCase(),
+      yard: String(item.yard || '').trim().toUpperCase()
+    })).filter(m => m.broker || m.master);
+  }
+  return [];
+}
+
+function updateDevMockAccountsUI() {
+  if (chkDevMockAccounts) {
+    chkDevMockAccounts.checked = Boolean(useDevMockAccounts);
+  }
+  if (devMockStateBadge) {
+    devMockStateBadge.style.display = useDevMockAccounts ? 'inline-block' : 'none';
+    devMockStateBadge.textContent = isLocalhostDevEnvironment() ? 'LOCALHOST MOCK' : 'DEV MOCK';
+  }
+}
+
 async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) {
   if (!workingFileHandle) return;
   if (!options.preserveStatus && !pendingMirrorBuffer) {
@@ -2073,16 +2164,27 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   allRows = [];
   dateSheets = [];
   masterAccountsMap = [];
+  hasMasterAccountsSheet = false;
   validationActions = [];
   validationStatuses = [];
 
   let hasTemplate = false;
   let hasValidation = false;
-  let hasMasterAccounts = false;
   let placeholderDateSheet = null;
   const dailySheetObjs = [];
 
-  // Pass 1: Parse Reference Sheets (Validation List & Master Accounts) first so XLOOKUP Broker names can resolve
+  // Safety check for optional Master Accounts sheet (removed from new monthly workbook bootstrap)
+  const masterAccountsWs = getMasterAccountsWorksheet(workbook);
+  hasMasterAccountsSheet = Boolean(masterAccountsWs);
+
+  if (useDevMockAccounts) {
+    // Dev / Localhost Mock Mode: bypass Excel 'Master Accounts' sheet lookup and populate dummy test records
+    masterAccountsMap = getMockMasterAccountsList();
+  } else if (masterAccountsWs) {
+    parseMasterAccountsSheet(masterAccountsWs);
+  }
+
+  // Pass 1: Parse Reference Sheets & collect daily MM-DD-YYYY tabs
   workbook.eachSheet((worksheet) => {
     const rawName = worksheet.name.trim();
     const lowerName = rawName.toLowerCase();
@@ -2097,9 +2199,6 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     } else if (lowerName === 'validation lists' || lowerName === 'validation list') {
       hasValidation = true;
       parseValidationSheet(worksheet);
-    } else if (lowerName === 'master accounts' || lowerName === 'master account') {
-      hasMasterAccounts = true;
-      parseMasterAccountsSheet(worksheet);
     }
   });
 
@@ -2109,24 +2208,28 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     indexWorksheetRows(worksheet, rawName);
   });
 
-  // Also enrich masterAccountsMap from existing daily rows so Broker <-> Master # auto-fill works even without a Master Accounts tab
-  const seenAccountKeys = new Set(
-    masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
-  );
-  allRows.forEach(r => {
-    if (!r.broker && !r.master) return;
-    const k = `${r.broker.toLowerCase()}::${r.master.toLowerCase()}`;
-    if (!seenAccountKeys.has(k)) {
-      seenAccountKeys.add(k);
-      masterAccountsMap.push({
-        broker: r.broker,
-        master: r.master.toUpperCase(),
-        bidder: r.bidder ? r.bidder.toUpperCase() : ''
-      });
-    }
-  });
+  // Enrich masterAccountsMap from existing daily rows when not running isolated Dev Mock Mode
+  if (!useDevMockAccounts) {
+    const seenAccountKeys = new Set(
+      masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
+    );
+    allRows.forEach(r => {
+      if (!r.broker && !r.master) return;
+      const k = `${r.broker.toLowerCase()}::${r.master.toLowerCase()}`;
+      if (!seenAccountKeys.has(k)) {
+        seenAccountKeys.add(k);
+        masterAccountsMap.push({
+          broker: r.broker,
+          master: r.master.toUpperCase(),
+          bidder: r.bidder ? r.bidder.toUpperCase() : '',
+          yard: r.yard ? r.yard.toUpperCase() : ''
+        });
+      }
+    });
+  }
 
   populateReferenceControls();
+  updateDevMockAccountsUI();
 
   // Sort date tabs newest first for UI dropdown
   dateSheets.sort((a, b) => parseDateTab(b) - parseDateTab(a));
@@ -2143,6 +2246,9 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   btnRollover.style.display = 'inline-flex';
   btnRepairSchema.disabled = false;
   btnAddBlankTab.disabled = false;
+  if (btnRolloverPrevSheet) {
+    btnRolloverPrevSheet.disabled = dateSheets.length === 0;
+  }
   btnRenameTab.disabled = dateSheets.length === 0;
   btnDeleteTab.disabled = dateSheets.length === 0;
   btnDeleteMode.disabled = allRows.length === 0;
@@ -2288,7 +2394,9 @@ function resolveBrokerFromMaster(masterVal, currentBrokerVal) {
 
 function setBrokerCellWithFormula(row, rowNumber, brokerVal, masterVal, colMap) {
   const resolvedBroker = resolveBrokerFromMaster(masterVal, brokerVal);
-  if (colMap && colMap.isTemplateLayout) {
+  const ownerWb = (row && row.worksheet && row.worksheet.workbook) ? row.worksheet.workbook : workbook;
+  const wbHasMasterSheet = Boolean(getMasterAccountsWorksheet(ownerWb));
+  if (colMap && colMap.isTemplateLayout && wbHasMasterSheet) {
     row.getCell(3).value = {
       formula: buildTemplateBrokerFormula(rowNumber, resolvedBroker, masterVal),
       result: resolvedBroker || ''
@@ -2574,7 +2682,7 @@ btnNewWorkbook.addEventListener('click', promptCreateNewWorkbook);
 btnRepairSchema.addEventListener('click', handleRepairCurrentWorkbookSchema);
 btnBannerBootstrap.addEventListener('click', handleRepairCurrentWorkbookSchema);
 
-// --- SHEET CREATION, RENAMING & DELETION ---
+// --- SHEET CREATION, ROLLOVER FROM PREVIOUS SHEET, RENAMING & DELETION ---
 btnAddBlankTab.addEventListener('click', async () => {
   closeToolsMenu();
   if (!workbook) return;
@@ -2584,17 +2692,36 @@ btnAddBlankTab.addEventListener('click', async () => {
     ? addDaysToDateTab(latestSheet, 1)
     : getTodayFormatted();
 
+  const hasPriorSheets = dateSheets.length > 0;
+  const selectOptions = hasPriorSheets
+    ? [
+        {
+          value: 'rollover_prev',
+          label: `↪ Rollover unfinished requests from previous sheet (${latestSheet})`
+        },
+        {
+          value: 'blank',
+          label: '📄 Create blank daily tab only (headers & template formulas)'
+        }
+      ]
+    : null;
+
   const rawInput = await showModalPrompt({
-    title: '➕ New Blank Day Tab',
+    title: '➕ New Daily Tab',
     badge: 'MM-DD-YYYY',
-    message: 'Enter the date for the new blank daily worksheet tab (cloned from your template headers):',
+    message: hasPriorSheets
+      ? `Enter the date for the new daily tab and choose whether to roll over unfinished items from the previous sheet or start blank:`
+      : 'Enter the date for the new blank daily worksheet tab (cloned from your template headers):',
+    selectLabel: 'Initial Tab Contents',
+    selectOptions,
+    defaultSelectValue: hasPriorSheets ? 'rollover_prev' : '',
     inputLabel: 'Daily Tab Date (MM-DD-YYYY)',
     defaultValue: suggestedDate,
     placeholder: 'MM-DD-YYYY',
     confirmText: '➕ Create Tab',
     validate: (val) => {
       if (!DATE_TAB_REGEX.test(val)) {
-        return 'Please use exact MM-DD-YYYY format (e.g., 10-25-2026).';
+        return 'Please use exact MM-DD-YYYY format (e.g., 11-06-2026).';
       }
       if (workbook.getWorksheet(val)) {
         return `Worksheet tab "${val}" already exists in this workbook.`;
@@ -2604,6 +2731,7 @@ btnAddBlankTab.addEventListener('click', async () => {
   });
   if (!rawInput) return;
   const newTabName = (typeof rawInput === 'object' ? rawInput.value : rawInput).trim();
+  const creationMode = (typeof rawInput === 'object' && rawInput.selectValue) ? rawInput.selectValue : 'blank';
 
   await loadWorkbookFromDisk(sheetSelect.value);
   if (workbook.getWorksheet(newTabName)) {
@@ -2618,11 +2746,13 @@ btnAddBlankTab.addEventListener('click', async () => {
     if (isTemplatePlaceholderTab(ws.name)) placeholderWs = ws;
   });
 
+  let newSheet = null;
   if (placeholderWs && dateSheets.length === 0) {
     placeholderWs.name = newTabName;
+    newSheet = placeholderWs;
   } else {
     const templateSheet = findTemplateSheet();
-    const newSheet = workbook.addWorksheet(newTabName);
+    newSheet = workbook.addWorksheet(newTabName);
     placeWorksheetFirst(newSheet);
 
     if (templateSheet) {
@@ -2632,15 +2762,64 @@ btnAddBlankTab.addEventListener('click', async () => {
     }
   }
 
+  let rolledCount = 0;
+  let prevSourceName = null;
+  if (creationMode === 'rollover_prev' && dateSheets.length > 0 && newSheet) {
+    const plan = computeRolloverAnalysis(newTabName, false, 'previous');
+    prevSourceName = plan.immediatePrevSheet || null;
+    if (plan.valid && plan.toRollOver.length > 0) {
+      const targetColMap = getWorksheetColumnMap(newSheet);
+      newSheet.getColumn(targetColMap.trackingCol).hidden = true;
+      if (targetColMap.emailSubjCol) {
+        newSheet.getColumn(targetColMap.emailSubjCol).hidden = false;
+      }
+      let writeRowIdx = getNextEmptyRow(newSheet);
+      for (const item of plan.toRollOver) {
+        const rNum = writeRowIdx++;
+        const r = newSheet.getRow(rNum);
+        writeItemToWorksheetRow(r, rNum, item, targetColMap);
+        unifyHistoricalGroupTrackingIds(item._entries, item.key);
+        rolledCount++;
+      }
+    }
+  }
+
   const saved = await saveWorkbookToDisk();
   if (saved) {
     clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     await loadWorkbookFromDisk(newTabName, {
       preserveStatus: saved === 'mirror-locked'
     });
-    showToast(`Created blank daily tab "${newTabName}".`, 'success');
+    if (creationMode === 'rollover_prev' && prevSourceName) {
+      showToast(
+        `Created "${newTabName}" and rolled over ${rolledCount} unfinished request(s) from ${prevSourceName}.`,
+        'success'
+      );
+    } else {
+      showToast(`Created blank daily tab "${newTabName}".`, 'success');
+    }
   }
 });
+
+if (btnRolloverPrevSheet) {
+  btnRolloverPrevSheet.addEventListener('click', async () => {
+    closeToolsMenu();
+    if (!workbook) return;
+    try {
+      const activeSheet = sheetSelect.value;
+      await loadWorkbookFromDisk(activeSheet);
+      const preferredTarget = (activeSheet && DATE_TAB_REGEX.test(activeSheet)) ? activeSheet : null;
+      openRolloverModal({ preferredSourceMode: 'previous', preferredTargetDate: preferredTarget });
+    } catch (err) {
+      console.error('Error opening rollover from previous sheet:', err);
+      await showModalAlert({
+        title: 'Rollover Read Error',
+        message: 'Could not read workbook for rollover: ' + err.message,
+        variant: 'danger'
+      });
+    }
+  });
+}
 
 btnRenameTab.addEventListener('click', async () => {
   closeToolsMenu();
@@ -2829,6 +3008,32 @@ function populateSelectWithStatuses(selectEl) {
   }
 }
 
+function updateAutoFillFieldHints() {
+  const hasAutoFillData = Array.isArray(masterAccountsMap) && masterAccountsMap.length > 0;
+  const modeHint = useDevMockAccounts
+    ? `Mock Auto-Fill active (${masterAccountsMap.length} test accounts)`
+    : hasAutoFillData
+      ? `Auto-fills from ${hasMasterAccountsSheet ? 'Master Accounts' : 'workbook history'} (or reverse)`
+      : 'Enter manually (Master Accounts sheet not present)';
+
+  if (fMaster) {
+    fMaster.placeholder = hasAutoFillData ? 'Auto-fills from Broker (or reverse)' : 'Enter Master # manually';
+    fMaster.title = modeHint;
+  }
+  if (dockMaster) {
+    dockMaster.placeholder = hasAutoFillData ? 'Master # (Auto-fills)' : 'Master #';
+    dockMaster.title = modeHint;
+  }
+  if (fBroker) {
+    fBroker.placeholder = hasAutoFillData ? 'Select or type broker...' : 'Type broker name...';
+    fBroker.title = modeHint;
+  }
+  if (dockBroker) {
+    dockBroker.placeholder = hasAutoFillData ? 'Select or type broker...' : 'Type broker name...';
+    dockBroker.title = modeHint;
+  }
+}
+
 function populateReferenceControls() {
   const actionsToUse = validationActions.length > 0 ? validationActions : DEFAULT_ACTIONS;
   actionListEl.innerHTML = '';
@@ -2840,56 +3045,123 @@ function populateReferenceControls() {
 
   populateSelectWithStatuses(fStatus);
   populateSelectWithStatuses(dockStatus);
+  populateSelectWithStatuses(batchStatusSelect);
 
   brokerListEl.innerHTML = '';
-  const uniqueBrokers = Array.from(new Set(masterAccountsMap.map(m => m.broker).filter(Boolean)));
+  const safeAccounts = Array.isArray(masterAccountsMap) ? masterAccountsMap : [];
+  const uniqueBrokers = Array.from(new Set(safeAccounts.map(m => m.broker).filter(Boolean)));
   uniqueBrokers.forEach(broker => {
     const opt = document.createElement('option');
     opt.value = broker;
     brokerListEl.appendChild(opt);
   });
+
+  updateAutoFillFieldHints();
 }
 
-function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl, bidderInputEl) {
+function refreshAccountAutoFillSource() {
+  masterAccountsMap = [];
+  if (useDevMockAccounts) {
+    masterAccountsMap = getMockMasterAccountsList();
+  } else if (workbook) {
+    const masterWs = getMasterAccountsWorksheet(workbook);
+    hasMasterAccountsSheet = Boolean(masterWs);
+    if (masterWs) {
+      parseMasterAccountsSheet(masterWs);
+    }
+    const seenAccountKeys = new Set(
+      masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
+    );
+    allRows.forEach(r => {
+      if (!r.broker && !r.master) return;
+      const k = `${r.broker.toLowerCase()}::${r.master.toLowerCase()}`;
+      if (!seenAccountKeys.has(k)) {
+        seenAccountKeys.add(k);
+        masterAccountsMap.push({
+          broker: r.broker,
+          master: r.master.toUpperCase(),
+          bidder: r.bidder ? r.bidder.toUpperCase() : '',
+          yard: r.yard ? r.yard.toUpperCase() : ''
+        });
+      }
+    });
+  }
+  populateReferenceControls();
+  updateDevMockAccountsUI();
+}
+
+if (chkDevMockAccounts) {
+  chkDevMockAccounts.checked = Boolean(useDevMockAccounts);
+  chkDevMockAccounts.addEventListener('change', (e) => {
+    useDevMockAccounts = Boolean(e.target.checked);
+    localStorage.setItem(DEV_MOCK_STORAGE_KEY, useDevMockAccounts ? 'true' : 'false');
+    refreshAccountAutoFillSource();
+    showToast(
+      useDevMockAccounts
+        ? `Dev Mock Master Accounts enabled (${masterAccountsMap.length} dummy accounts loaded).`
+        : (hasMasterAccountsSheet
+            ? 'Switched auto-fill back to workbook Master Accounts sheet.'
+            : 'Mock data disabled — graceful manual entry / workbook history mode active.'),
+      'info'
+    );
+  });
+}
+
+// Initialize Dev Mock Master Accounts immediately on startup when enabled (e.g., localhost testing)
+if (useDevMockAccounts) {
+  masterAccountsMap = getMockMasterAccountsList();
+}
+populateReferenceControls();
+updateDevMockAccountsUI();
+
+function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl, bidderInputEl, yardInputEl = null) {
+  if (!brokerInputEl || !Array.isArray(masterAccountsMap) || masterAccountsMap.length === 0) return;
   const typedBroker = brokerInputEl.value.trim().toLowerCase();
   if (!typedBroker) return;
 
-  const match = masterAccountsMap.find(m => m.broker.toLowerCase() === typedBroker);
+  const match = masterAccountsMap.find(m => m.broker && m.broker.toLowerCase() === typedBroker);
   if (match) {
-    if (!masterInputEl.value.trim() && match.master) {
+    if (masterInputEl && !masterInputEl.value.trim() && match.master) {
       masterInputEl.value = match.master;
     }
-    if (!bidderInputEl.value.trim() && match.bidder) {
+    if (bidderInputEl && !bidderInputEl.value.trim() && match.bidder) {
       bidderInputEl.value = match.bidder;
+    }
+    if (yardInputEl && !yardInputEl.value.trim() && match.yard) {
+      yardInputEl.value = match.yard;
     }
   }
 }
 
-function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl, bidderInputEl) {
+function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl, bidderInputEl, yardInputEl = null) {
+  if (!masterInputEl || !Array.isArray(masterAccountsMap) || masterAccountsMap.length === 0) return;
   const typedMaster = masterInputEl.value.trim().toLowerCase();
   if (!typedMaster) return;
 
-  const match = masterAccountsMap.find(m => m.master.toLowerCase() === typedMaster);
+  const match = masterAccountsMap.find(m => m.master && m.master.toLowerCase() === typedMaster);
   if (match) {
-    if (!brokerInputEl.value.trim() && match.broker) {
+    if (brokerInputEl && !brokerInputEl.value.trim() && match.broker) {
       brokerInputEl.value = match.broker;
     }
-    if (!bidderInputEl.value.trim() && match.bidder) {
+    if (bidderInputEl && !bidderInputEl.value.trim() && match.bidder) {
       bidderInputEl.value = match.bidder;
+    }
+    if (yardInputEl && !yardInputEl.value.trim() && match.yard) {
+      yardInputEl.value = match.yard;
     }
   }
 }
 
-fBroker.addEventListener('input', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder));
-fBroker.addEventListener('change', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder));
-fMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder));
-fMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder));
+fBroker.addEventListener('input', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder, fYard));
+fBroker.addEventListener('change', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder, fYard));
+fMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder, fYard));
+fMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder, fYard));
 
 if (dockBroker && dockMaster && dockBidder) {
-  dockBroker.addEventListener('input', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder));
-  dockBroker.addEventListener('change', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder));
-  dockMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder));
-  dockMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder));
+  dockBroker.addEventListener('input', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder, dockYard));
+  dockBroker.addEventListener('change', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder, dockYard));
+  dockMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder, dockYard));
+  dockMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder, dockYard));
 }
 
 // --- UNIQUE REQUEST IDENTITY & CHRONOLOGICAL ACTION NOTES MERGING ---
@@ -3310,6 +3582,10 @@ function clearTransientFiltersOnNavigation({ resetScopeToCurrent = true } = {}) 
   if (resetScopeToCurrent && scopeSelect && scopeSelect.value !== 'current') {
     scopeSelect.value = 'current';
   }
+  if (selectedForDelete.size > 0) {
+    selectedForDelete.clear();
+    updateDeleteSelectionUI();
+  }
 }
 
 function renderSheetTabsBar() {
@@ -3670,16 +3946,58 @@ function renderList() {
   currentlyVisibleRows = sorted;
   updateSortAndFilterUI(sorted.length);
 
+  // Prune any stale selection keys that no longer exist in allRows
+  if (selectedForDelete.size > 0) {
+    const validCompIds = new Set(allRows.map(r => getRowCompositeId(r.sheetName, r.rowNumber)));
+    for (const cid of Array.from(selectedForDelete)) {
+      if (!validCompIds.has(cid)) {
+        selectedForDelete.delete(cid);
+      }
+    }
+  }
+
   listBody.innerHTML = '';
-  const colSpan = isDeleteMode ? 12 : 11;
+  const colSpan = 12;
   if (sorted.length === 0) {
-    listBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell">No matching requests found.</td></tr>`;
+    let prevSheetForEmpty = null;
+    if (
+      workbook &&
+      scope === 'current' &&
+      !activeFilter &&
+      query.length === 0 &&
+      currentSheet &&
+      DATE_TAB_REGEX.test(currentSheet)
+    ) {
+      const currentTabTime = parseDateTab(currentSheet);
+      const olderTabs = dateSheets
+        .filter(name => parseDateTab(name) < currentTabTime)
+        .sort((a, b) => parseDateTab(b) - parseDateTab(a));
+      if (olderTabs.length > 0) {
+        prevSheetForEmpty = olderTabs[0];
+      }
+    }
+
+    const emptyRolloverBtnHtml = prevSheetForEmpty
+      ? `<div>
+           <button type="button" id="btnEmptyTabRolloverPrev" class="btn-rollover btn-sm empty-rollover-cta">
+             ↪ Rollover Unfinished Requests from ${escapeHtml(prevSheetForEmpty)}
+           </button>
+         </div>`
+      : '';
+
+    listBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell"><div>No matching requests found.</div>${emptyRolloverBtnHtml}</td></tr>`;
+    const btnEmptyRollover = document.getElementById('btnEmptyTabRolloverPrev');
+    if (btnEmptyRollover) {
+      btnEmptyRollover.addEventListener('click', () => {
+        openRolloverModal({ preferredSourceMode: 'previous', preferredTargetDate: currentSheet });
+      });
+    }
+
     const shadowRowEmpty = createShadowNewRowElement(colSpan, currentSheet);
     if (shadowRowEmpty) {
       listBody.appendChild(shadowRowEmpty);
     }
-    syncSelectAllCheckboxes();
-    updateStatusBarTelemetry();
+    updateDeleteSelectionUI();
     return;
   }
 
@@ -3689,9 +4007,9 @@ function renderList() {
     tr.dataset.row = String(item.rowNumber);
 
     const compId = getRowCompositeId(item.sheetName, item.rowNumber);
-    const isCheckedForDelete = isDeleteMode && selectedForDelete.has(compId);
-    if (isCheckedForDelete) {
-      tr.classList.add('selected-for-delete');
+    const isRowChecked = selectedForDelete.has(compId);
+    if (isRowChecked) {
+      tr.classList.add(isDeleteMode ? 'selected-for-delete' : 'selected-for-batch');
     }
     if (
       dockEditingTarget &&
@@ -3706,11 +4024,9 @@ function renderList() {
     const isLongNote = noteText.length > 45 || noteText.includes('\n');
     const shortGuid = item.key.length > 8 ? `${item.key.slice(0, 8)}...` : item.key;
 
-    const deleteCheckboxCell = isDeleteMode
-      ? `<td class="delete-cell">
-           <input type="checkbox" class="chk-delete-row" data-comp="${escapeHtml(compId)}" ${isCheckedForDelete ? 'checked' : ''}>
-         </td>`
-      : '';
+    const rowCheckboxCell = `<td class="${isDeleteMode ? 'delete-cell' : 'select-cell'}">
+      <input type="checkbox" class="chk-delete-row" data-comp="${escapeHtml(compId)}" data-key="${escapeHtml(item.key)}" ${isRowChecked ? 'checked' : ''} aria-label="Select request row ${item.rowNumber} on ${escapeHtml(item.sheetName)}">
+    </td>`;
 
     const keyActiveClass = isFieldFilterActive('key', item.key) ? ' active-filter-match' : '';
     const subjectActiveClass = isFieldFilterActive('subject', item.subject) ? ' active-filter-match' : '';
@@ -3753,7 +4069,7 @@ function renderList() {
     const lotsHtml = renderClickableLotsHtml(item.lots);
 
     tr.innerHTML = `
-      ${deleteCheckboxCell}
+      ${rowCheckboxCell}
       <td style="white-space:nowrap;">
         <button type="button" class="clickable-date-tab" data-date-tab="${escapeHtml(item.sheetName)}" title="Click to switch to daily tab ${escapeHtml(item.sheetName)}">
           ${escapeHtml(item.sheetName)}
@@ -3798,11 +4114,10 @@ function renderList() {
     listBody.appendChild(shadowRow);
   }
 
-  syncSelectAllCheckboxes();
-  updateStatusBarTelemetry();
+  updateDeleteSelectionUI();
 }
 
-// --- DELETE SELECTION MODE & CONFIRMATION ---
+// --- PERMANENT CHECKBOX SELECTION, FLOATING BATCH STATUS DOCK & BATCH DELETE ---
 function setDeleteMode(enabled) {
   closeToolsMenu();
   isDeleteMode = Boolean(enabled);
@@ -3817,31 +4132,69 @@ function setDeleteMode(enabled) {
       : 'Batch Delete Requests Mode';
   }
   deleteBanner.style.display = isDeleteMode ? 'flex' : 'none';
-  thDeleteSelect.style.display = isDeleteMode ? 'table-cell' : 'none';
+  if (thDeleteSelect) {
+    thDeleteSelect.className = isDeleteMode ? 'delete-col' : 'select-col';
+  }
   updateDeleteSelectionUI();
   renderList();
 }
 
 function updateDeleteSelectionUI() {
   const count = selectedForDelete.size;
-  deleteSelectedCountEl.textContent = String(count);
-  btnConfirmDeleteSelected.textContent = `Delete Selected (${count})`;
-  btnConfirmDeleteSelected.disabled = count === 0;
+  if (deleteSelectedCountEl) {
+    deleteSelectedCountEl.textContent = String(count);
+  }
+  if (btnConfirmDeleteSelected) {
+    btnConfirmDeleteSelected.textContent = `Delete Selected (${count})`;
+    btnConfirmDeleteSelected.disabled = count === 0;
+  }
+  if (batchSelectedCountEl) {
+    batchSelectedCountEl.textContent = String(count);
+  }
+  if (batchActionDock) {
+    const showBatchDock = !isDeleteMode && count > 0 && Boolean(workbook);
+    batchActionDock.style.display = showBatchDock ? 'block' : 'none';
+  }
   syncSelectAllCheckboxes();
   updateStatusBarTelemetry();
 }
 
 function syncSelectAllCheckboxes() {
-  if (!isDeleteMode || currentlyVisibleRows.length === 0) {
-    chkSelectAllHeader.checked = false;
-    chkSelectAllBanner.checked = false;
+  if (!workbook || currentlyVisibleRows.length === 0) {
+    if (chkSelectAllHeader) {
+      chkSelectAllHeader.checked = false;
+      chkSelectAllHeader.indeterminate = false;
+      chkSelectAllHeader.disabled = true;
+    }
+    if (chkSelectAllBanner) {
+      chkSelectAllBanner.checked = false;
+      chkSelectAllBanner.indeterminate = false;
+    }
     return;
   }
-  const allVisibleSelected = currentlyVisibleRows.every(item =>
-    selectedForDelete.has(getRowCompositeId(item.sheetName, item.rowNumber))
-  );
-  chkSelectAllHeader.checked = allVisibleSelected;
-  chkSelectAllBanner.checked = allVisibleSelected;
+
+  if (chkSelectAllHeader) {
+    chkSelectAllHeader.disabled = false;
+  }
+
+  let visibleSelectedCount = 0;
+  currentlyVisibleRows.forEach(item => {
+    if (selectedForDelete.has(getRowCompositeId(item.sheetName, item.rowNumber))) {
+      visibleSelectedCount++;
+    }
+  });
+
+  const allVisibleSelected = visibleSelectedCount === currentlyVisibleRows.length;
+  const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
+
+  if (chkSelectAllHeader) {
+    chkSelectAllHeader.checked = allVisibleSelected;
+    chkSelectAllHeader.indeterminate = someVisibleSelected;
+  }
+  if (chkSelectAllBanner) {
+    chkSelectAllBanner.checked = isDeleteMode && allVisibleSelected;
+    chkSelectAllBanner.indeterminate = isDeleteMode && someVisibleSelected;
+  }
 }
 
 function handleToggleSelectAllVisible(checked) {
@@ -3873,6 +4226,14 @@ chkSelectAllBanner.addEventListener('change', (e) => {
   handleToggleSelectAllVisible(e.target.checked);
 });
 
+if (btnClearBatchSelection) {
+  btnClearBatchSelection.addEventListener('click', () => {
+    selectedForDelete.clear();
+    updateDeleteSelectionUI();
+    renderList();
+  });
+}
+
 listBody.addEventListener('change', (e) => {
   const chk = e.target.closest('.chk-delete-row');
   if (!chk) return;
@@ -3882,15 +4243,140 @@ listBody.addEventListener('change', (e) => {
   const tr = chk.closest('tr');
   if (chk.checked) {
     selectedForDelete.add(compId);
-    if (tr) tr.classList.add('selected-for-delete');
+    if (tr) {
+      tr.classList.toggle('selected-for-delete', isDeleteMode);
+      tr.classList.toggle('selected-for-batch', !isDeleteMode);
+    }
   } else {
     selectedForDelete.delete(compId);
-    if (tr) tr.classList.remove('selected-for-delete');
+    if (tr) {
+      tr.classList.remove('selected-for-delete', 'selected-for-batch');
+    }
   }
   updateDeleteSelectionUI();
 });
 
-btnConfirmDeleteSelected.addEventListener('click', async () => {
+async function handleApplyBatchStatusUpdate() {
+  if (selectedForDelete.size === 0 || !workbook || !batchStatusSelect) return;
+  const targetStatus = batchStatusSelect.value.trim();
+  if (!targetStatus) return;
+
+  const selectedCompSet = new Set(selectedForDelete);
+  const selectedItems = allRows.filter(item =>
+    selectedCompSet.has(getRowCompositeId(item.sheetName, item.rowNumber))
+  );
+  if (selectedItems.length === 0) return;
+
+  // Check if any selected rows also appear on newer daily tabs with a different status
+  const extraNewerItems = [];
+  const seenExtraComp = new Set();
+  selectedItems.forEach(sel => {
+    const selTime = parseDateTab(sel.sheetName);
+    const selKey = String(sel.key || '').trim().toLowerCase();
+    if (!selKey) return;
+    allRows.forEach(candidate => {
+      const candComp = getRowCompositeId(candidate.sheetName, candidate.rowNumber);
+      if (selectedCompSet.has(candComp) || seenExtraComp.has(candComp)) return;
+      if (
+        String(candidate.key || '').trim().toLowerCase() === selKey &&
+        parseDateTab(candidate.sheetName) > selTime &&
+        candidate.status.trim().toLowerCase() !== targetStatus.toLowerCase()
+      ) {
+        seenExtraComp.add(candComp);
+        extraNewerItems.push(candidate);
+      }
+    });
+  });
+
+  let rowsToMutate = [...selectedItems];
+  if (extraNewerItems.length > 0) {
+    const newerTabsList = Array.from(new Set(extraNewerItems.map(r => r.sheetName))).join(', ');
+    const syncNewer = await showModalConfirm({
+      title: '🔄 Sync Batch Status to Newer Tab(s)?',
+      badge: targetStatus,
+      message:
+        `${extraNewerItems.length} selected request(s) also exist on newer daily tab(s): ${newerTabsList}.\n\n` +
+        `Also update their status to "${targetStatus}" on those newer tab(s) so Rollover stays consistent?`,
+      confirmText: '🔄 Update Newer Tab(s) Too',
+      cancelText: 'Only Selected Row(s)'
+    });
+    if (syncNewer) {
+      rowsToMutate = [...selectedItems, ...extraNewerItems];
+    }
+  }
+
+  // 1 & 2. Map via immutable UUIDv4 keys (hidden Col K/L) & strictly preserve existing UUIDv4s
+  const batchTargets = rowsToMutate.map(item => ({
+    itemRef: item,
+    sheetName: item.sheetName,
+    rowNumber: item.rowNumber,
+    immutableKey: item.key // Strictly preserved — never regenerated
+  }));
+
+  // 3. Update Request Status in active state array FIRST
+  ensureStatusOptionExists(targetStatus);
+  batchTargets.forEach(target => {
+    target.itemRef.status = targetStatus;
+    if (
+      dockEditingTarget &&
+      dockEditingTarget.sheetName === target.sheetName &&
+      dockEditingTarget.rowNumber === target.rowNumber &&
+      dockStatus
+    ) {
+      dockStatus.value = targetStatus;
+    }
+  });
+
+  // 4. Clear selection & re-render the DOM immediately to reflect the new statuses
+  selectedForDelete.clear();
+  updateDeleteSelectionUI();
+  renderSheetTabsBar();
+  renderList();
+
+  // 5. Mutate ExcelJS cells (preserving existing Column K/L UUIDv4s) & perform ONE single batch write-back
+  if (btnApplyBatchStatus) btnApplyBatchStatus.disabled = true;
+  try {
+    batchTargets.forEach(target => {
+      const ws = workbook.getWorksheet(target.sheetName);
+      if (!ws) return;
+      const colMap = getWorksheetColumnMap(ws);
+      ws.getColumn(colMap.trackingCol).hidden = true;
+      if (colMap.emailSubjCol) {
+        ws.getColumn(colMap.emailSubjCol).hidden = false;
+      }
+
+      const excelRow = ws.getRow(target.rowNumber);
+      excelRow.getCell(colMap.statusCol).value = targetStatus;
+
+      // Guarantee existing UUIDv4 in hidden Tracking ID column is never lost or regenerated
+      const existingCellKey = cellText(excelRow, colMap.trackingCol).trim();
+      if (!existingCellKey && target.immutableKey) {
+        excelRow.getCell(colMap.trackingCol).value = target.immutableKey;
+      }
+      excelRow.commit();
+    });
+
+    const saveResult = await saveWorkbookToDisk();
+    if (!saveResult) {
+      // Primary working file was locked in Desktop Excel — reload from disk so state stays truthful
+      await loadWorkbookFromDisk(sheetSelect.value);
+      return;
+    }
+
+    showToast(
+      `Batch updated ${selectedItems.length} request(s) to "${targetStatus}"${rowsToMutate.length > selectedItems.length ? ` (+${rowsToMutate.length - selectedItems.length} newer-tab row(s))` : ''}.`,
+      'success'
+    );
+  } finally {
+    if (btnApplyBatchStatus) btnApplyBatchStatus.disabled = false;
+  }
+}
+
+if (btnApplyBatchStatus) {
+  btnApplyBatchStatus.addEventListener('click', handleApplyBatchStatusUpdate);
+}
+
+async function executeBatchDeleteSelected() {
   if (selectedForDelete.size === 0 || !workbook) return;
 
   const itemsToDelete = allRows.filter(item =>
@@ -3941,13 +4427,19 @@ btnConfirmDeleteSelected.addEventListener('click', async () => {
 
   const saveResult = await saveWorkbookToDisk();
   if (saveResult) {
+    selectedForDelete.clear();
     setDeleteMode(false);
     await loadWorkbookFromDisk(currentTab, {
       preserveStatus: saveResult === 'mirror-locked'
     });
     showToast(`Deleted ${deletedCount} request(s) from workbook.`, 'success');
   }
-});
+}
+
+btnConfirmDeleteSelected.addEventListener('click', executeBatchDeleteSelected);
+if (btnBatchDeleteSelected) {
+  btnBatchDeleteSelected.addEventListener('click', executeBatchDeleteSelected);
+}
 
 // Column Header Sorting
 if (tableHead) {
@@ -4038,6 +4530,19 @@ listBody.addEventListener('click', (e) => {
     return;
   }
 
+  // Handle clicks inside the permanent left-edge checkbox cell without opening the single-row editor
+  const selectCellEl = e.target.closest('.select-cell, .delete-cell');
+  if (selectCellEl) {
+    if (!e.target.closest('.chk-delete-row')) {
+      const cellChk = selectCellEl.querySelector('.chk-delete-row');
+      if (cellChk) {
+        cellChk.checked = !cellChk.checked;
+        cellChk.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+    return;
+  }
+
   // Clicking anywhere else on a data row populates the Bottom Editor Dock
   if (!isDeleteMode && !e.target.closest('.chk-delete-row')) {
     const rowTr = e.target.closest('tr[data-sheet][data-row]');
@@ -4087,6 +4592,7 @@ function ensureSelectOptionExists(selectEl, statusValue) {
 function ensureStatusOptionExists(statusValue) {
   ensureSelectOptionExists(fStatus, statusValue);
   ensureSelectOptionExists(dockStatus, statusValue);
+  ensureSelectOptionExists(batchStatusSelect, statusValue);
 }
 
 function formatCurrentTimestampPrefix() {
@@ -5047,7 +5553,10 @@ btnCancelRollover.addEventListener('click', () => {
   rolloverModal.classList.remove('open');
 });
 
-function openRolloverModal() {
+function openRolloverModal(options = {}) {
+  const { preferredSourceMode = null, preferredTargetDate = null } = options || {};
+  rolloverSourceMode = preferredSourceMode === 'all' ? 'all' : (preferredSourceMode === 'previous' ? 'previous' : 'previous');
+
   const todayStr = getTodayFormatted();
   const todayTime = parseDateTab(todayStr);
   rolloverTodayBadge.textContent = `Today: ${todayStr}`;
@@ -5076,7 +5585,7 @@ function openRolloverModal() {
     presets.push({ label: `Next Day (${nextAfterLatest})`, date: nextAfterLatest });
     presets.push({ label: `Today (${todayStr})`, date: todayStr });
 
-    rolloverTargetDate.value = latestSheet;
+    rolloverTargetDate.value = preferredTargetDate || latestSheet;
   } else {
     rolloverFutureBanner.style.display = 'none';
     presets.push({ label: `Today (${todayStr})`, date: todayStr });
@@ -5087,7 +5596,11 @@ function openRolloverModal() {
     if (latestSheet && latestSheet !== todayStr) {
       presets.push({ label: `Latest Tab (${latestSheet})`, date: latestSheet });
     }
-    rolloverTargetDate.value = todayStr;
+    rolloverTargetDate.value = preferredTargetDate || todayStr;
+  }
+
+  if (preferredTargetDate && !presets.some(p => p.date === preferredTargetDate)) {
+    presets.unshift({ label: `Selected Tab (${preferredTargetDate})`, date: preferredTargetDate });
   }
 
   presets.forEach(p => {
@@ -5109,6 +5622,17 @@ function openRolloverModal() {
 
 rolloverTargetDate.addEventListener('input', updateRolloverModalPreview);
 chkIncludeFutureTabs.addEventListener('change', updateRolloverModalPreview);
+if (rolloverSourceGroup) {
+  rolloverSourceGroup.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-rollover-source]');
+    if (!btn || btn.disabled) return;
+    const nextMode = btn.dataset.rolloverSource;
+    if (nextMode === 'previous' || nextMode === 'all') {
+      rolloverSourceMode = nextMode;
+      updateRolloverModalPreview();
+    }
+  });
+}
 
 function buildConsolidatedRolloverItem(entries, baseRow) {
   const mergedNotes = mergeChronologicalActionNotes(entries);
@@ -5172,17 +5696,20 @@ function unifyHistoricalGroupTrackingIds(entries, canonicalKey) {
   });
 }
 
-function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
+function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = rolloverSourceMode) {
   if (!DATE_TAB_REGEX.test(targetTabName)) {
     return { valid: false };
   }
 
+  const effectiveSourceMode = sourceMode === 'all' ? 'all' : 'previous';
   const targetTime = parseDateTab(targetTabName);
   const targetExists = Boolean(workbook.getWorksheet(targetTabName));
 
   const priorSheets = dateSheets
     .filter(name => parseDateTab(name) < targetTime)
     .sort((a, b) => parseDateTab(a) - parseDateTab(b));
+
+  const immediatePrevSheet = priorSheets.length > 0 ? priorSheets[priorSheets.length - 1] : null;
 
   const futureSheets = dateSheets
     .filter(name => parseDateTab(name) > targetTime)
@@ -5191,6 +5718,13 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
   const sourceSheets = includeFutureTabs
     ? [...priorSheets, ...futureSheets]
     : priorSheets;
+
+  const allowedActiveSourceSheets = effectiveSourceMode === 'previous'
+    ? new Set([
+        ...(immediatePrevSheet ? [immediatePrevSheet] : []),
+        ...(includeFutureTabs ? futureSheets : [])
+      ])
+    : null;
 
   // Consolidate each unique request across all source daily tabs chronologically
   // so only ONE consolidated item per unique request rolls forward with all prior notes appended.
@@ -5261,6 +5795,8 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     const latestRow = group.latestRow;
     const isLatestComplete = isCompletedStatus(latestRow.status);
     const consolidatedLatest = buildConsolidatedRolloverItem(group.entries, latestRow);
+    const inSelectedSourceScope = !allowedActiveSourceSheets ||
+      group.entries.some(e => allowedActiveSourceSheets.has(e.sheetName));
 
     // Check whether this unique request is already present on targetTabName
     let targetRow = existingTargetRows.find(t =>
@@ -5292,20 +5828,29 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
       alreadyOnTarget.push({
         latestRow: consolidatedLatest,
         targetRow,
-        reopenedOnSource: isTargetComplete && !isLatestComplete,
-        hasMissingPriorNotes,
-        mergedTargetNotes,
+        reopenedOnSource: inSelectedSourceScope && isTargetComplete && !isLatestComplete,
+        hasMissingPriorNotes: inSelectedSourceScope && hasMissingPriorNotes,
+        mergedTargetNotes: inSelectedSourceScope ? mergedTargetNotes : targetRow.notes,
         groupEntries: group.entries
       });
+    } else if (!inSelectedSourceScope) {
+      // Excluded when Source Sheet Scope is "Previous Sheet Only" and request is not on immediatePrevSheet
+      return;
     } else if (!isLatestComplete) {
       toRollOver.push(consolidatedLatest);
     } else if (group.lastOpenRow) {
-      const consolidatedOpen = buildConsolidatedRolloverItem(group.entries, group.lastOpenRow);
-      supersededByComplete.push({
-        openRow: consolidatedOpen,
-        completedRow: latestRow,
-        groupEntries: group.entries
-      });
+      const canOfferReopen = effectiveSourceMode === 'all' || (
+        immediatePrevSheet &&
+        group.entries.some(e => e.sheetName === immediatePrevSheet && !isCompletedStatus(e.status))
+      );
+      if (canOfferReopen) {
+        const consolidatedOpen = buildConsolidatedRolloverItem(group.entries, group.lastOpenRow);
+        supersededByComplete.push({
+          openRow: consolidatedOpen,
+          completedRow: latestRow,
+          groupEntries: group.entries
+        });
+      }
     }
   });
 
@@ -5327,6 +5872,8 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs) {
     targetTabName,
     targetExists,
     priorSheets,
+    immediatePrevSheet,
+    sourceMode: effectiveSourceMode,
     futureSheets,
     toRollOver,
     alreadyOnTarget,
@@ -5343,11 +5890,42 @@ function updateRolloverModalPreview() {
 
   if (!DATE_TAB_REGEX.test(targetVal)) {
     rolloverFutureOptionWrap.style.display = 'none';
+    if (rolloverSourceWrap) rolloverSourceWrap.style.display = 'none';
     rolloverPreviewBox.innerHTML = `<div style="color:var(--warning-text);">Please enter a valid target date in exact <code>MM-DD-YYYY</code> format.</div>`;
     return;
   }
 
   const targetTime = parseDateTab(targetVal);
+  const priorTabs = dateSheets
+    .filter(name => parseDateTab(name) < targetTime)
+    .sort((a, b) => parseDateTab(a) - parseDateTab(b));
+  const immediatePrev = priorTabs.length > 0 ? priorTabs[priorTabs.length - 1] : null;
+
+  if (rolloverSourceWrap) {
+    rolloverSourceWrap.style.display = 'flex';
+  }
+  if (btnRolloverSourcePrev) {
+    btnRolloverSourcePrev.textContent = immediatePrev
+      ? `Previous Sheet Only (${immediatePrev})`
+      : 'Previous Sheet Only (None)';
+    btnRolloverSourcePrev.classList.toggle('active', rolloverSourceMode === 'previous');
+    btnRolloverSourcePrev.setAttribute('aria-pressed', String(rolloverSourceMode === 'previous'));
+  }
+  if (btnRolloverSourceAll) {
+    btnRolloverSourceAll.textContent = `All Prior Sheets (${priorTabs.length})`;
+    btnRolloverSourceAll.classList.toggle('active', rolloverSourceMode === 'all');
+    btnRolloverSourceAll.setAttribute('aria-pressed', String(rolloverSourceMode === 'all'));
+  }
+  if (rolloverSourceDesc) {
+    if (rolloverSourceMode === 'previous') {
+      rolloverSourceDesc.textContent = immediatePrev
+        ? `Carries forward unfinished requests from ${immediatePrev} only (Complete / Completed / Closed items are excluded) while preserving historical notes & Tracking IDs.`
+        : `No daily sheet exists prior to ${targetVal}. Create or select a later date, or include future-dated tabs below.`;
+    } else {
+      rolloverSourceDesc.textContent = `Scans all ${priorTabs.length} daily tab(s) prior to ${targetVal} chronologically so older unfinished requests are also carried forward (Complete / Completed / Closed items are excluded).`;
+    }
+  }
+
   const futureTabs = dateSheets.filter(name => parseDateTab(name) > targetTime);
   if (futureTabs.length > 0) {
     rolloverFutureOptionWrap.style.display = 'block';
@@ -5357,15 +5935,19 @@ function updateRolloverModalPreview() {
   }
 
   const includeFuture = futureTabs.length > 0 && chkIncludeFutureTabs.checked;
-  const plan = computeRolloverAnalysis(targetVal, includeFuture);
+  const plan = computeRolloverAnalysis(targetVal, includeFuture, rolloverSourceMode);
 
   const tabStateBadge = plan.targetExists
     ? `<span class="badge badge-complete">Existing Tab (${plan.alreadyOnTarget.length} request${plan.alreadyOnTarget.length === 1 ? '' : 's'} currently on sheet)</span>`
     : `<span class="badge badge-pending">New Tab (Will be created &amp; cloned from template)</span>`;
 
+  const sourceSummaryLabel = plan.sourceMode === 'previous'
+    ? (plan.immediatePrevSheet ? `Source: <code>${escapeHtml(plan.immediatePrevSheet)}</code>` : 'Source: None prior')
+    : `Source: All ${plan.priorSheets.length} prior sheet(s)`;
+
   let html = `
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding-bottom:8px; border-bottom:1px solid var(--border);">
-      <div><strong>Target:</strong> <code>${escapeHtml(targetVal)}</code></div>
+      <div><strong>Target:</strong> <code>${escapeHtml(targetVal)}</code> <span style="color:var(--text-muted); font-size:0.75rem; margin-left:6px;">• ${sourceSummaryLabel}</span></div>
       ${tabStateBadge}
     </div>
   `;
@@ -5373,7 +5955,10 @@ function updateRolloverModalPreview() {
   html += `<div>
     <div class="preview-section-title">Unfinished Unique Requests to Roll Over (${plan.toRollOver.length})</div>`;
   if (plan.toRollOver.length === 0) {
-    html += `<div style="color:var(--text-muted); font-size:0.78125rem;">No new unfinished requests found across source sheets.</div>`;
+    const emptyMsg = plan.sourceMode === 'previous' && plan.immediatePrevSheet
+      ? `No unfinished requests found on ${escapeHtml(plan.immediatePrevSheet)} that aren't already on ${escapeHtml(targetVal)}.`
+      : 'No new unfinished requests found across source sheets.';
+    html += `<div style="color:var(--text-muted); font-size:0.78125rem;">${emptyMsg}</div>`;
   } else {
     html += `<div class="preview-list">`;
     plan.toRollOver.forEach(item => {
@@ -5466,11 +6051,12 @@ rolloverForm.addEventListener('submit', async (e) => {
   const targetTime = parseDateTab(targetTabName);
   const hasFuture = dateSheets.some(name => parseDateTab(name) > targetTime);
   const includeFuture = hasFuture && chkIncludeFutureTabs.checked;
+  const selectedSourceMode = rolloverSourceMode;
 
   try {
     await loadWorkbookFromDisk(sheetSelect.value);
 
-    const plan = computeRolloverAnalysis(targetTabName, includeFuture);
+    const plan = computeRolloverAnalysis(targetTabName, includeFuture, selectedSourceMode);
     if (!plan.valid) return;
 
     const itemsToCarry = [...plan.toRollOver];
@@ -5929,7 +6515,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION ---
-const APP_VERSION = 'v1.12.0';
+const APP_VERSION = 'v1.13.0';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

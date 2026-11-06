@@ -1,12 +1,12 @@
 # TrackerUI — Changelog & Feature Tracker
 
-This file tracks all requested features, architectural suggestions (from [`newfeatures.txt`](newfeatures.txt) and user sessions), implementation statuses, and version release history.
+This file tracks all requested features, architectural suggestions (from [`newfeatures.txt`](newfeatures.txt), [`--Project--- TrackerUI.md`](--Project---%20TrackerUI.md), and user sessions), implementation statuses, active bug fixes, and version release history.
 
 > **Automated Tracking Rule**: Whenever a feature or suggestion is implemented, modified, or decided against, this file is automatically updated by the coding assistant per [`AGENTS.md`](AGENTS.md).
 
 ---
 
-## 1. Feature & Suggestion Status Matrix (`newfeatures.txt`)
+## 1. Feature & Suggestion Status Matrix (`newfeatures.txt` & `--Project--- TrackerUI.md`)
 
 ### ✅ Implemented Features
 | Feature / Suggestion | Source | Status | Implemented In | Implementation Details |
@@ -24,6 +24,10 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 | **Light Mode Color Palette & `Light` / `Auto` / `Dark` Theme Switcher** | `newfeatures.txt` (L39) + User Request | ✅ Implemented | `v1.12.0` | Added complete semantic Light Mode and Dark Mode token palettes in `css/styles.css`, automatic OS theme detection via `matchMedia('(prefers-color-scheme: light)')`, and synced `Light` / `Auto` / `Dark` segmented controls in both the top header (`#headerThemeGroup`) and **Tools & Setup** menu (`#menuThemeGroup`), persisted in `localStorage` (`trackerui_theme_mode`). |
 | **Whole-App Text Size Slider & Professional UI / Menu Cleanup** | User Request | ✅ Implemented | `v1.12.0` | Converted all typography across `css/styles.css` to scalable `rem` units driven by `html { font-size: calc(16px * var(--font-scale, 1)); }` and added an interactive **Text Size** slider (`85%`–`125%`, `A−`/`A+` steppers, `Reset`) inside **Tools & Setup**, persisted in `localStorage` (`trackerui_font_scale`). Replaced header/menu emoji clutter with crisp inline SVG icons and refined control styling. |
 | **Consolidated Unique-Request Rollover with Chronological Action Notes Appending** | User Request | ✅ Implemented | `v1.12.0` | Upgraded `indexWorksheetRows()` (chronological oldest → newest indexing + prior-day Tracking ID inheritance) and `computeRolloverAnalysis()` (`areRowsSameUniqueRequest` + `mergeChronologicalActionNotes`) so each unique request across prior days is rolled forward **once** (never duplicating per day) with all prior days' `Action Notes` chronologically appended and deduplicated (`[MM-DD-YYYY] ...`), while unifying hidden Column K/L `Tracking ID`s across consolidated rows. |
+| **Batch Status Update Architecture (Permanent Checkboxes & Floating Batch Action Dock)** | `--Project--- TrackerUI.md` (§1, L4–12) | ✅ Implemented | `v1.13.0` | Made the left-edge row selection checkbox column (`#thDeleteSelect` / `.chk-delete-row`) permanent on the main table and added a floating `#batchActionDock` (status dropdown + `Apply` + `Delete` + `Clear`) that renders only when ≥1 rows are ticked. `handleApplyBatchStatusUpdate()` updates `allRows` optimistically, re-renders the DOM immediately, strictly preserves immutable Column K/L UUIDv4s, and executes a single `saveWorkbookToDisk()` dual-write. |
+| **Auto-Fill Graceful Degradation & Mock Testing Data (`mockMasterAccounts.js`)** | `--Project--- TrackerUI.md` (§2, L14–18) | ✅ Implemented | `v1.13.0` | Guarded `setBrokerCellWithFormula()` against writing `'Master Accounts'` `_xlfn.XLOOKUP` formulas when that sheet is absent; created standalone `js/mockMasterAccounts.js` dummy dataset (10 sample accounts including `"Auto Import Tbilisi LLC"`, Yard `110`); added `localhost` auto-fallback when no `Master Accounts` tab exists plus an explicit `#chkDevMockAccounts` toggle inside **Tools & Setup → Workbook & Schema**. |
+| **Rollover from Previous Sheet & `"Completed"` Status Filtering** | `--Project--- TrackerUI.md` (L25, L27) | ✅ Implemented | `v1.13.0` | Fixed `isCompletedStatus()` (`COMPLETED_STATUS_SET`) to recognize `'completed'` (with trailing `'d'`), `'resolved'`, `'done'`, and `'cancelled'`/`'canceled'` so completed items never roll over. Added **Source Sheet Scope** (`Previous Sheet Only` vs. `All Prior Sheets`) in `#rolloverModal`, `#btnRolloverPrevSheet` in **Tools & Setup**, a carry-over option in **New Day Tab** (`#btnAddBlankTab`), and a one-click rollover CTA on empty daily tabs. |
+| **Fix Dark Mode `#workbookSelect` White-on-White Dropdown Text** | `--Project--- TrackerUI.md` (L29) | ✅ Implemented | `v1.13.0` | Styled `.workbook-picker-wrap select` with `background-color: var(--surface-muted); color: var(--text)` and added global `select option, select optgroup { background-color: var(--surface); color: var(--text); }` in `css/styles.css` so native Windows Chromium `<option>` menus remain legible without hovering. |
 
 ---
 
@@ -35,9 +39,11 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 
 ---
 
-### 📋 Planned / Backlog & On Hold
+### 📋 Planned / Backlog & Parked Scope
 | Feature / Suggestion | Source | Status | Notes |
 |---|---|---|---|
+| **Mass Report Filter (380,000-Row Client-Side `Set` Filter)** | `--Project--- TrackerUI.md` (§3, L20) | ⏸️ Parked | Explicitly parked ("Do not implement yet"). Uses `O(1)` `Set` lookup and lightweight `{ header: 1 }` array-of-arrays parsing to avoid V8 memory crashes on massive reports. |
+| **Smart Scratchpad (Real-Time Regex Lot # & Title Tracking Extractor)** | `--Project--- TrackerUI.md` (§3, L21) | ⏸️ Parked | Explicitly parked ("Do not implement yet"). Split-pane raw text input using real-time Regex to extract 8-digit lot numbers and alphanumeric title tracking numbers into a structured table with eventual UUID ticket linking. |
 | **Chart.js Metric View for Current Data (Phase 1)** | `newfeatures.txt` (L40) | ⏸️ On Hold | Explicitly deferred per user direction ("We can hold off on Chart.JS view for now") while focusing on core agent workflow & testing branch. |
 | **Config Excel Sheet or `.ini` / `.json` File** | `newfeatures.txt` (L55) | 📋 Backlog | Store workspace/settings configuration in an external `.ini`/`.json` file or hidden config sheet inside the workbook. |
 | **Supervisor Pipeline: Subtype → Parent Type Lookup (Phase 2)** | `newfeatures.txt` (L44) | 📋 Backlog | Action subtype to parent category lookup mapping for supervisor reporting. |
@@ -59,7 +65,24 @@ This file tracks all requested features, architectural suggestions (from [`newfe
 
 ## 2. Version Release History
 
-### `v1.12.0` (Current)
+### `v1.13.0` (Current)
+- **Batch Status Update Architecture (`#batchActionDock` & Permanent Selection Checkboxes)**:
+  - Made the left-edge selection checkbox column (`#thDeleteSelect` / `.chk-delete-row`) permanent on the request table so rows can be multi-selected at any time without entering a separate mode.
+  - Added a floating bottom **Batch Action Dock** (`#batchActionDock`) rendered whenever ≥1 rows are checked, providing bulk status selection (`#batchStatusSelect`), **Apply Status** (`#btnApplyBatchStatus`), **Delete** (`#btnBatchDeleteSelected`), and **Clear** (`#btnClearBatchSelection`).
+  - Implemented `handleApplyBatchStatusUpdate()` on top of ExcelJS: preserves every row's immutable hidden UUIDv4 (`Tracking ID` in Col K/L), updates `allRows` and re-renders the DOM optimistically, and executes a single `saveWorkbookToDisk()` dual-write to the working `.xlsx` and Supervisor `(VIEW ONLY).xlsx` mirror.
+- **Auto-Fill Graceful Degradation & Mock Testing Dataset (`js/mockMasterAccounts.js`)**:
+  - Guarded `setBrokerCellWithFormula()` so 12-column template layouts never write `_xlfn.XLOOKUP(..., 'Master Accounts'!...)` formulas when the optional `'Master Accounts'` worksheet is absent, falling back cleanly to plain string Broker cells while keeping all form inputs editable.
+  - Added standalone `js/mockMasterAccounts.js` (`window.MOCK_MASTER_ACCOUNTS`) containing 10 sample Broker / Master # / Bidder # / Yard # records (including `"Auto Import Tbilisi LLC"`, `MA-104820`, `BD-882104`, Yard `110`) plus bidirectional Yard auto-fill when empty.
+  - Added automatic `localhost` mock fallback when a workbook has no `Master Accounts` tab and an explicit **Mock Master Accounts (Dev)** toggle (`#chkDevMockAccounts`) inside **Tools & Setup → Workbook & Schema**.
+- **Rollover from Previous Sheet & `"Completed"` Status Fix**:
+  - Upgraded `isCompletedStatus()` (`COMPLETED_STATUS_SET`) to match `'completed'` (with trailing `'d'`), `'complete'`, `'closed'`, `'resolved'`, `'done'`, and `'cancelled'`/`'canceled'` so `"Completed"` requests no longer roll forward.
+  - Added **Source Sheet Scope** (`Previous Sheet Only` vs. `All Prior Sheets`) to `#rolloverModal`, a **Rollover from Previous Sheet...** action (`#btnRolloverPrevSheet`) in **Tools & Setup**, a carry-over mode when creating a **New Day Tab** (`#btnAddBlankTab`), and a one-click rollover CTA on empty daily tabs.
+- **Dark Mode `#workbookSelect` Dropdown Contrast Fix**:
+  - Updated `.workbook-picker-wrap select` (`background-color: var(--surface-muted); color: var(--text)`) and added global `select option, select optgroup { background-color: var(--surface); color: var(--text); }` rules in `css/styles.css` to eliminate white-on-white dropdown text on Windows Chromium.
+- **PWA Service Worker Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v16'` in `sw.js` and added `./js/mockMasterAccounts.js` to offline precache assets.
+
+### `v1.12.0`
 - **Light Mode Palette & `Light` / `Auto` / `Dark` Theme Switcher**:
   - Added full high-contrast Light Mode and Dark Mode semantic color schemes in `css/styles.css`, including `@media (prefers-color-scheme: light)` automatic system detection when in `Auto` mode and explicit `[data-theme="light" | "dark"]` overrides.
   - Added synced `Light` / `Auto` / `Dark` segmented theme controls in both the top header (`#headerThemeGroup`) and **Tools & Setup** (`#menuThemeGroup`), persisted in `localStorage` (`trackerui_theme_mode`) with live OS preference listeners and dynamic PWA `<meta name="theme-color">` updates.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.12.0</title>
+  <title>TrackerUI v1.13.0</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.12.0)">v1.12.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI Application Version (v1.13.0)">v1.13.0</span>
     </div>
 
     <div class="header-actions">
@@ -233,7 +233,10 @@
 
           <!-- 3. Workbook & Schema -->
           <div class="menu-section">
-            <div class="menu-section-title">Workbook &amp; Schema</div>
+            <div class="menu-section-header-row">
+              <span class="menu-section-title">Workbook &amp; Schema</span>
+              <span id="devMockStateBadge" class="menu-meta-hint" style="display:none;">DEV MOCK</span>
+            </div>
             <button type="button" id="btnNewWorkbook" class="menu-item" disabled>
               <span class="menu-item-left">
                 <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -253,6 +256,10 @@
                 <span>Bootstrap / Repair Workbook Schema</span>
               </span>
             </button>
+            <label class="menu-checkbox-item" id="devMockMenuRow" title="Populate Broker / Master # / Bidder # / Yard # auto-fill using dummy mockMasterAccounts.js test data instead of requiring a Master Accounts Excel sheet">
+              <input type="checkbox" id="chkDevMockAccounts">
+              <span>Use Mock Master Accounts (Dev Test)</span>
+            </label>
           </div>
 
           <!-- 4. Active Day Tab Management -->
@@ -265,7 +272,17 @@
                   <line x1="10" y1="7.5" x2="10" y2="13.5"></line>
                   <line x1="7" y1="10.5" x2="13" y2="10.5"></line>
                 </svg>
-                <span>New Blank Day Tab (MM-DD-YYYY)...</span>
+                <span>New Day Tab (Blank or Rollover)...</span>
+              </span>
+            </button>
+            <button type="button" id="btnRolloverPrevSheet" class="menu-item" disabled title="Carry unfinished requests strictly from the immediately preceding MM-DD-YYYY sheet">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 10h9.5"></path>
+                  <path d="m10 6 4 4-4 4"></path>
+                  <line x1="16" y1="5" x2="16" y2="15"></line>
+                </svg>
+                <span>Rollover from Previous Sheet...</span>
               </span>
             </button>
             <button type="button" id="btnRenameTab" class="menu-item" disabled>
@@ -399,7 +416,7 @@
     <table>
       <thead id="tableHead">
         <tr>
-          <th id="thDeleteSelect" class="delete-col" style="display:none;">
+          <th id="thDeleteSelect" class="select-col" title="Select rows for batch status update or deletion">
             <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
           </th>
           <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
@@ -443,6 +460,30 @@
         <tr><td colspan="12" class="empty-table-cell">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
       </tbody>
     </table>
+  </div>
+
+  <!-- Floating Batch Status Action Bar (Renders only when 1+ row checkboxes are ticked) -->
+  <div id="batchActionDock" class="batch-action-dock" style="display:none;" role="region" aria-label="Batch row actions">
+    <div class="batch-dock-inner">
+      <div class="batch-dock-left">
+        <span class="batch-count-pill"><span id="batchSelectedCount">0</span> selected</span>
+        <span class="batch-dock-hint">UUIDv4 keys preserved on batch update</span>
+      </div>
+      <div class="batch-dock-controls">
+        <label for="batchStatusSelect" class="batch-dock-label">Set Status:</label>
+        <select id="batchStatusSelect" aria-label="Batch target request status">
+          <option value="Pending">Pending</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Waiting on Buyer">Waiting on Buyer</option>
+          <option value="Escalated">Escalated</option>
+          <option value="Complete">Complete</option>
+        </select>
+        <button type="button" id="btnApplyBatchStatus" class="btn-primary btn-sm">Apply</button>
+        <span class="batch-dock-sep" aria-hidden="true"></span>
+        <button type="button" id="btnBatchDeleteSelected" class="btn-danger-outline btn-sm" title="Permanently delete selected request row(s)">Delete</button>
+        <button type="button" id="btnClearBatchSelection" class="btn-sm" title="Uncheck all selected rows">✕ Clear</button>
+      </div>
+    </div>
   </div>
 
   <!-- Docked Bottom Request Editor Panel (Pinned above status bar & collapsible; Unique Key excluded from inputs) -->
@@ -708,6 +749,21 @@
           </div>
         </div>
 
+        <div id="rolloverSourceWrap" class="rollover-source-wrap">
+          <div class="rollover-source-header">
+            <span class="rollover-source-label">Source Sheet Scope</span>
+            <div id="rolloverSourceGroup" class="rollover-source-segmented" role="group" aria-label="Rollover source sheet scope">
+              <button type="button" id="btnRolloverSourcePrev" class="rollover-source-btn active" data-rollover-source="previous">
+                Previous Sheet Only
+              </button>
+              <button type="button" id="btnRolloverSourceAll" class="rollover-source-btn" data-rollover-source="all">
+                All Prior Sheets
+              </button>
+            </div>
+          </div>
+          <div id="rolloverSourceDesc" class="rollover-source-desc"></div>
+        </div>
+
         <div id="rolloverFutureOptionWrap" class="rollover-option-row" style="display:none;">
           <label class="checkbox-label">
             <input type="checkbox" id="chkIncludeFutureTabs" checked>
@@ -770,10 +826,11 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.12.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.13.0</span>
     </div>
   </footer>
 
+  <script src="js/mockMasterAccounts.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
