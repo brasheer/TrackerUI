@@ -51,8 +51,11 @@
   --danger-soft-hover: rgba(239, 68, 68, 0.24);
   --danger-border: rgba(239, 68, 68, 0.38);
 
-  --row-hover: rgba(56, 189, 248, 0.06);
-  --row-active: rgba(56, 189, 248, 0.13);
+  --row-stripe: #172338;
+  --row-hover: #1e314b;
+  --row-active: #1a3656;
+  --scratch-range-bg: rgba(56, 189, 248, 0.15);
+  --scratch-range-anchor-bg: rgba(56, 189, 248, 0.05);
   --code-bg: rgba(148, 163, 184, 0.12);
   --code-border: rgba(148, 163, 184, 0.26);
   --pill-neutral-bg: #283548;
@@ -114,8 +117,11 @@
     --danger-soft-hover: rgba(220, 38, 38, 0.15);
     --danger-border: rgba(220, 38, 38, 0.28);
 
-    --row-hover: rgba(2, 132, 199, 0.05);
-    --row-active: rgba(2, 132, 199, 0.10);
+    --row-stripe: #f1f5f9;
+    --row-hover: #e6f4fe;
+    --row-active: #d8effd;
+    --scratch-range-bg: rgba(2, 132, 199, 0.12);
+    --scratch-range-anchor-bg: rgba(2, 132, 199, 0.03);
     --code-bg: #f1f5f9;
     --code-border: #cbd5e1;
     --pill-neutral-bg: #e2e8f0;
@@ -177,8 +183,11 @@
   --danger-soft-hover: rgba(220, 38, 38, 0.15);
   --danger-border: rgba(220, 38, 38, 0.28);
 
-  --row-hover: rgba(2, 132, 199, 0.05);
-  --row-active: rgba(2, 132, 199, 0.10);
+  --row-stripe: #f1f5f9;
+  --row-hover: #e6f4fe;
+  --row-active: #d8effd;
+  --scratch-range-bg: rgba(2, 132, 199, 0.12);
+  --scratch-range-anchor-bg: rgba(2, 132, 199, 0.03);
   --code-bg: #f1f5f9;
   --code-border: #cbd5e1;
   --pill-neutral-bg: #e2e8f0;
@@ -1248,13 +1257,28 @@ tbody#listBody tr {
   transition: background 0.1s ease;
 }
 
-tbody#listBody tr:hover td {
+/* Excel-Style Alternating Shaded Rows (Bright / Gray Banding) */
+tbody#listBody tr[data-sheet]:nth-child(odd) td {
+  background: var(--table-bg);
+}
+
+tbody#listBody tr[data-sheet]:nth-child(even) td {
+  background: var(--row-stripe);
+}
+
+tbody#listBody tr:hover td,
+tbody#listBody tr[data-sheet]:hover td {
   background: var(--row-hover);
 }
 
-tbody#listBody tr.active-editing-row td {
+tbody#listBody tr.active-editing-row td,
+tbody#listBody tr[data-sheet].active-editing-row td {
   background: var(--row-active);
   border-bottom-color: var(--accent-border);
+}
+
+tbody#listBody tr.active-editing-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .select-col, .select-cell,
@@ -2354,6 +2378,18 @@ tr.shadow-new-row:hover .shadow-action-pill {
   margin-top: 0;
 }
 
+.view-only-table-wrap tbody tr:nth-child(odd) td:not(.empty-table-cell) {
+  background: var(--table-bg);
+}
+
+.view-only-table-wrap tbody tr:nth-child(even) td:not(.empty-table-cell) {
+  background: var(--row-stripe);
+}
+
+.view-only-table-wrap tbody tr:hover td:not(.empty-table-cell) {
+  background: var(--row-hover);
+}
+
 /* ==========================================================================
    Toast Notifications & Bottom Workspace Status Bar
    ========================================================================== */
@@ -2846,17 +2882,18 @@ tr.shadow-new-row:hover .shadow-action-pill {
 }
 
 .scratch-cell-coord {
-  min-width: 3.4rem;
+  min-width: 4.1rem;
   text-align: center;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.75rem;
   font-weight: 700;
-  padding: 0.22rem 0.48rem;
+  padding: 0.22rem 0.52rem;
   border-radius: 0.32rem;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   color: var(--accent);
   user-select: none;
+  white-space: nowrap;
 }
 
 .scratch-fx-label {
@@ -2871,10 +2908,25 @@ tr.shadow-new-row:hover .shadow-action-pill {
 
 .scratch-formula-input {
   flex: 1 1 auto;
+  min-width: 10rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.78125rem;
   padding: 0.26rem 0.58rem;
   background: var(--surface);
+}
+
+.scratch-selection-stats {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.2rem 0.58rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  white-space: nowrap;
+  user-select: none;
 }
 
 /* Scrollable Spreadsheet Grid */
@@ -2884,6 +2936,11 @@ tr.shadow-new-row:hover .shadow-action-pill {
   overflow: auto;
   background: var(--table-bg, var(--surface));
   outline: none;
+}
+
+.scratch-grid-wrap.is-drag-selecting,
+.scratch-grid-wrap.is-drag-selecting * {
+  user-select: none !important;
 }
 
 .scratch-grid-table {
@@ -2916,6 +2973,14 @@ tr.shadow-new-row:hover .shadow-action-pill {
   text-align: center;
   user-select: none;
   height: 1.75rem;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.scratch-grid-table thead th:hover,
+.scratch-grid-table tbody th.scratch-row-hdr:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .scratch-grid-table thead th.scratch-corner-th {
@@ -2926,12 +2991,43 @@ tr.shadow-new-row:hover .shadow-action-pill {
   max-width: 3rem;
   background: var(--surface-muted);
   border-right: 1px solid var(--border-strong);
+  cursor: pointer;
 }
 
 .scratch-grid-table thead th.active-col-hdr,
-.scratch-grid-table tbody th.active-row-hdr {
+.scratch-grid-table tbody th.active-row-hdr,
+.scratch-grid-table thead th.scratch-corner-th.active-corner-hdr {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.scratch-grid-table thead th.active-col-hdr {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.scratch-grid-table tbody th.active-row-hdr {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.scratch-col-label {
+  display: inline-block;
+  pointer-events: none;
+}
+
+.scratch-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 15;
+}
+
+.scratch-col-resizer:hover,
+.scratch-col-resizer.resizing {
+  background: var(--accent);
+  opacity: 0.55;
 }
 
 .scratch-grid-table tbody th.scratch-row-hdr {
@@ -2949,6 +3045,8 @@ tr.shadow-new-row:hover .shadow-action-pill {
   font-weight: 600;
   text-align: center;
   user-select: none;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
 }
 
 .scratch-cell {
@@ -2956,8 +3054,9 @@ tr.shadow-new-row:hover .shadow-action-pill {
   background: var(--surface);
   color: var(--text);
   cursor: cell;
-  max-width: 24rem;
+  max-width: 32rem;
   overflow: hidden;
+  user-select: none;
 }
 
 .scratch-grid-table tbody tr:first-child .scratch-cell.header-like-cell {
@@ -2982,12 +3081,87 @@ tr.shadow-new-row:hover .shadow-action-pill {
   background: var(--warning-soft) !important;
 }
 
-.scratch-cell.selected-cell {
+/* Multi-Cell Range Highlighting & Perimeter Border (Excel-Style) */
+.scratch-cell.in-range-cell {
+  background: var(--scratch-range-bg) !important;
+}
+
+.scratch-cell.in-range-cell.selected-cell {
+  background: var(--surface) !important;
+  outline: 1.5px solid var(--accent-border);
+  outline-offset: -2px;
+  z-index: 4;
+}
+
+.scratch-cell.selected-cell:not(.in-range-cell) {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   z-index: 4;
   background: var(--accent-soft);
 }
+
+.scratch-cell.range-edge-top {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.scratch-cell.range-edge-bottom {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+.scratch-cell.range-edge-left {
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-right {
+  box-shadow: inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-left {
+  box-shadow: inset 0 2px 0 0 var(--accent), inset 2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-right {
+  box-shadow: inset 0 2px 0 0 var(--accent), inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-bottom.range-edge-left {
+  box-shadow: inset 0 -2px 0 0 var(--accent), inset 2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-bottom.range-edge-right {
+  box-shadow: inset 0 -2px 0 0 var(--accent), inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-bottom {
+  box-shadow: inset 0 2px 0 0 var(--accent), inset 0 -2px 0 0 var(--accent);
+}
+.scratch-cell.range-edge-left.range-edge-right {
+  box-shadow: inset 2px 0 0 0 var(--accent), inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-bottom.range-edge-left {
+  box-shadow: inset 0 2px 0 0 var(--accent), inset 0 -2px 0 0 var(--accent), inset 2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-bottom.range-edge-right {
+  box-shadow: inset 0 2px 0 0 var(--accent), inset 0 -2px 0 0 var(--accent), inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-left.range-edge-right {
+  box-shadow: inset 0 2px 0 0 var(--accent), inset 2px 0 0 0 var(--accent), inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-bottom.range-edge-left.range-edge-right {
+  box-shadow: inset 0 -2px 0 0 var(--accent), inset 2px 0 0 0 var(--accent), inset -2px 0 0 0 var(--accent);
+}
+.scratch-cell.range-edge-top.range-edge-bottom.range-edge-left.range-edge-right {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Copied Range Dashed Perimeter Indicator */
+.scratch-cell.copied-edge-top::after,
+.scratch-cell.copied-edge-bottom::after,
+.scratch-cell.copied-edge-left::after,
+.scratch-cell.copied-edge-right::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  border: 0 dashed var(--accent);
+}
+.scratch-cell.copied-edge-top::after { border-top-width: 2px; }
+.scratch-cell.copied-edge-bottom::after { border-bottom-width: 2px; }
+.scratch-cell.copied-edge-left::after { border-left-width: 2px; }
+.scratch-cell.copied-edge-right::after { border-right-width: 2px; }
 
 .scratch-inline-editor {
   position: absolute;

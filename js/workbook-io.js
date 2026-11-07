@@ -703,10 +703,10 @@ workbookSelect.addEventListener('change', async () => {
   const idx = Number(workbookSelect.value);
   if (availableWorkbooks[idx]) {
     commitActiveScratchInlineEdit();
-    if (scratchPendingEdits.size > 0) {
+    if (hasAnyPendingScratchMutations()) {
       await flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true });
     }
-    scratchPendingEdits.clear();
+    resetScratchWorkbookRuntimeState();
     activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
     workingFileHandle = availableWorkbooks[idx].handle;
     lastSavedWorkbookName = workingFileHandle.name;
@@ -1436,7 +1436,7 @@ function updateDevMockAccountsUI() {
 async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) {
   if (!workingFileHandle) return;
   commitActiveScratchInlineEdit();
-  if (scratchPendingEdits.size > 0 && !options.skipFlushPendingScratch && workbook) {
+  if (hasAnyPendingScratchMutations() && !options.skipFlushPendingScratch && workbook) {
     await flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true });
   }
   if (!options.preserveStatus && !pendingMirrorBuffer) {

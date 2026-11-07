@@ -573,6 +573,8 @@ const scratchSaveStateBadge = document.getElementById('scratchSaveStateBadge');
 const scratchSearchInput = document.getElementById('scratchSearchInput');
 const scratchSearchMatchCount = document.getElementById('scratchSearchMatchCount');
 const chkScratchFilterRows = document.getElementById('chkScratchFilterRows');
+const btnScratchUndo = document.getElementById('btnScratchUndo');
+const btnScratchRedo = document.getElementById('btnScratchRedo');
 const btnScratchAddRows = document.getElementById('btnScratchAddRows');
 const btnScratchAddCol = document.getElementById('btnScratchAddCol');
 const btnScratchRenameSheet = document.getElementById('btnScratchRenameSheet');
@@ -580,6 +582,7 @@ const btnScratchDeleteSheet = document.getElementById('btnScratchDeleteSheet');
 const btnScratchSaveNow = document.getElementById('btnScratchSaveNow');
 const scratchCellCoord = document.getElementById('scratchCellCoord');
 const scratchFormulaInput = document.getElementById('scratchFormulaInput');
+const scratchSelectionStats = document.getElementById('scratchSelectionStats');
 const scratchGridWrap = document.getElementById('scratchGridWrap');
 const scratchGridTable = document.getElementById('scratchGridTable');
 const scratchGridHead = document.getElementById('scratchGridHead');
@@ -882,7 +885,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
-const APP_VERSION = 'v1.14.1';
+const APP_VERSION = 'v1.15.0';
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;
