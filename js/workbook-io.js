@@ -1260,6 +1260,10 @@ async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
       const lower = sheetName.trim().toLowerCase();
       let xml = dec.decode(entries.get(zipPath));
 
+      if (/<f\b[^>]*>[\s\S]*?\[1\]/.test(xml)) {
+        hasAnyExternalRefFormula = true;
+      }
+
       const isDynamicArrayRefSheet =
         lower === 'master accounts' ||
         lower === 'master account' ||
@@ -5028,6 +5032,7 @@ function exportWorkspaceConfigJson() {
     },
     trackerProfiles,
     schemaOverrides: schemaOverridesStore,
+    formLayouts: formLayoutsStore,
     actionCategoryOverrides: actionCategoryOverridesStore,
     referenceDefaults: {
       statuses: validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES,
@@ -5094,6 +5099,11 @@ async function importWorkspaceConfigJsonFile(file) {
     if (parsed.schemaOverrides && typeof parsed.schemaOverrides === 'object' && !Array.isArray(parsed.schemaOverrides)) {
       schemaOverridesStore = { ...schemaOverridesStore, ...parsed.schemaOverrides };
       localStorage.setItem(SCHEMA_OVERRIDES_STORAGE_KEY, JSON.stringify(schemaOverridesStore));
+    }
+
+    if (parsed.formLayouts && typeof parsed.formLayouts === 'object' && !Array.isArray(parsed.formLayouts)) {
+      formLayoutsStore = { ...formLayoutsStore, ...parsed.formLayouts };
+      saveFormLayoutsStore();
     }
 
     if (parsed.actionCategoryOverrides && typeof parsed.actionCategoryOverrides === 'object' && !Array.isArray(parsed.actionCategoryOverrides)) {

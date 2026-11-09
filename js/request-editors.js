@@ -72,7 +72,406 @@ if (btnModalInsertTimestamp) {
   });
 }
 
-// --- DYNAMIC CUSTOM SCHEMA FORM RENDERING (DOCK & MODAL) ---
+// --- DYNAMIC CUSTOM SCHEMA FORM RENDERING & LOCKABLE 12-COL GRID LAYOUT ---
+let isFormLayoutEditMode = false;
+let activeFieldResizeDrag = null;
+
+function getActiveFormLayoutSchemaKey() {
+  if (
+    activeSchemaConfig &&
+    !activeSchemaConfig.isStandardSchema &&
+    Array.isArray(activeSchemaConfig.columns) &&
+    activeSchemaConfig.columns.length > 0
+  ) {
+    const sig = activeSchemaConfig.columns
+      .map(c => `${c.colIndex}:${String(c.header || '').trim().toLowerCase()}`)
+      .join('|');
+    return `custom::${sig}`;
+  }
+  return '__standard__';
+}
+
+function buildDefaultFormLayoutForActiveSchema() {
+  if (
+    !activeSchemaConfig ||
+    activeSchemaConfig.isStandardSchema ||
+    !Array.isArray(activeSchemaConfig.columns) ||
+    activeSchemaConfig.columns.length === 0
+  ) {
+    return {
+      order: ['subject', 'ticket', 'broker', 'master', 'bidder', 'action', 'yard', 'lots', 'status', 'notes'],
+      spans: {
+        subject: 3,
+        ticket: 3,
+        broker: 2,
+        master: 2,
+        bidder: 2,
+        action: 3,
+        yard: 2,
+        lots: 4,
+        status: 3,
+        notes: 12
+      },
+      rows: { notes: 2 }
+    };
+  }
+
+  const cols = activeSchemaConfig.columns;
+  const nonNotesCols = cols.filter(c => c.colIndex !== activeSchemaConfig.notesCol);
+  const notesColObj = cols.find(c => c.colIndex === activeSchemaConfig.notesCol) || null;
+
+  // Smart default order: place multi-line Notes at the bottom so mid-sheet Notes columns (e.g. Col E of A..H)
+  // never split single-line inputs into awkward half-empty rows, while still saving to their exact Excel column.
+  const orderedCols = notesColObj ? [...nonNotesCols, notesColObj] : [...nonNotesCols];
+  const order = orderedCols.map(c => `col_${c.colIndex}`);
+  const spans = {};
+  const rows = {};
+
+  // Assign base spans on a 12-column grid and auto-balance each row to eliminate dead trailing whitespace
+  const baseItems = nonNotesCols.map(col => {
+    const idx = col.colIndex;
+    const hdr = String(col.header || '');
+    const isSubjectLike =
+      idx === activeSchemaConfig.primaryCol ||
+      /\b(subject|summary|description|title|detail|reason|message)\b/i.test(hdr);
+    const isTicket = idx === activeSchemaConfig.ticketCol;
+    const isMedText = /\b(broker|dealer|customer|company|vendor|account\s*name|action|type|category|status|disposition)\b/i.test(hdr);
+
+    let base = 2;
+    if (isSubjectLike) {
+      base = nonNotesCols.length >= 8 ? 3 : 4;
+    } else if (isTicket || isMedText) {
+      base = 3;
+    } else if (nonNotesCols.length <= 6) {
+      base = 3;
+    }
+    return { id: `col_${idx}`, span: base, priority: isSubjectLike ? 2 : (isTicket || isMedText ? 1 : 0) };
+  });
+
+  const packedRows = [];
+  let currentRow = [];
+  let currentSum = 0;
+  baseItems.forEach(item => {
+    if (currentSum + item.span > 12 && currentRow.length > 0) {
+      packedRows.push(currentRow);
+      currentRow = [];
+      currentSum = 0;
+    }
+    currentRow.push(item);
+    currentSum += item.span;
+  });
+  if (currentRow.length > 0) packedRows.push(currentRow);
+
+  packedRows.forEach(rowItems => {
+    let sum = rowItems.reduce((acc, it) => acc + it.span, 0);
+    const targetSum = rowItems.length === 1 ? Math.max(rowItems[0].span, 6) : 12;
+    if (sum < targetSum) {
+      const sortedByPriority = [...rowItems].sort((a, b) => b.priority - a.priority);
+      let cursor = 0;
+      while (sum < targetSum && cursor < 24) {
+        const target = sortedByPriority[cursor % sortedByPriority.length];
+        if (target.span < 12) {
+          target.span += 1;
+          sum += 1;
+        }
+        cursor++;
+      }
+    }
+    rowItems.forEach(it => {
+      spans[it.id] = it.span;
+    });
+  });
+
+  if (notesColObj) {
+    const nId = `col_${notesColObj.colIndex}`;
+    spans[nId] = 12;
+    rows[nId] = 2;
+  }
+
+  return { order, spans, rows };
+}
+
+function getResolvedFormLayoutForActiveSchema() {
+  const key = getActiveFormLayoutSchemaKey();
+  const defaults = buildDefaultFormLayoutForActiveSchema();
+  const saved = (formLayoutsStore && formLayoutsStore[key] && typeof formLayoutsStore[key] === 'object')
+    ? formLayoutsStore[key]
+    : null;
+  if (!saved) return defaults;
+
+  const validIds = new Set(defaults.order);
+  const mergedOrder = [];
+  if (Array.isArray(saved.order)) {
+    saved.order.forEach(id => {
+      if (validIds.has(id) && !mergedOrder.includes(id)) {
+        mergedOrder.push(id);
+      }
+    });
+  }
+  defaults.order.forEach(id => {
+    if (!mergedOrder.includes(id)) mergedOrder.push(id);
+  });
+
+  const mergedSpans = { ...defaults.spans };
+  if (saved.spans && typeof saved.spans === 'object') {
+    Object.entries(saved.spans).forEach(([id, val]) => {
+      const n = Number(val);
+      if (validIds.has(id) && Number.isFinite(n)) {
+        mergedSpans[id] = Math.max(2, Math.min(12, Math.round(n)));
+      }
+    });
+  }
+
+  const mergedRows = { ...defaults.rows };
+  if (saved.rows && typeof saved.rows === 'object') {
+    Object.entries(saved.rows).forEach(([id, val]) => {
+      const n = Number(val);
+      if (validIds.has(id) && Number.isFinite(n)) {
+        mergedRows[id] = Math.max(1, Math.min(6, Math.round(n)));
+      }
+    });
+  }
+
+  return { order: mergedOrder, spans: mergedSpans, rows: mergedRows };
+}
+
+function persistActiveFormLayoutMutation(mutatorFn) {
+  const key = getActiveFormLayoutSchemaKey();
+  const current = getResolvedFormLayoutForActiveSchema();
+  const next = {
+    order: [...current.order],
+    spans: { ...current.spans },
+    rows: { ...current.rows }
+  };
+  mutatorFn(next);
+  if (!formLayoutsStore || typeof formLayoutsStore !== 'object') {
+    formLayoutsStore = {};
+  }
+  formLayoutsStore[key] = next;
+  if (typeof saveFormLayoutsStore === 'function') {
+    saveFormLayoutsStore();
+  }
+  applyActiveFormLayoutToGrids();
+}
+
+function ensureDockFieldLayoutChrome(groupEl, fieldId, indexInOrder, totalCount, span, rowsVal) {
+  let toolbar = groupEl.querySelector(':scope > .field-layout-toolbar');
+  const hasTextarea = Boolean(groupEl.querySelector('textarea'));
+  if (!toolbar) {
+    toolbar = document.createElement('div');
+    toolbar.className = 'field-layout-toolbar';
+    groupEl.insertBefore(toolbar, groupEl.firstChild);
+  }
+  const rowsControlsHtml = hasTextarea
+    ? `<span class="field-layout-btn-group" title="Adjust textarea height (rows)">
+         <button type="button" class="field-layout-step-btn" data-layout-act="rows-dec" data-field-id="${escapeHtml(fieldId)}" ${rowsVal <= 1 ? 'disabled' : ''} title="Fewer rows">↕−</button>
+         <span class="field-layout-span-pill">${rowsVal}r</span>
+         <button type="button" class="field-layout-step-btn" data-layout-act="rows-inc" data-field-id="${escapeHtml(fieldId)}" ${rowsVal >= 6 ? 'disabled' : ''} title="More rows">↕+</button>
+       </span>`
+    : '';
+
+  toolbar.innerHTML = `
+    <span class="field-layout-btn-group" title="Move field earlier or later in the form (Excel column mapping stays unchanged)">
+      <button type="button" class="field-layout-step-btn" data-layout-act="left" data-field-id="${escapeHtml(fieldId)}" ${indexInOrder === 0 ? 'disabled' : ''} title="Move field left / up">◀</button>
+      <button type="button" class="field-layout-step-btn" data-layout-act="right" data-field-id="${escapeHtml(fieldId)}" ${indexInOrder >= totalCount - 1 ? 'disabled' : ''} title="Move field right / down">▶</button>
+    </span>
+    <span class="field-layout-btn-group" title="Adjust field width on 12-column grid (or drag right border)">
+      <button type="button" class="field-layout-step-btn" data-layout-act="narrow" data-field-id="${escapeHtml(fieldId)}" ${span <= 2 ? 'disabled' : ''} title="Narrower (−1 col)">−</button>
+      <span class="field-layout-span-pill">${span}/12</span>
+      <button type="button" class="field-layout-step-btn" data-layout-act="widen" data-field-id="${escapeHtml(fieldId)}" ${span >= 12 ? 'disabled' : ''} title="Wider (+1 col)">+</button>
+    </span>
+    ${rowsControlsHtml}
+  `;
+
+  let dragHandle = groupEl.querySelector(':scope > .field-width-drag-handle');
+  if (!dragHandle) {
+    dragHandle = document.createElement('div');
+    dragHandle.className = 'field-width-drag-handle';
+    dragHandle.title = 'Drag horizontally to resize field width';
+    groupEl.appendChild(dragHandle);
+  }
+  dragHandle.dataset.fieldId = fieldId;
+}
+
+function syncFormLayoutButtonsUI() {
+  if (bottomEditorDock) {
+    bottomEditorDock.classList.toggle('layout-edit-active', isFormLayoutEditMode);
+  }
+  if (btnDockToggleLayout) {
+    btnDockToggleLayout.classList.toggle('unlocked', isFormLayoutEditMode);
+    btnDockToggleLayout.setAttribute('aria-pressed', String(isFormLayoutEditMode));
+    btnDockToggleLayout.textContent = isFormLayoutEditMode ? '🔓 Lock Layout' : '🔒 Layout';
+    btnDockToggleLayout.title = isFormLayoutEditMode
+      ? 'Lock form layout to hide adjustment controls'
+      : 'Unlock form grid to adjust field widths, order, or textarea rows (locked by default)';
+  }
+  if (btnDockResetLayout) {
+    const key = getActiveFormLayoutSchemaKey();
+    const hasCustomSaved = Boolean(formLayoutsStore && formLayoutsStore[key]);
+    btnDockResetLayout.style.display = isFormLayoutEditMode ? 'inline-flex' : 'none';
+    btnDockResetLayout.disabled = !hasCustomSaved;
+  }
+}
+
+function applyActiveFormLayoutToGrids() {
+  const isCustom = Boolean(
+    activeSchemaConfig &&
+    !activeSchemaConfig.isStandardSchema &&
+    Array.isArray(activeSchemaConfig.columns) &&
+    activeSchemaConfig.columns.length > 0
+  );
+  const layout = getResolvedFormLayoutForActiveSchema();
+  const activeDockGrid = isCustom ? dockDynamicFieldsGrid : dockStandardFieldsGrid;
+
+  if (activeDockGrid) {
+    const groupMap = new Map();
+    Array.from(activeDockGrid.children).forEach(el => {
+      if (el && el.dataset && el.dataset.fieldId) {
+        groupMap.set(el.dataset.fieldId, el);
+      }
+    });
+
+    const presentOrder = layout.order.filter(id => groupMap.has(id));
+    presentOrder.forEach((fieldId, idx) => {
+      const groupEl = groupMap.get(fieldId);
+      activeDockGrid.appendChild(groupEl);
+      const span = Math.max(2, Math.min(12, Number(layout.spans[fieldId]) || 3));
+      groupEl.style.gridColumn = span >= 12 ? '1 / -1' : `span ${span}`;
+      const rowsVal = Math.max(1, Math.min(6, Number(layout.rows[fieldId]) || 2));
+      const textarea = groupEl.querySelector('textarea');
+      if (textarea) {
+        textarea.rows = rowsVal;
+      }
+      ensureDockFieldLayoutChrome(groupEl, fieldId, idx, presentOrder.length, span, rowsVal);
+    });
+  }
+
+  // Mirror field order & proportional spans into Popup Modal dynamic grid for custom schemas
+  if (isCustom && modalDynamicFieldsGrid) {
+    const modalMap = new Map();
+    Array.from(modalDynamicFieldsGrid.children).forEach(el => {
+      if (el && el.dataset && el.dataset.fieldId) {
+        modalMap.set(el.dataset.fieldId, el);
+      }
+    });
+    layout.order.forEach(fieldId => {
+      const mEl = modalMap.get(fieldId);
+      if (!mEl) return;
+      modalDynamicFieldsGrid.appendChild(mEl);
+      const dockSpan = Math.max(2, Math.min(12, Number(layout.spans[fieldId]) || 3));
+      const modalSpan = dockSpan >= 8 ? 12 : (dockSpan >= 4 ? 6 : 4);
+      mEl.style.gridColumn = modalSpan >= 12 ? '1 / -1' : `span ${modalSpan}`;
+    });
+  }
+
+  syncFormLayoutButtonsUI();
+}
+
+function handleDockLayoutControlAction(e) {
+  const stepBtn = e.target.closest('[data-layout-act]');
+  if (!stepBtn || !isFormLayoutEditMode) return;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const act = stepBtn.dataset.layoutAct;
+  const fieldId = stepBtn.dataset.fieldId;
+  if (!fieldId) return;
+
+  persistActiveFormLayoutMutation(next => {
+    const idx = next.order.indexOf(fieldId);
+    if (act === 'left' && idx > 0) {
+      [next.order[idx - 1], next.order[idx]] = [next.order[idx], next.order[idx - 1]];
+    } else if (act === 'right' && idx !== -1 && idx < next.order.length - 1) {
+      [next.order[idx + 1], next.order[idx]] = [next.order[idx], next.order[idx + 1]];
+    } else if (act === 'narrow') {
+      next.spans[fieldId] = Math.max(2, (Number(next.spans[fieldId]) || 3) - 1);
+    } else if (act === 'widen') {
+      next.spans[fieldId] = Math.min(12, (Number(next.spans[fieldId]) || 3) + 1);
+    } else if (act === 'rows-dec') {
+      next.rows[fieldId] = Math.max(1, (Number(next.rows[fieldId]) || 2) - 1);
+    } else if (act === 'rows-inc') {
+      next.rows[fieldId] = Math.min(6, (Number(next.rows[fieldId]) || 2) + 1);
+    }
+  });
+}
+
+function startFieldWidthDragResize(e) {
+  if (!isFormLayoutEditMode) return;
+  const handle = e.target.closest('.field-width-drag-handle');
+  if (!handle) return;
+  const groupEl = handle.closest('.form-group[data-field-id]');
+  const gridEl = groupEl ? groupEl.parentElement : null;
+  if (!groupEl || !gridEl) return;
+
+  e.preventDefault();
+  const fieldId = groupEl.dataset.fieldId;
+  const layout = getResolvedFormLayoutForActiveSchema();
+  const startSpan = Math.max(2, Math.min(12, Number(layout.spans[fieldId]) || 3));
+  const gridWidth = Math.max(240, gridEl.getBoundingClientRect().width || 960);
+
+  handle.classList.add('dragging');
+  activeFieldResizeDrag = {
+    fieldId,
+    startX: e.clientX,
+    startSpan,
+    colPx: gridWidth / 12,
+    lastSpan: startSpan,
+    handle
+  };
+}
+
+window.addEventListener('mousemove', (e) => {
+  if (!activeFieldResizeDrag) return;
+  const deltaCols = Math.round((e.clientX - activeFieldResizeDrag.startX) / activeFieldResizeDrag.colPx);
+  const nextSpan = Math.max(2, Math.min(12, activeFieldResizeDrag.startSpan + deltaCols));
+  if (nextSpan !== activeFieldResizeDrag.lastSpan) {
+    activeFieldResizeDrag.lastSpan = nextSpan;
+    persistActiveFormLayoutMutation(next => {
+      next.spans[activeFieldResizeDrag.fieldId] = nextSpan;
+    });
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  if (!activeFieldResizeDrag) return;
+  if (activeFieldResizeDrag.handle) {
+    activeFieldResizeDrag.handle.classList.remove('dragging');
+  }
+  activeFieldResizeDrag = null;
+});
+
+if (btnDockToggleLayout) {
+  btnDockToggleLayout.addEventListener('click', () => {
+    if (!isFormLayoutEditMode && isBottomDockCollapsed) {
+      setBottomDockCollapsed(false);
+    }
+    isFormLayoutEditMode = !isFormLayoutEditMode;
+    applyActiveFormLayoutToGrids();
+    if (isFormLayoutEditMode) {
+      showToast('Layout unlocked — adjust field order (◀ ▶), width (−/+ or drag right border), or rows, then click 🔓 Lock Layout.', 'info');
+    }
+  });
+}
+
+if (btnDockResetLayout) {
+  btnDockResetLayout.addEventListener('click', () => {
+    const key = getActiveFormLayoutSchemaKey();
+    if (formLayoutsStore && formLayoutsStore[key]) {
+      delete formLayoutsStore[key];
+      if (typeof saveFormLayoutsStore === 'function') {
+        saveFormLayoutsStore();
+      }
+    }
+    applyActiveFormLayoutToGrids();
+    showToast('Form field layout reset to smart defaults.', 'success');
+  });
+}
+
+if (dockStandardFieldsGrid) {
+  dockStandardFieldsGrid.addEventListener('click', handleDockLayoutControlAction);
+  dockStandardFieldsGrid.addEventListener('mousedown', startFieldWidthDragResize);
+}
+
 function buildDynamicFieldsHtmlForScope(scopePrefix) {
   if (!activeSchemaConfig || activeSchemaConfig.isStandardSchema || !Array.isArray(activeSchemaConfig.columns)) {
     return '';
@@ -82,25 +481,27 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
 
   return activeSchemaConfig.columns.map(col => {
     const idx = col.colIndex;
+    const fieldId = `col_${idx}`;
     const colLetter = colNumberToExcelLetters(idx);
     const inputId = `${scopePrefix}CustomCol_${idx}`;
     const isPrimary = idx === activeSchemaConfig.primaryCol;
     const isStatus = idx === activeSchemaConfig.statusCol;
     const isNotes = idx === activeSchemaConfig.notesCol;
     const isTicket = idx === activeSchemaConfig.ticketCol;
-    const labelText = `${escapeHtml(col.header)} (Col ${escapeHtml(colLetter)})${isPrimary ? ' *' : ''}`;
+    const fullTitleAttr = `${escapeHtml(col.header)} (Column ${escapeHtml(colLetter)})${isPrimary ? ' — Required' : ''}`;
+    const labelInnerHtml = `<span class="field-lbl-main">${escapeHtml(col.header)}${isPrimary ? ' *' : ''}</span> <span class="field-col-tag">Col ${escapeHtml(colLetter)}</span>`;
 
     if (isNotes) {
       const groupClass = isDock ? 'form-group dock-col-notes' : 'form-group full';
       return `
-        <div class="${groupClass}">
+        <div class="${groupClass}" data-field-id="${fieldId}">
           <div class="dock-notes-label-row">
-            <label for="${inputId}">${labelText}</label>
+            <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
             <button type="button" class="btn-timestamp-chip" data-dyn-timestamp="${inputId}" title="Insert current date &amp; time stamp">
               + Insert Timestamp
             </button>
           </div>
-          <textarea id="${inputId}" data-custom-col="${idx}" rows="${isDock ? 2 : 4}" placeholder="Enter ${escapeHtml(col.header)}..."></textarea>
+          <textarea id="${inputId}" data-custom-col="${idx}" rows="${isDock ? 2 : 3}" placeholder="Enter ${escapeHtml(col.header)}..."></textarea>
         </div>
       `;
     }
@@ -113,8 +514,8 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
         .map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`)
         .join('');
       return `
-        <div class="form-group">
-          <label for="${inputId}">${labelText}</label>
+        <div class="form-group" data-field-id="${fieldId}">
+          <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
           <select id="${inputId}" data-custom-col="${idx}">
             ${optionsHtml}
           </select>
@@ -133,15 +534,15 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
 
     const headerLabelBlock = isTicket
       ? `<div class="dock-notes-label-row">
-           <label for="${inputId}">${labelText}</label>
+           <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
            <button type="button" class="btn-timestamp-chip" data-dyn-grab-ticket="${scopePrefix}" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from primary subject column">
              🎯 Grab Ticket
            </button>
          </div>`
-      : `<label for="${inputId}">${labelText}</label>`;
+      : `<label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>`;
 
     return `
-      <div class="${groupClass}">
+      <div class="${groupClass}" data-field-id="${fieldId}">
         ${headerLabelBlock}
         <input type="text" id="${inputId}" data-custom-col="${idx}" ${hasDatalist ? `list="${datalistId}"` : ''} placeholder="${escapeHtml(col.header)}..." ${isPrimary ? 'required' : ''}>
         ${datalistHtml}
@@ -183,9 +584,15 @@ function syncDynamicEditorFormsUI() {
       b.style.display = showCustomTicketBtn ? 'inline-flex' : 'none';
     });
   }
+
+  applyActiveFormLayoutToGrids();
 }
 
 function handleDynamicGridDelegatedClick(e) {
+  if (e.target.closest('[data-layout-act]')) {
+    handleDockLayoutControlAction(e);
+    return;
+  }
   const tsBtn = e.target.closest('[data-dyn-timestamp]');
   if (tsBtn) {
     const targetArea = document.getElementById(tsBtn.dataset.dynTimestamp);
@@ -200,10 +607,13 @@ function handleDynamicGridDelegatedClick(e) {
 
 if (dockDynamicFieldsGrid) {
   dockDynamicFieldsGrid.addEventListener('click', handleDynamicGridDelegatedClick);
+  dockDynamicFieldsGrid.addEventListener('mousedown', startFieldWidthDragResize);
 }
 if (modalDynamicFieldsGrid) {
   modalDynamicFieldsGrid.addEventListener('click', handleDynamicGridDelegatedClick);
 }
+
+applyActiveFormLayoutToGrids();
 
 function populateDynamicGridFromItem(gridEl, itemOrNull) {
   if (!gridEl || !activeSchemaConfig || activeSchemaConfig.isStandardSchema) return;

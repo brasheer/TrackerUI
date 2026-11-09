@@ -269,7 +269,7 @@ function extractScratchCellInfo(ws, rNum, cNum) {
         resStr = String(val.result.error);
       }
       const rawFormula = val.formula
-        ? `=${String(val.formula).replace(/^_xlfn\./i, '')}`
+        ? `=${String(val.formula)}`
         : resStr;
       return { display: resStr, rawEdit: rawFormula, isFormula: true };
     }

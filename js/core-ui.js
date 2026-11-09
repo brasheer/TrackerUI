@@ -103,8 +103,16 @@ function loadSavedJsonMapFromStorage(storageKey) {
   return {};
 }
 
+const FORM_LAYOUTS_STORAGE_KEY = 'trackerui_form_layouts_v1';
 let schemaOverridesStore = loadSavedJsonMapFromStorage(SCHEMA_OVERRIDES_STORAGE_KEY);
 let actionCategoryOverridesStore = loadSavedJsonMapFromStorage(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY);
+let formLayoutsStore = loadSavedJsonMapFromStorage(FORM_LAYOUTS_STORAGE_KEY);
+
+function saveFormLayoutsStore() {
+  try {
+    localStorage.setItem(FORM_LAYOUTS_STORAGE_KEY, JSON.stringify(formLayoutsStore || {}));
+  } catch (_) { /* ignore */ }
+}
 
 // Active Workbook Dynamic Schema Descriptor (defaults to standard 11-col Broker layout)
 let activeSchemaConfig = {
@@ -565,6 +573,8 @@ const btnDockPullPrior = document.getElementById('btnDockPullPrior');
 const btnDockSyncForward = document.getElementById('btnDockSyncForward');
 const btnDockTicketDetails = document.getElementById('btnDockTicketDetails');
 const btnDockOpenModal = document.getElementById('btnDockOpenModal');
+const btnDockToggleLayout = document.getElementById('btnDockToggleLayout');
+const btnDockResetLayout = document.getElementById('btnDockResetLayout');
 const btnDockNewClear = document.getElementById('btnDockNewClear');
 const btnDockToggleCollapse = document.getElementById('btnDockToggleCollapse');
 const dockEntryForm = document.getElementById('dockEntryForm');
@@ -1170,7 +1180,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
-const APP_VERSION = 'v1.17.0';
+const APP_VERSION = 'v1.17.1';
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;

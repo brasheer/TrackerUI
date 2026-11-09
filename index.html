@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.17.0</title>
+  <title>TrackerUI v1.17.1</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.17.0">
+  <link rel="stylesheet" href="css/styles.css?v=1.17.1">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.17.0 — Click to check for updates &amp; refresh app cache">v1.17.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.17.1 — Click to check for updates &amp; refresh app cache">v1.17.1</span>
     </div>
 
     <div class="header-actions">
@@ -646,6 +646,12 @@
         <button type="button" id="btnDockOpenModal" class="btn-dock-secondary" title="Open current request in popup modal">
           Popup Editor
         </button>
+        <button type="button" id="btnDockToggleLayout" class="btn-dock-secondary btn-dock-layout-lock" aria-pressed="false" title="Unlock form grid to adjust field widths, order, or textarea rows (locked by default)">
+          🔒 Layout
+        </button>
+        <button type="button" id="btnDockResetLayout" class="btn-dock-secondary" style="display:none;" title="Reset form field widths and order to smart defaults for this tracker schema">
+          ↺ Reset Layout
+        </button>
         <button type="button" id="btnDockNewClear" class="btn-dock-secondary" title="Clear form and switch to New Request mode">
           ＋ Clear / New
         </button>
@@ -657,45 +663,45 @@
 
     <form id="dockEntryForm" class="dock-form">
       <div id="dockStandardFieldsGrid" class="dock-form-grid">
-        <div class="form-group dock-col-subject">
-          <label for="dockSubject">Subject (Col A) *</label>
+        <div class="form-group dock-col-subject" data-field-id="subject">
+          <label for="dockSubject"><span class="field-lbl-main">Subject *</span> <span class="field-col-tag">Col A</span></label>
           <input type="text" id="dockSubject" placeholder="Request subject..." required>
         </div>
-        <div class="form-group">
+        <div class="form-group" data-field-id="ticket">
           <div class="dock-notes-label-row">
-            <label for="dockTicket">Ticket Number (Col B)</label>
+            <label for="dockTicket"><span class="field-lbl-main">Ticket Number</span> <span class="field-col-tag">Col B</span></label>
             <button type="button" id="btnDockGrabTicket" class="btn-timestamp-chip" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from Subject into Ticket Number">
               🎯 Grab Ticket
             </button>
           </div>
           <input type="text" id="dockTicket" placeholder="Optional Ticket #">
         </div>
-        <div class="form-group">
-          <label for="dockBroker">Broker Name (Col C) *</label>
+        <div class="form-group" data-field-id="broker">
+          <label for="dockBroker"><span class="field-lbl-main">Broker Name *</span> <span class="field-col-tag">Col C</span></label>
           <input type="text" id="dockBroker" list="brokerList" placeholder="Select or type broker..." required>
         </div>
-        <div class="form-group">
-          <label for="dockMaster">Master # (Col D)</label>
+        <div class="form-group" data-field-id="master">
+          <label for="dockMaster"><span class="field-lbl-main">Master #</span> <span class="field-col-tag">Col D</span></label>
           <input type="text" id="dockMaster" placeholder="Master #">
         </div>
-        <div class="form-group">
-          <label for="dockBidder">Bidder # (Col E)</label>
+        <div class="form-group" data-field-id="bidder">
+          <label for="dockBidder"><span class="field-lbl-main">Bidder #</span> <span class="field-col-tag">Col E</span></label>
           <input type="text" id="dockBidder" placeholder="Bidder #">
         </div>
-        <div class="form-group">
-          <label for="dockAction">Requested Action (Col F)</label>
+        <div class="form-group" data-field-id="action">
+          <label for="dockAction"><span class="field-lbl-main">Requested Action</span> <span class="field-col-tag">Col F</span></label>
           <input type="text" id="dockAction" list="actionList" placeholder="Select or type action...">
         </div>
-        <div class="form-group">
-          <label for="dockYard">Yard # (Col G)</label>
+        <div class="form-group" data-field-id="yard">
+          <label for="dockYard"><span class="field-lbl-main">Yard #</span> <span class="field-col-tag">Col G</span></label>
           <input type="text" id="dockYard" placeholder="Yard #">
         </div>
-        <div class="form-group">
-          <label for="dockLots">Lot Numbers (Col H)</label>
+        <div class="form-group" data-field-id="lots">
+          <label for="dockLots"><span class="field-lbl-main">Lot Numbers</span> <span class="field-col-tag">Col H</span></label>
           <input type="text" id="dockLots" placeholder="Lot #s">
         </div>
-        <div class="form-group">
-          <label for="dockStatus">Request Status (Col J)</label>
+        <div class="form-group" data-field-id="status">
+          <label for="dockStatus"><span class="field-lbl-main">Request Status</span> <span class="field-col-tag">Col J</span></label>
           <select id="dockStatus">
             <option value="Pending">Pending</option>
             <option value="In Progress">In Progress</option>
@@ -704,9 +710,9 @@
             <option value="Complete">Complete</option>
           </select>
         </div>
-        <div class="form-group dock-col-notes">
+        <div class="form-group dock-col-notes" data-field-id="notes">
           <div class="dock-notes-label-row">
-            <label for="dockNotes">Action Notes (Col I)</label>
+            <label for="dockNotes"><span class="field-lbl-main">Action Notes</span> <span class="field-col-tag">Col I</span></label>
             <button type="button" id="btnDockInsertTimestamp" class="btn-timestamp-chip" title="Insert current date &amp; time stamp into Action Notes">
               + Insert Timestamp
             </button>
@@ -803,9 +809,17 @@
 
     <div class="scratch-formula-bar">
       <span id="scratchCellCoord" class="scratch-cell-coord" title="Selected cell or range coordinate">A1</span>
-      <span class="scratch-fx-label" aria-hidden="true">fx</span>
-      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="Click, drag, or right-click cells • Cut/Copy/Paste • Fill Color • Data to Columns • Undo (Ctrl+Z)..." autocomplete="off">
+      <span class="scratch-fx-label" title="Raw cell text / OpenXML value (live Excel formulas do not evaluate in-app)">Cell</span>
+      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="View or edit plain cell values • Formulas do NOT calculate in-app • Cut/Copy/Paste • Fill Color • Data to Columns..." autocomplete="off">
       <span id="scratchSelectionStats" class="scratch-selection-stats" style="display:none;" title="Quick summary of highlighted cell range"></span>
+    </div>
+
+    <div id="scratchFormulaNotice" class="scratch-formula-notice" role="note">
+      <span class="scratch-formula-notice-icon" aria-hidden="true">⚠️</span>
+      <span class="scratch-formula-notice-body">
+        <strong>Formulas Do Not Run in Scratch Sheets:</strong>
+        Scratch sheets are a plain-value grid — Excel formulas (<code>=SUM</code>, <code>=XLOOKUP</code>, <code>=LET</code>, cross-sheet references, etc.) are <strong>not evaluated or recalculated</strong> here and shouldn't be expected to work in-app. Existing Excel 365 formulas are stored as raw OpenXML text (which is why internal tokens like <code>_xlpm.data</code> or <code>_xlfn.</code> appear) and only calculate when opened in Desktop Excel.
+      </span>
     </div>
 
     <div id="scratchGridWrap" class="scratch-grid-wrap" tabindex="0">
@@ -962,7 +976,7 @@
             <textarea id="fNotes" rows="4"></textarea>
           </div>
         </div>
-        <div id="modalDynamicFieldsGrid" class="form-grid" style="display:none;"></div>
+        <div id="modalDynamicFieldsGrid" class="form-grid modal-dyn-grid" style="display:none;"></div>
         <div class="modal-actions">
           <button type="button" id="btnCancelModal">Cancel</button>
           <button type="submit" class="btn-primary">Save to Workbook</button>
@@ -1351,16 +1365,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.17.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.17.1</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.17.0"></script>
-  <script src="js/core-ui.js?v=1.17.0"></script>
-  <script src="js/workbook-io.js?v=1.17.0"></script>
-  <script src="js/tracker-table.js?v=1.17.0"></script>
-  <script src="js/request-editors.js?v=1.17.0"></script>
-  <script src="js/scratch-sheets.js?v=1.17.0"></script>
-  <script src="js/rollover.js?v=1.17.0"></script>
+  <script src="js/mockMasterAccounts.js?v=1.17.1"></script>
+  <script src="js/core-ui.js?v=1.17.1"></script>
+  <script src="js/workbook-io.js?v=1.17.1"></script>
+  <script src="js/tracker-table.js?v=1.17.1"></script>
+  <script src="js/request-editors.js?v=1.17.1"></script>
+  <script src="js/scratch-sheets.js?v=1.17.1"></script>
+  <script src="js/rollover.js?v=1.17.1"></script>
 </body>
 </html>

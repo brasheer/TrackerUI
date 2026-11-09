@@ -8,7 +8,18 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.17.0` (Current — `meerkat`)
+### `v1.17.1` (Current — `meerkat`)
+- **📐 Polished 12-Column Editor Grid & Lockable Form Layout Customizer (`#btnDockToggleLayout`, `js/request-editors.js`, `css/styles.css`)**:
+  - Upgraded the Bottom Editor Dock (`#dockStandardFieldsGrid`, `#dockDynamicFieldsGrid`) and Popup Modal dynamic grid (`#modalDynamicFieldsGrid`) to a baseline-aligned **12-column CSS grid** with single-line label badges (`<span class="field-col-tag">Col X</span>`), eliminating multi-line label wrapping (`Ticket Number` + `🎯 Grab Ticket`), misaligned inputs, and trailing row whitespace, while pinning `.dock-form-actions` (`Save to Workbook`) so it is never clipped behind scrollbars.
+  - Smart custom-schema defaults automatically place mid-sheet `Notes` columns (e.g., `Col E` of `A..H`) at the bottom of the form while preserving exact Excel column saves, and auto-balance row column spans (`Subject` / `LKQ Email Subject`, `Ticket Number`, and short ID fields) to fill all 12 columns cleanly.
+  - Added a **Locked-by-Default Form Layout Mode** (`🔒 Layout` → `🔓 Lock Layout` + `↺ Reset Layout`): when unlocked, each field displays compact controls to reorder fields (`◀` `▶`), adjust column width (`−` / `+` from `2/12` to `12/12` or drag the right border), and resize textarea height (`↕−` / `↕+` rows `1..6`), persisted per schema in `localStorage` (`trackerui_form_layouts_v1`) and portable `.json` workspace backups.
+- **⚠️ Scratch Sheet Values-Only Formula Notice & OpenXML Formula Preservation (`#scratchFormulaNotice`, `js/scratch-sheets.js`, `js/workbook-io.js`)**:
+  - Added an explicit notice banner (`#scratchFormulaNotice`) and updated the `Cell` input bar on scratch sheets clarifying that Excel formulas (`=SUM`, `=XLOOKUP`, `=LET`, cross-sheet references, etc.) **do not evaluate or update in-app**, and explaining why Excel 365 formulas display internal OpenXML tokens such as `_xlpm.data` or `_xlfn.` until opened in Desktop Excel.
+  - Preserved exact OpenXML `val.formula` prefixes (`_xlfn.`) without partial stripping in `extractScratchCellInfo` and extended external workbook reference (`[1]`) archive preservation across scratch sheets in `repairSavedXlsxArchive`.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v24'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.17.1` in [`index.html`](index.html).
+
+### `v1.17.0`
 - **🎯 Grab Ticket Number from Email Subject (`[XXXX-XX-XXXX]`, `js/core-ui.js`, `js/request-editors.js`)**:
   - Added **`🎯 Grab Ticket`** buttons (`#btnDockGrabTicket`, `#btnModalGrabTicket`, and dynamic custom ticket inputs) to extract bracketed hyphenated ticket IDs (e.g., `[ABCD-12-3456]`, `[1234-56-7890]`, including multiple matches) from the Subject, normalize to uppercase, and merge comma-delimited into Ticket Number without duplicates.
 - **📥 Sync from Previous Entry ("Pull from Prior Tab", `js/request-editors.js`)**:
