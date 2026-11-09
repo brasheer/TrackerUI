@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.16.1</title>
+  <title>TrackerUI v1.17.0</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.16.0">
+  <link rel="stylesheet" href="css/styles.css?v=1.17.0">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.16.1 — Click to check for updates &amp; refresh app cache">v1.16.1</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.17.0 — Click to check for updates &amp; refresh app cache">v1.17.0</span>
     </div>
 
     <div class="header-actions">
@@ -225,6 +225,23 @@
               <span class="menu-item-tag">Read-Only</span>
             </button>
 
+            <button type="button" id="menuOpenMasterRollup" class="menu-item" title="Aggregate and classify requests across multiple agent workbooks in the Supervisor or Agent folder">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="3" width="15" height="4" rx="1"></rect>
+                  <rect x="2.5" y="8.5" width="15" height="4" rx="1"></rect>
+                  <rect x="2.5" y="14" width="15" height="3.5" rx="1"></rect>
+                </svg>
+                <span>Supervisor Multi-Workbook Rollup...</span>
+              </span>
+              <span class="menu-item-tag">Rollup</span>
+            </button>
+
+            <label class="menu-checkbox-item" title="Enable or disable writing the <Workbook> (VIEW ONLY).xlsx mirror copy for this tracker tab">
+              <input type="checkbox" id="chkEnableMirrorCopy" checked>
+              <span>Write (VIEW ONLY).xlsx Mirror Copy</span>
+            </label>
+
             <label class="menu-checkbox-item" title="Automatically reconnect saved directories when opening TrackerUI">
               <input type="checkbox" id="chkAutoReconnect" checked>
               <span>Auto-Reconnect Folders on Startup</span>
@@ -254,6 +271,34 @@
                   <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.1-2.1a5 5 0 0 1-6.5 6.5l-5.8 5.8a1.8 1.8 0 0 1-2.5-2.5l5.8-5.8a5 5 0 0 1 6.5-6.5l-2.1 2.1Z"></path>
                 </svg>
                 <span>Bootstrap / Repair Workbook Schema</span>
+              </span>
+            </button>
+            <button type="button" id="btnOpenSchemaMapper" class="menu-item" disabled title="Inspect or customize dynamic column mappings (Primary Title, Status, Notes, Ticket #) for custom department trackers">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="3" width="4.5" height="14" rx="1"></rect>
+                  <rect x="8" y="3" width="4.5" height="14" rx="1"></rect>
+                  <rect x="13.5" y="3" width="4" height="14" rx="1"></rect>
+                </svg>
+                <span>Configure Column Mapping...</span>
+              </span>
+            </button>
+            <button type="button" id="menuAddTrackerProfile" class="menu-item" title="Open an additional Department Tracker tab with its own folder and custom column schema">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="4" width="15" height="12.5" rx="2"></rect>
+                  <line x1="10" y1="8" x2="10" y2="13"></line>
+                  <line x1="7.5" y1="10.5" x2="12.5" y2="10.5"></line>
+                </svg>
+                <span>Add Department Tracker Tab...</span>
+              </span>
+            </button>
+            <button type="button" id="menuRenameTrackerProfile" class="menu-item" title="Rename the currently active Department Tracker tab">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M13.8 3.5a1.8 1.8 0 0 1 2.5 2.5L6.8 15.5l-3.5.8.8-3.5 9.7-9.3Z"></path>
+                </svg>
+                <span>Rename Active Tracker Tab...</span>
               </span>
             </button>
             <button type="button" id="menuNewScratchSheet" class="menu-item" disabled title="Create a custom scratch worksheet (e.g., Title Tracking) and open it in an app tab">
@@ -315,9 +360,9 @@
             </button>
           </div>
 
-          <!-- 5. Row Management & App Cache -->
+          <!-- 5. Row Management, Config & App Cache -->
           <div class="menu-section">
-            <div class="menu-section-title">Row Management &amp; App Cache</div>
+            <div class="menu-section-title">Row Management, Config &amp; Cache</div>
             <button type="button" id="btnDeleteMode" class="menu-item menu-item-danger" disabled>
               <span class="menu-item-left">
                 <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -327,6 +372,27 @@
                 <span id="deleteModeLabel">Batch Delete Requests Mode</span>
               </span>
             </button>
+            <button type="button" id="btnExportConfigJson" class="menu-item" title="Export tracker profiles, custom column mappings, and preferences to a .json file">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M10 3v9.5"></path>
+                  <polyline points="6.5 9 10 12.5 13.5 9"></polyline>
+                  <path d="M3.5 14v2A1.5 1.5 0 0 0 5 17.5h10a1.5 1.5 0 0 0 1.5-1.5v-2"></path>
+                </svg>
+                <span>Export Workspace Config (.json)</span>
+              </span>
+            </button>
+            <button type="button" id="btnImportConfigJson" class="menu-item" title="Import tracker profiles, custom column mappings, and preferences from a .json file">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M10 12.5V3"></path>
+                  <polyline points="6.5 6.5 10 3 13.5 6.5"></polyline>
+                  <path d="M3.5 14v2A1.5 1.5 0 0 0 5 17.5h10a1.5 1.5 0 0 0 1.5-1.5v-2"></path>
+                </svg>
+                <span>Import Workspace Config (.json)...</span>
+              </span>
+            </button>
+            <input type="file" id="configJsonFileInput" accept=".json,application/json" style="display:none;">
             <button type="button" id="btnCheckForUpdates" class="menu-item" title="Clear cached PWA scripts/styles and reload fresh from the server">
               <span class="menu-item-left">
                 <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -335,7 +401,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta">v1.16.1</span>
+              <span class="menu-item-meta">v1.17.0</span>
             </button>
           </div>
         </div>
@@ -377,10 +443,17 @@
     </div>
   </div>
 
-  <!-- In-App Workspace Tab Bar (Daily Tracker + Open Workbook Scratch Sheet Tabs) -->
+  <!-- In-App Workspace Tab Bar (Department Tracker Profiles + Open Workbook Scratch Sheet Tabs) -->
   <div id="workspaceTabsBar" class="workspace-tabs-bar" style="display:none;" role="tablist" aria-label="Open workbook workspace tabs">
     <div id="workspaceTabsList" class="workspace-tabs-list"></div>
     <div class="workspace-tabs-actions">
+      <button type="button" id="btnAddTrackerProfile" class="btn-add-tracker-profile btn-with-icon" title="Open an additional Department Tracker tab (with its own folder and dynamic column headers)">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="10" y1="4.5" x2="10" y2="15.5"></line>
+          <line x1="4.5" y1="10" x2="15.5" y2="10"></line>
+        </svg>
+        <span>Tracker Tab</span>
+      </button>
       <div id="scratchSheetMenuWrap" class="scratch-menu-wrap">
         <button type="button" id="btnOpenScratchMenu" class="btn-open-scratch-menu btn-with-icon" aria-haspopup="true" aria-expanded="false" title="Open an existing scratch sheet or create a new scratch sheet in this workbook">
           <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -561,6 +634,12 @@
         <span id="dockKeyBadge" class="key-chip" style="display:none; cursor:default;" title="Immutable Tracking ID (Excluded from editable inputs)"></span>
       </div>
       <div class="bottom-editor-header-actions">
+        <button type="button" id="btnDockPullPrior" class="btn-dock-secondary" title="Look backward across earlier daily tabs and fill any blank fields on this entry">
+          📥 Pull Prior
+        </button>
+        <button type="button" id="btnDockSyncForward" class="btn-dock-secondary" style="display:none;" title="Propagate new data on this request forward to rolled-over rows on newer daily tabs without overwriting existing values">
+          🔄 Sync Forward
+        </button>
         <button type="button" id="btnDockTicketDetails" class="btn-dock-secondary" style="display:none;" title="View aggregated notes history with date-time stamps for this request">
           Ticket Details &amp; History
         </button>
@@ -577,13 +656,18 @@
     </div>
 
     <form id="dockEntryForm" class="dock-form">
-      <div class="dock-form-grid">
+      <div id="dockStandardFieldsGrid" class="dock-form-grid">
         <div class="form-group dock-col-subject">
           <label for="dockSubject">Subject (Col A) *</label>
           <input type="text" id="dockSubject" placeholder="Request subject..." required>
         </div>
         <div class="form-group">
-          <label for="dockTicket">Ticket Number (Col B)</label>
+          <div class="dock-notes-label-row">
+            <label for="dockTicket">Ticket Number (Col B)</label>
+            <button type="button" id="btnDockGrabTicket" class="btn-timestamp-chip" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from Subject into Ticket Number">
+              🎯 Grab Ticket
+            </button>
+          </div>
           <input type="text" id="dockTicket" placeholder="Optional Ticket #">
         </div>
         <div class="form-group">
@@ -630,6 +714,8 @@
           <textarea id="dockNotes" rows="2" placeholder="Enter action notes (click '+ Insert Timestamp' to prefix with date/time)..."></textarea>
         </div>
       </div>
+
+      <div id="dockDynamicFieldsGrid" class="dock-form-grid" style="display:none;"></div>
 
       <div class="dock-form-actions">
         <span id="dockHintText" class="dock-hint-text">Tip: Click any request row in the table above to load it here for instant editing.</span>
@@ -808,16 +894,26 @@
     <div class="modal">
       <div class="modal-header">
         <h3 id="modalTitle">Edit Request</h3>
-        <span id="modalKeyDisplay" class="key-chip" style="cursor:default;"></span>
+        <div class="modal-header-right">
+          <button type="button" id="btnModalPullPrior" class="btn-dock-secondary" title="Look backward across earlier daily tabs and fill any blank fields on this entry">
+            📥 Pull from Prior Tab
+          </button>
+          <span id="modalKeyDisplay" class="key-chip" style="cursor:default;"></span>
+        </div>
       </div>
       <form id="entryForm">
-        <div class="form-grid">
+        <div id="modalStandardFieldsGrid" class="form-grid">
           <div class="form-group full">
             <label>Subject (Col A)</label>
             <input type="text" id="fSubject" required>
           </div>
           <div class="form-group">
-            <label>Ticket Number (Col B)</label>
+            <div class="dock-notes-label-row">
+              <label>Ticket Number (Col B)</label>
+              <button type="button" id="btnModalGrabTicket" class="btn-timestamp-chip" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from Subject into Ticket Number">
+                🎯 Grab Ticket
+              </button>
+            </div>
             <input type="text" id="fTicket" placeholder="Optional metadata">
           </div>
           <div class="form-group">
@@ -866,6 +962,7 @@
             <textarea id="fNotes" rows="4"></textarea>
           </div>
         </div>
+        <div id="modalDynamicFieldsGrid" class="form-grid" style="display:none;"></div>
         <div class="modal-actions">
           <button type="button" id="btnCancelModal">Cancel</button>
           <button type="submit" class="btn-primary">Save to Workbook</button>
@@ -904,6 +1001,9 @@
       </form>
 
       <div class="modal-actions">
+        <button type="button" id="btnTicketSyncForward" class="btn-dock-secondary" title="Propagate new data forward across newer daily tabs without overwriting existing values">
+          🔄 Sync Forward Across Tabs
+        </button>
         <button type="button" id="btnTicketEditInDock" class="btn-dock-secondary">Edit in Bottom Dock</button>
         <button type="button" id="btnCloseTicketDetails" class="btn-primary">Close</button>
       </div>
@@ -935,7 +1035,7 @@
 
       <div class="view-only-table-wrap">
         <table>
-          <thead>
+          <thead id="viewOnlyHead">
             <tr>
               <th>Date Tab</th>
               <th>Subject</th>
@@ -1062,6 +1162,147 @@
     </div>
   </div>
 
+  <!-- Dynamic Column Role Mapper Modal (Multi-Department Custom Schema Engine) -->
+  <div id="schemaMapperModal" class="modal-backdrop">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <div>
+          <h3>Configure Column Mapping</h3>
+          <div id="schemaMapperSubtitle" class="modal-subtitle">Inspect Row-1 headers and assign semantic roles for custom department trackers</div>
+        </div>
+        <span id="schemaMapperModeBadge" class="badge badge-complete">Auto-Detected</span>
+      </div>
+      <form id="schemaMapperForm">
+        <div class="schema-mapper-grid">
+          <div class="form-group full">
+            <label for="schemaModeSelect">Tracker Schema Layout Mode</label>
+            <select id="schemaModeSelect">
+              <option value="auto">Auto-Detect from Row-1 Headers (Recommended)</option>
+              <option value="custom">Dynamic Custom Department Schema (Use Workbook Row-1 Headers)</option>
+              <option value="standard">Standard 11/12-Column Broker Support Layout</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="schemaPrimaryColSelect">Primary Title / Subject Column *</label>
+            <select id="schemaPrimaryColSelect"></select>
+          </div>
+          <div class="form-group">
+            <label for="schemaStatusColSelect">Status Column (Badges, Batch &amp; Rollover)</label>
+            <select id="schemaStatusColSelect"></select>
+          </div>
+          <div class="form-group">
+            <label for="schemaNotesColSelect">Notes / Timeline Column (Timestamps &amp; History)</label>
+            <select id="schemaNotesColSelect"></select>
+          </div>
+          <div class="form-group">
+            <label for="schemaTicketColSelect">Ticket # Column (Optional — Grab &amp; Merge)</label>
+            <select id="schemaTicketColSelect"></select>
+          </div>
+          <div class="form-group">
+            <label for="schemaSecondaryColSelect">Secondary Account / Subtitle Column (Optional)</label>
+            <select id="schemaSecondaryColSelect"></select>
+          </div>
+          <div class="form-group">
+            <label>Immutable Primary Key (UUIDv4)</label>
+            <div id="schemaTrackingColInfo" class="schema-readonly-pill">Hidden Tracking ID Column</div>
+          </div>
+        </div>
+
+        <div class="schema-preview-section">
+          <div class="ttc-section-label">Detected Row-1 Workbook Columns &amp; Validation Bindings</div>
+          <div id="schemaDetectedColsPreview" class="schema-cols-preview"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btnResetSchemaMapper" class="btn-dock-secondary">Reset to Auto-Detect</button>
+          <button type="button" id="btnCancelSchemaMapper">Cancel</button>
+          <button type="submit" id="btnSaveSchemaMapper" class="btn-primary">Save Column Mapping</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Supervisor Multi-Workbook Master Tracker Rollup Modal -->
+  <div id="masterRollupModal" class="modal-backdrop">
+    <div class="modal modal-xl">
+      <div class="modal-header">
+        <div>
+          <h3 id="masterRollupTitle">Supervisor Multi-Workbook Master Rollup</h3>
+          <div id="masterRollupSubtitle" class="modal-subtitle">Cross-workbook request aggregation &amp; Subtype → Parent Category pipeline</div>
+        </div>
+        <div class="modal-header-right">
+          <span id="masterRollupWorkerBadge" class="badge badge-complete">Background Parser</span>
+          <button type="button" id="btnPickMasterRollupFolder" class="btn-dock-secondary" title="Choose any Supervisor or Team folder to scan">
+            Select Folder...
+          </button>
+          <button type="button" id="btnExportMasterRollupXlsx" class="btn-primary btn-sm" disabled title="Export aggregated Master Rollup to a standalone .xlsx file">
+            Export Rollup (.xlsx)
+          </button>
+        </div>
+      </div>
+
+      <div id="masterRollupSummaryGrid" class="rollup-kpi-grid"></div>
+      <div id="masterRollupCategoryBar" class="rollup-cat-bar"></div>
+
+      <div class="view-only-controls rollup-controls-row">
+        <label for="masterRollupSourceMode" class="control-label">Files</label>
+        <select id="masterRollupSourceMode" title="Choose which .xlsx files in the folder to scan">
+          <option value="auto">Auto (Mirrors if present, else Working)</option>
+          <option value="mirrors">Only (VIEW ONLY).xlsx Mirrors</option>
+          <option value="working">Only Working .xlsx Files</option>
+        </select>
+
+        <select id="masterRollupWorkbookFilter" title="Filter by agent workbook">
+          <option value="__ALL__">All Workbooks</option>
+        </select>
+
+        <select id="masterRollupCategoryFilter" title="Filter by Parent Category">
+          <option value="__ALL__">All Parent Categories</option>
+        </select>
+
+        <select id="masterRollupStatusFilter" title="Filter by Request Status">
+          <option value="__ALL__">All Statuses</option>
+          <option value="__OPEN__">Open / Unfinished Only</option>
+          <option value="__COMPLETE__">Completed / Closed Only</option>
+        </select>
+
+        <label class="checkbox-label rollup-dedup-label" title="Consolidate rolled-over daily rows into one latest state per unique request per workbook">
+          <input type="checkbox" id="masterRollupDedupCheck" checked>
+          <span>Latest per Unique ID</span>
+        </label>
+
+        <input type="text" id="masterRollupSearchInput" class="search-box" placeholder="Search across all aggregated workbooks...">
+        <span id="masterRollupStatsText" class="control-label"></span>
+      </div>
+
+      <div class="view-only-table-wrap">
+        <table>
+          <thead id="masterRollupHead">
+            <tr>
+              <th>Workbook</th>
+              <th>Latest Tab</th>
+              <th>Subject / Primary</th>
+              <th>Ticket #</th>
+              <th>Account / Subtitle</th>
+              <th>Action / Subtype</th>
+              <th>Parent Category</th>
+              <th>Notes</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="masterRollupBody">
+            <tr><td colspan="9" class="empty-table-cell">Scanning folder...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="btnRefreshMasterRollup" class="btn-dock-secondary">Rescan Folder</button>
+        <button type="button" id="btnCloseMasterRollup" class="btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- In-App Dialog Modal (Replaces native browser alert / confirm / prompt) -->
   <div id="dialogModal" class="modal-backdrop dialog-backdrop">
     <div class="modal dialog-modal">
@@ -1095,6 +1336,9 @@
   <footer id="statusBar" class="status-bar">
     <div class="status-bar-left">
       <span id="statusPill" class="status-pill">No Folder Linked</span>
+      <button type="button" id="btnRetryPrimarySave" class="btn-retry-primary-save" style="display:none;" title="Primary workbook was locked in Desktop Excel. Your edits are safely staged in browser cache — click to retry saving now.">
+        💾 Retry Primary Save
+      </button>
       <button type="button" id="btnRetryMirror" class="btn-retry-mirror" style="display:none;" title="Supervisor (VIEW ONLY) mirror was in use. Click to retry syncing now.">
         Retry Mirror Sync
       </button>
@@ -1107,16 +1351,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.16.1</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.17.0</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.16.0"></script>
-  <script src="js/core-ui.js?v=1.16.0"></script>
-  <script src="js/workbook-io.js?v=1.16.0"></script>
-  <script src="js/tracker-table.js?v=1.16.0"></script>
-  <script src="js/request-editors.js?v=1.16.0"></script>
-  <script src="js/scratch-sheets.js?v=1.16.0"></script>
-  <script src="js/rollover.js?v=1.16.0"></script>
+  <script src="js/mockMasterAccounts.js?v=1.17.0"></script>
+  <script src="js/core-ui.js?v=1.17.0"></script>
+  <script src="js/workbook-io.js?v=1.17.0"></script>
+  <script src="js/tracker-table.js?v=1.17.0"></script>
+  <script src="js/request-editors.js?v=1.17.0"></script>
+  <script src="js/scratch-sheets.js?v=1.17.0"></script>
+  <script src="js/rollover.js?v=1.17.0"></script>
 </body>
 </html>

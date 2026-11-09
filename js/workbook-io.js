@@ -62,6 +62,85 @@ async function deleteHandleFromIDB(key) {
   }
 }
 
+function getProfileIDBKeys(profileId = activeProfileId) {
+  if (!profileId || profileId === DEFAULT_TRACKER_PROFILE_ID) {
+    return {
+      agentKey: IDB_AGENT_KEY,
+      supervisorKey: IDB_SUPERVISOR_KEY,
+      templatesKey: IDB_TEMPLATES_KEY,
+      lastWbKey: IDB_LAST_WORKBOOK_KEY
+    };
+  }
+  const prefix = `profile::${profileId}::`;
+  return {
+    agentKey: `${prefix}agentFolderHandle`,
+    supervisorKey: `${prefix}supervisorFolderHandle`,
+    templatesKey: `${prefix}templatesFolderHandle`,
+    lastWbKey: `${prefix}lastActiveWorkbookName`
+  };
+}
+
+function getStagedPrimarySaveIDBKey(workbookName, profileId = activeProfileId) {
+  return `stagedPrimarySave::${profileId || DEFAULT_TRACKER_PROFILE_ID}::${String(workbookName || '').trim()}`;
+}
+
+function getActiveTrackerProfile() {
+  let found = trackerProfiles.find(p => p.id === activeProfileId);
+  if (!found) {
+    found = trackerProfiles[0] || { id: DEFAULT_TRACKER_PROFILE_ID, name: 'Daily Tracker', mirrorEnabled: true };
+    activeProfileId = found.id;
+  }
+  return found;
+}
+
+function isActiveProfileMirrorEnabled() {
+  const prof = getActiveTrackerProfile();
+  return prof ? prof.mirrorEnabled !== false : true;
+}
+
+function persistTrackerProfiles() {
+  try {
+    localStorage.setItem(TRACKER_PROFILES_STORAGE_KEY, JSON.stringify(trackerProfiles));
+    localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, activeProfileId);
+  } catch (err) {
+    console.warn('Could not persist tracker profiles:', err);
+  }
+}
+
+function syncMirrorCopyCheckboxUI() {
+  if (chkEnableMirrorCopy) {
+    chkEnableMirrorCopy.checked = isActiveProfileMirrorEnabled();
+  }
+}
+
+if (chkEnableMirrorCopy) {
+  syncMirrorCopyCheckboxUI();
+  chkEnableMirrorCopy.addEventListener('change', async (e) => {
+    const prof = getActiveTrackerProfile();
+    if (!prof) return;
+    prof.mirrorEnabled = Boolean(e.target.checked);
+    persistTrackerProfiles();
+    if (!prof.mirrorEnabled) {
+      clearMirrorRetryState();
+    }
+    updateFilePathsBarUI();
+    updateStatusBarTelemetry();
+    if (prof.mirrorEnabled && workbook && workingFileHandle) {
+      try {
+        const buf = await serializeWorkbookBuffer();
+        await attemptMirrorWrite(buf, false);
+      } catch (_) { /* ignore */ }
+    } else {
+      showToast(
+        prof.mirrorEnabled
+          ? `Enabled (VIEW ONLY).xlsx mirroring for "${prof.name}".`
+          : `Disabled (VIEW ONLY).xlsx mirroring for "${prof.name}" (saves working file only).`,
+        'info'
+      );
+    }
+  });
+}
+
 function setAutoReconnectPreference(enabled) {
   autoReconnectEnabled = Boolean(enabled);
   localStorage.setItem(AUTO_RECONNECT_STORAGE_KEY, autoReconnectEnabled ? 'true' : 'false');
@@ -205,8 +284,12 @@ function updateFilePathsBarUI() {
     }
   }
 
+  const mirrorEnabled = isActiveProfileMirrorEnabled();
+
   if (pathViewOnlyText) {
-    if ((supervisorDirHandle || parentDirHandle) && workingFileHandle) {
+    if (!mirrorEnabled) {
+      pathViewOnlyText.textContent = 'Disabled for this tracker tab';
+    } else if ((supervisorDirHandle || parentDirHandle) && workingFileHandle) {
       const mirrorDir = supervisorDirHandle ? supervisorDirHandle.name : parentDirHandle.name;
       const mirrorFile = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
       pathViewOnlyText.textContent = `${mirrorDir}\\${mirrorFile}`;
@@ -235,13 +318,14 @@ function updateFilePathsBarUI() {
     }
   }
 
-  const canOpenViewOnly = Boolean((parentDirHandle || supervisorDirHandle) && workingFileHandle);
+  const canOpenViewOnly = Boolean(mirrorEnabled && (parentDirHandle || supervisorDirHandle) && workingFileHandle);
   if (btnOpenViewOnly) {
     btnOpenViewOnly.style.display = canOpenViewOnly ? 'inline-block' : 'none';
   }
   if (menuOpenViewOnly) {
     menuOpenViewOnly.disabled = !canOpenViewOnly;
   }
+  syncMirrorCopyCheckboxUI();
 }
 
 async function scanTemplatesDirectory() {
@@ -336,12 +420,17 @@ async function attemptReconnectFolders({ requestPermissionIfNeeded = true, silen
 }
 
 async function initCachedDirectoryHandles() {
+  syncMirrorCopyCheckboxUI();
+  if (typeof syncWorkspaceTabsUI === 'function') {
+    syncWorkspaceTabsUI();
+  }
   if (!('indexedDB' in window)) return;
+  const idbKeys = getProfileIDBKeys(activeProfileId);
   const [savedAgentHandle, savedSupHandle, savedTplHandle, savedWbName] = await Promise.all([
-    getHandleFromIDB(IDB_AGENT_KEY),
-    getHandleFromIDB(IDB_SUPERVISOR_KEY),
-    getHandleFromIDB(IDB_TEMPLATES_KEY),
-    getHandleFromIDB(IDB_LAST_WORKBOOK_KEY)
+    getHandleFromIDB(idbKeys.agentKey),
+    getHandleFromIDB(idbKeys.supervisorKey),
+    getHandleFromIDB(idbKeys.templatesKey),
+    getHandleFromIDB(idbKeys.lastWbKey)
   ]);
 
   if (savedWbName && typeof savedWbName === 'string') {
@@ -388,7 +477,8 @@ async function initCachedDirectoryHandles() {
           evt.target.closest('#btnResetAgentDir') ||
           evt.target.closest('#headerThemeGroup') ||
           evt.target.closest('#menuThemeGroup') ||
-          evt.target.closest('.menu-fontsize-control')
+          evt.target.closest('.menu-fontsize-control') ||
+          evt.target.closest('#workspaceTabsBar')
         ) {
           return;
         }
@@ -415,7 +505,8 @@ async function promptSelectAgentFolder() {
     parentDirHandle = dirHandle;
     cachedDirHandle = dirHandle;
     autoReconnectGesturePending = false;
-    await saveHandleToIDB(IDB_AGENT_KEY, dirHandle);
+    const idbKeys = getProfileIDBKeys(activeProfileId);
+    await saveHandleToIDB(idbKeys.agentKey, dirHandle);
     btnReconnect.style.display = 'none';
     btnLinkFile.style.display = 'none';
     btnNewWorkbook.disabled = false;
@@ -434,6 +525,49 @@ async function promptSelectAgentFolder() {
 btnLinkFile.addEventListener('click', promptSelectAgentFolder);
 menuSelectAgentFolder.addEventListener('click', promptSelectAgentFolder);
 
+function resetActiveTrackerUIDisconnectedState() {
+  workbookPickerWrap.style.display = 'none';
+  btnReconnect.style.display = cachedDirHandle ? 'inline-flex' : 'none';
+  btnLinkFile.style.display = 'inline-flex';
+  btnNewEntry.style.display = 'none';
+  btnRollover.style.display = 'none';
+  btnNewWorkbook.disabled = !parentDirHandle;
+  btnRepairSchema.disabled = true;
+  if (btnOpenSchemaMapper) btnOpenSchemaMapper.disabled = true;
+  if (menuNewScratchSheet) menuNewScratchSheet.disabled = true;
+  btnAddBlankTab.disabled = true;
+  if (btnRolloverPrevSheet) btnRolloverPrevSheet.disabled = true;
+  btnRenameTab.disabled = true;
+  btnDeleteTab.disabled = true;
+  btnDeleteMode.disabled = true;
+  selectedForDelete.clear();
+  if (batchActionDock) batchActionDock.style.display = 'none';
+  if (bottomEditorDock) bottomEditorDock.style.display = 'none';
+  sheetTabsBar.style.display = 'none';
+  schemaBanner.style.display = 'none';
+  activeSchemaConfig = {
+    isStandardSchema: true,
+    mode: 'auto',
+    columns: [],
+    primaryCol: 1,
+    ticketCol: 2,
+    secondaryCol: 3,
+    statusCol: 10,
+    notesCol: 9,
+    trackingCol: 11
+  };
+  if (typeof renderTableHeader === 'function') renderTableHeader();
+  if (typeof syncDynamicEditorFormsUI === 'function') syncDynamicEditorFormsUI();
+  setStatus('No Folder Linked', '');
+  updateAgentDirUI();
+  updateSupervisorDirUI();
+  updateTemplatesDirUI();
+  const prof = getActiveTrackerProfile();
+  const label = prof ? escapeHtml(prof.name) : 'Tracker';
+  listBody.innerHTML = `<tr><td colspan="12" class="empty-table-cell">Click <strong>Select Agent Folder</strong> to connect the workbook directory for <strong>${label}</strong>.</td></tr>`;
+  if (typeof syncWorkspaceTabsUI === 'function') syncWorkspaceTabsUI();
+}
+
 if (btnResetAgentDir) {
   btnResetAgentDir.addEventListener('click', async () => {
     closeToolsMenu();
@@ -444,22 +578,11 @@ if (btnResetAgentDir) {
     availableWorkbooks = [];
     lastSavedWorkbookName = null;
     autoReconnectGesturePending = false;
-    await deleteHandleFromIDB(IDB_AGENT_KEY);
-    await deleteHandleFromIDB(IDB_LAST_WORKBOOK_KEY);
-    workbookPickerWrap.style.display = 'none';
-    btnReconnect.style.display = 'none';
-    btnLinkFile.style.display = 'inline-flex';
-    btnNewEntry.style.display = 'none';
-    btnRollover.style.display = 'none';
-    if (btnRolloverPrevSheet) btnRolloverPrevSheet.disabled = true;
-    selectedForDelete.clear();
-    if (batchActionDock) batchActionDock.style.display = 'none';
-    if (bottomEditorDock) bottomEditorDock.style.display = 'none';
-    sheetTabsBar.style.display = 'none';
-    schemaBanner.style.display = 'none';
-    setStatus('No Folder Linked', '');
-    updateAgentDirUI();
-    listBody.innerHTML = '<tr><td colspan="12" class="empty-table-cell">Click "Select Agent Folder" to connect your tracker directory.</td></tr>';
+    const idbKeys = getProfileIDBKeys(activeProfileId);
+    await deleteHandleFromIDB(idbKeys.agentKey);
+    await deleteHandleFromIDB(idbKeys.lastWbKey);
+    trackerProfileRuntimeCache.delete(activeProfileId);
+    resetActiveTrackerUIDisconnectedState();
     showToast('Cleared saved Tracker Workbooks folder.', 'info');
   });
 }
@@ -505,7 +628,7 @@ btnSupervisorDir.addEventListener('click', async () => {
     const supDir = await window.showDirectoryPicker({ mode: 'readwrite' });
     supervisorDirHandle = supDir;
     cachedSupervisorDirHandle = supDir;
-    await saveHandleToIDB(IDB_SUPERVISOR_KEY, supDir);
+    await saveHandleToIDB(getProfileIDBKeys(activeProfileId).supervisorKey, supDir);
     updateSupervisorDirUI();
     showToast(`Supervisor (VIEW ONLY) export folder set to "${supDir.name}"`, 'success');
 
@@ -527,7 +650,7 @@ btnResetSupervisorDir.addEventListener('click', async () => {
   closeToolsMenu();
   supervisorDirHandle = null;
   cachedSupervisorDirHandle = null;
-  await deleteHandleFromIDB(IDB_SUPERVISOR_KEY);
+  await deleteHandleFromIDB(getProfileIDBKeys(activeProfileId).supervisorKey);
   updateSupervisorDirUI();
   showToast('Supervisor (VIEW ONLY) export reset to Agent workbook folder.', 'info');
 });
@@ -559,7 +682,7 @@ if (btnTemplatesDir) {
       const tplDir = await window.showDirectoryPicker({ mode: 'read' });
       templatesDirHandle = tplDir;
       cachedTemplatesDirHandle = tplDir;
-      await saveHandleToIDB(IDB_TEMPLATES_KEY, tplDir);
+      await saveHandleToIDB(getProfileIDBKeys(activeProfileId).templatesKey, tplDir);
       await scanTemplatesDirectory();
       showToast(`Templates folder set to "${tplDir.name}" (${availableTemplates.length} .xlsx template(s) found)`, 'success');
     } catch (err) {
@@ -579,7 +702,7 @@ if (btnResetTemplatesDir) {
     templatesDirHandle = null;
     cachedTemplatesDirHandle = null;
     availableTemplates = [];
-    await deleteHandleFromIDB(IDB_TEMPLATES_KEY);
+    await deleteHandleFromIDB(getProfileIDBKeys(activeProfileId).templatesKey);
     updateTemplatesDirUI();
     showToast('Templates folder reset to built-in default schema.', 'info');
   });
@@ -693,7 +816,7 @@ async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
   workbookSelect.value = String(selectedIdx);
   workingFileHandle = availableWorkbooks[selectedIdx].handle;
   lastSavedWorkbookName = workingFileHandle.name;
-  await saveHandleToIDB(IDB_LAST_WORKBOOK_KEY, workingFileHandle.name);
+  await saveHandleToIDB(getProfileIDBKeys(activeProfileId).lastWbKey, workingFileHandle.name);
   updateFilePathsBarUI();
 
   await loadWorkbookFromDisk();
@@ -710,7 +833,7 @@ workbookSelect.addEventListener('change', async () => {
     activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
     workingFileHandle = availableWorkbooks[idx].handle;
     lastSavedWorkbookName = workingFileHandle.name;
-    await saveHandleToIDB(IDB_LAST_WORKBOOK_KEY, workingFileHandle.name);
+    await saveHandleToIDB(getProfileIDBKeys(activeProfileId).lastWbKey, workingFileHandle.name);
     clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
     dockEditingTarget = null;
     clearMirrorRetryState();
@@ -1433,18 +1556,354 @@ function updateDevMockAccountsUI() {
   }
 }
 
+function getWorkbookSeriesKey(fileName) {
+  return String(fileName || '')
+    .replace(/\.xlsx$/i, '')
+    .replace(/\s*\(view only\)\s*$/i, '')
+    .replace(/[\s\-_]+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)[\s\-_]+20\d{2}\b/ig, '')
+    .trim()
+    .toLowerCase();
+}
+
+function getSavedSchemaOverrideForWorkbook(fileName, profileId = activeProfileId) {
+  if (!fileName || !schemaOverridesStore) return null;
+  const exactKey = `${profileId}::file::${String(fileName).trim().toLowerCase()}`;
+  if (schemaOverridesStore[exactKey]) return schemaOverridesStore[exactKey];
+  const series = getWorkbookSeriesKey(fileName);
+  if (series) {
+    const seriesKey = `${profileId}::series::${series}`;
+    if (schemaOverridesStore[seriesKey]) return schemaOverridesStore[seriesKey];
+  }
+  return null;
+}
+
+function saveSchemaOverrideForWorkbook(fileName, overrideObj, profileId = activeProfileId) {
+  if (!fileName) return;
+  const exactKey = `${profileId}::file::${String(fileName).trim().toLowerCase()}`;
+  const series = getWorkbookSeriesKey(fileName);
+  const seriesKey = series ? `${profileId}::series::${series}` : null;
+
+  if (!overrideObj) {
+    delete schemaOverridesStore[exactKey];
+    if (seriesKey) delete schemaOverridesStore[seriesKey];
+  } else {
+    schemaOverridesStore[exactKey] = overrideObj;
+    if (seriesKey) schemaOverridesStore[seriesKey] = overrideObj;
+  }
+  try {
+    localStorage.setItem(SCHEMA_OVERRIDES_STORAGE_KEY, JSON.stringify(schemaOverridesStore));
+  } catch (e) {
+    console.warn('Could not persist schema overrides:', e);
+  }
+}
+
+function extractDetectedRow1HeadersFromSheet(ws) {
+  if (!ws) return { columns: [], existingTrackingCol: null, maxCol: 0 };
+  const row1 = ws.getRow(1);
+  const scanLimit = Math.min(Math.max(row1.cellCount || 0, ws.columnCount || 0, 14), 60);
+  let maxNonEmptyCol = 0;
+  for (let c = 1; c <= scanLimit; c++) {
+    if (cellText(row1, c) !== '') {
+      maxNonEmptyCol = c;
+    }
+  }
+  if (maxNonEmptyCol === 0) {
+    return { columns: [], existingTrackingCol: null, maxCol: 0 };
+  }
+
+  let existingTrackingCol = null;
+  const rawCols = [];
+  for (let c = 1; c <= maxNonEmptyCol; c++) {
+    const header = cellText(row1, c);
+    const lower = header.toLowerCase();
+    if (/^(tracking\s*id|tracking_id|uuid|guid|row\s*guid)$/i.test(lower)) {
+      existingTrackingCol = c;
+      continue;
+    }
+    const colLetter = colNumberToExcelLetters(c);
+    const label = header || `Column ${colLetter}`;
+    const dropdownOpts = findValidationOptionsForHeader(label);
+    rawCols.push({
+      colIndex: c,
+      fieldKey: `col_${c}`,
+      colLetter,
+      header: label,
+      dropdownOptions: dropdownOpts
+    });
+  }
+
+  return {
+    columns: rawCols,
+    existingTrackingCol,
+    maxCol: maxNonEmptyCol
+  };
+}
+
+function findValidationOptionsForHeader(headerLabel) {
+  if (!headerLabel || !validationListsByHeader || validationListsByHeader.size === 0) return [];
+  const norm = String(headerLabel).trim().toLowerCase();
+  if (!norm) return [];
+  if (validationListsByHeader.has(norm)) {
+    return validationListsByHeader.get(norm) || [];
+  }
+  // Singular/plural & partial match (e.g. "Requested Action" <-> "Requested Actions", "Status" <-> "Status Options")
+  for (const [vHeader, opts] of validationListsByHeader.entries()) {
+    if (
+      vHeader === `${norm}s` ||
+      `${vHeader}s` === norm ||
+      (norm.length >= 4 && vHeader.startsWith(norm)) ||
+      (vHeader.length >= 4 && norm.startsWith(vHeader))
+    ) {
+      return opts || [];
+    }
+  }
+  return [];
+}
+
+function isBrokerStandardHeaderRow(ws) {
+  if (!ws) return true;
+  const row1 = ws.getRow(1);
+  let anyHeader = false;
+  for (let c = 1; c <= 12; c++) {
+    if (cellText(row1, c) !== '') {
+      anyHeader = true;
+      break;
+    }
+  }
+  if (!anyHeader) return true;
+
+  let maxCol = 0;
+  for (let c = 1; c <= 40; c++) {
+    if (cellText(row1, c) !== '') maxCol = c;
+  }
+  if (maxCol > 12) return false;
+
+  const h1 = cellText(row1, 1).toLowerCase();
+  const h2 = cellText(row1, 2).toLowerCase();
+  const h3 = cellText(row1, 3).toLowerCase();
+  const h4 = cellText(row1, 4).toLowerCase();
+  const h5 = cellText(row1, 5).toLowerCase();
+  const h6 = cellText(row1, 6).toLowerCase();
+  const h7 = cellText(row1, 7).toLowerCase();
+  const h8 = cellText(row1, 8).toLowerCase();
+
+  const standardMatches = [
+    h2.includes('ticket'),
+    h3.includes('broker') || h3.includes('account'),
+    h4.includes('master'),
+    h5.includes('bidder'),
+    h6.includes('action'),
+    h7.includes('yard'),
+    h8.includes('lot')
+  ].filter(Boolean).length;
+
+  return h1.includes('subject') && standardMatches >= 2;
+}
+
+function findPrimarySchemaHeaderWorksheet(wb) {
+  if (!wb) return null;
+  let tplWs = null;
+  let placeholderWs = null;
+  const dateTabList = [];
+  let firstCustomWs = null;
+
+  wb.eachSheet((ws) => {
+    const raw = ws.name.trim();
+    const lower = raw.toLowerCase();
+    if (lower === 'template') tplWs = ws;
+    else if (isTemplatePlaceholderTab(raw)) placeholderWs = ws;
+    else if (DATE_TAB_REGEX.test(raw)) dateTabList.push(ws);
+    else if (!isProtectedReferenceSheetName(raw) && !firstCustomWs) firstCustomWs = ws;
+  });
+
+  if (dateTabList.length > 0) {
+    dateTabList.sort((a, b) => parseDateTab(b.name.trim()) - parseDateTab(a.name.trim()));
+    const newestDaily = dateTabList[0];
+    const hasDailyHdr = [1, 2, 3].some(c => cellText(newestDaily.getRow(1), c) !== '');
+    if (hasDailyHdr) return newestDaily;
+  }
+  if (placeholderWs) return placeholderWs;
+  if (tplWs) return tplWs;
+  return firstCustomWs;
+}
+
+function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
+  const refWs = findPrimarySchemaHeaderWorksheet(wb);
+  const detected = extractDetectedRow1HeadersFromSheet(refWs);
+  const autoIsStandard = isBrokerStandardHeaderRow(refWs);
+  const savedOverride = getSavedSchemaOverrideForWorkbook(fileName, activeProfileId);
+  const mode = (savedOverride && ['auto', 'custom', 'standard'].includes(savedOverride.mode))
+    ? savedOverride.mode
+    : 'auto';
+
+  let useStandard = mode === 'standard'
+    ? true
+    : (mode === 'custom' ? false : autoIsStandard);
+
+  // Cannot use custom mode if Row 1 has zero headers at all
+  if (!useStandard && detected.columns.length === 0) {
+    useStandard = true;
+  }
+
+  if (useStandard) {
+    const stdMap = refWs ? getStandardWorksheetColumnMapOnly(refWs) : {
+      isTemplateLayout: false,
+      statusCol: 10,
+      notesCol: 9,
+      emailSubjCol: null,
+      trackingCol: 11
+    };
+    activeSchemaConfig = {
+      isStandardSchema: true,
+      mode,
+      autoDetectedStandard: autoIsStandard,
+      columns: detected.columns,
+      primaryCol: 1,
+      ticketCol: 2,
+      secondaryCol: 3,
+      statusCol: stdMap.statusCol,
+      notesCol: stdMap.notesCol,
+      trackingCol: stdMap.trackingCol
+    };
+    return activeSchemaConfig;
+  }
+
+  const cols = detected.columns;
+  const validColSet = new Set(cols.map(c => c.colIndex));
+  const pickValidOverride = (val) => {
+    if (val === 0 || val === '0' || val === 'none') return null;
+    const n = Number(val);
+    return Number.isFinite(n) && validColSet.has(n) ? n : undefined;
+  };
+
+  // Auto-infer semantic roles from column headers
+  const findColByRegex = (regex, excludeSet = new Set()) => {
+    const hit = cols.find(c => !excludeSet.has(c.colIndex) && regex.test(c.header));
+    return hit ? hit.colIndex : null;
+  };
+
+  const inferredStatusCol =
+    findColByRegex(/\b(status|state|stage|disposition|outcome)\b/i) ||
+    findColByRegex(/status|state/i);
+  const statusCol = savedOverride && pickValidOverride(savedOverride.statusCol) !== undefined
+    ? pickValidOverride(savedOverride.statusCol)
+    : inferredStatusCol;
+
+  const usedSet = new Set(statusCol ? [statusCol] : []);
+
+  const inferredNotesCol =
+    findColByRegex(/\b(notes?|comments?|remarks?|updates?|timeline|action taken)\b/i, usedSet) ||
+    findColByRegex(/note|comment|detail/i, usedSet);
+  const notesCol = savedOverride && pickValidOverride(savedOverride.notesCol) !== undefined
+    ? pickValidOverride(savedOverride.notesCol)
+    : inferredNotesCol;
+  if (notesCol) usedSet.add(notesCol);
+
+  const inferredTicketCol = findColByRegex(/\b(tickets?|case\s*#?|incident|ref\s*#?|reference)\b/i, usedSet);
+  const ticketCol = savedOverride && pickValidOverride(savedOverride.ticketCol) !== undefined
+    ? pickValidOverride(savedOverride.ticketCol)
+    : inferredTicketCol;
+  if (ticketCol) usedSet.add(ticketCol);
+
+  const inferredPrimaryCol =
+    findColByRegex(/\b(subject|title|summary|request|vin|lot|item|issue|topic|account|customer|name)\b/i, usedSet) ||
+    (cols.find(c => !usedSet.has(c.colIndex)) || cols[0]).colIndex;
+  const primaryCol = (savedOverride && pickValidOverride(savedOverride.primaryCol)) || inferredPrimaryCol;
+  if (primaryCol) usedSet.add(primaryCol);
+
+  const inferredSecondaryCol =
+    findColByRegex(/\b(account|broker|dealer|customer|buyer|assigned|owner|specialist|agent|dept|department|state|master)\b/i, usedSet) ||
+    (cols.find(c => !usedSet.has(c.colIndex)) ? cols.find(c => !usedSet.has(c.colIndex)).colIndex : null);
+  const secondaryCol = savedOverride && pickValidOverride(savedOverride.secondaryCol) !== undefined
+    ? pickValidOverride(savedOverride.secondaryCol)
+    : inferredSecondaryCol;
+
+  const maxVisibleCol = cols.reduce((m, c) => Math.max(m, c.colIndex), 0);
+  const trackingCol = detected.existingTrackingCol || (maxVisibleCol + 1);
+
+  // If Status column has dropdown options from validation lists and validationStatuses was empty, sync them
+  if (statusCol) {
+    const stColObj = cols.find(c => c.colIndex === statusCol);
+    if (stColObj && stColObj.dropdownOptions && stColObj.dropdownOptions.length > 0 && validationStatuses.length === 0) {
+      validationStatuses = [...stColObj.dropdownOptions];
+    }
+  }
+
+  activeSchemaConfig = {
+    isStandardSchema: false,
+    mode,
+    autoDetectedStandard: autoIsStandard,
+    columns: cols,
+    primaryCol,
+    ticketCol: ticketCol || null,
+    secondaryCol: secondaryCol || null,
+    statusCol: statusCol || null,
+    notesCol: notesCol || null,
+    trackingCol
+  };
+  return activeSchemaConfig;
+}
+
 async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) {
   if (!workingFileHandle) return;
   commitActiveScratchInlineEdit();
   if (hasAnyPendingScratchMutations() && !options.skipFlushPendingScratch && workbook) {
     await flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true });
   }
-  if (!options.preserveStatus && !pendingMirrorBuffer) {
+  if (!options.preserveStatus && !pendingMirrorBuffer && !pendingPrimarySaveState) {
     setStatus('Reading...', '');
   }
 
-  const file = await workingFileHandle.getFile();
-  const arrayBuffer = await file.arrayBuffer();
+  let file = await workingFileHandle.getFile();
+  let arrayBuffer = await file.arrayBuffer();
+
+  // Check IndexedDB Fail-Safe Staging Cache for unsaved primary .xlsx edits (e.g., from when Desktop Excel locked the file)
+  if (!options.skipStagedRecoveryCheck) {
+    const stagedKey = getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId);
+    const stagedRecord = await getHandleFromIDB(stagedKey);
+    if (stagedRecord && stagedRecord.buffer && stagedRecord.savedAt) {
+      const stagedDateStr = new Date(stagedRecord.savedAt).toLocaleString();
+      const diskDateStr = file.lastModified ? new Date(file.lastModified).toLocaleString() : 'Unknown';
+      const recoverNow = await showModalConfirm({
+        title: '🛡️ Recover Staged Fail-Safe Edits?',
+        badge: workingFileHandle.name,
+        message:
+          `TrackerUI found unsaved edits for "${workingFileHandle.name}" staged in browser fail-safe storage (from ${stagedDateStr} while the file was locked in Excel; current disk timestamp: ${diskDateStr}).\n\n` +
+          `Would you like to write and restore those staged edits now?`,
+        confirmText: '💾 Restore & Save Staged Edits',
+        cancelText: '🗑️ Discard Staged Cache'
+      });
+
+      if (recoverNow) {
+        try {
+          const writable = await workingFileHandle.createWritable();
+          await writable.write(stagedRecord.buffer);
+          await writable.close();
+          await deleteHandleFromIDB(stagedKey);
+          clearPrimarySaveRetryUI();
+          await attemptMirrorWrite(stagedRecord.buffer, false);
+          file = await workingFileHandle.getFile();
+          arrayBuffer = await file.arrayBuffer();
+          showToast(`Recovered and saved staged edits to "${workingFileHandle.name}".`, 'success');
+        } catch (lockErr) {
+          // File is still locked in Excel; load the staged buffer into memory and keep Retry Primary Save active!
+          arrayBuffer = stagedRecord.buffer.slice ? stagedRecord.buffer.slice(0) : stagedRecord.buffer;
+          pendingPrimarySaveState = {
+            profileId: activeProfileId,
+            workbookName: workingFileHandle.name,
+            savedAt: stagedRecord.savedAt,
+            buffer: stagedRecord.buffer
+          };
+          showPrimarySaveRetryUI();
+          showToast('Loaded your staged edits in memory (file is still open in Excel — click Retry Primary Save when closed).', 'warning');
+        }
+      } else {
+        await deleteHandleFromIDB(stagedKey);
+        clearPrimarySaveRetryUI();
+      }
+    }
+  }
+
   originalArchiveState = await captureOriginalArchiveState(arrayBuffer);
   const sanitizedBuffer = sanitizeXlsxBufferForExcelJS(arrayBuffer);
 
@@ -1460,6 +1919,8 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   hasMasterAccountsSheet = false;
   validationActions = [];
   validationStatuses = [];
+  validationListsByHeader = new Map();
+  actionCategoryMap = new Map();
 
   let hasTemplate = false;
   let hasValidation = false;
@@ -1503,14 +1964,26 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     }
   });
 
+  // Resolve Standard vs Dynamic Custom Department Schema before indexing daily rows
+  resolveWorkbookSchemaConfig(workbook, workingFileHandle.name);
+
   // Pass 2: Sort Daily MM-DD-YYYY Tabs oldest -> newest before indexing so un-keyed cross-day rows inherit prior Tracking IDs
   dailySheetObjs.sort((a, b) => parseDateTab(a.rawName) - parseDateTab(b.rawName));
   dailySheetObjs.forEach(({ worksheet, rawName }) => {
     indexWorksheetRows(worksheet, rawName);
   });
 
-  // Enrich masterAccountsMap from existing daily rows when not running isolated Dev Mock Mode
-  if (!useDevMockAccounts) {
+  // For custom schemas without a validation lists sheet, enrich status options from existing sheet values
+  if (!activeSchemaConfig.isStandardSchema && validationStatuses.length === 0) {
+    const discoveredStatuses = new Set(DEFAULT_STATUSES);
+    allRows.forEach(r => {
+      if (r.status && r.status.trim()) discoveredStatuses.add(r.status.trim());
+    });
+    validationStatuses = Array.from(discoveredStatuses);
+  }
+
+  // Enrich masterAccountsMap from existing daily rows when standard schema is active and not running isolated Dev Mock Mode
+  if (activeSchemaConfig.isStandardSchema && !useDevMockAccounts) {
     const seenAccountKeys = new Set(
       masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
     );
@@ -1529,7 +2002,13 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     });
   }
 
+  if (typeof renderTableHeader === 'function') {
+    renderTableHeader();
+  }
   populateReferenceControls();
+  if (typeof syncDynamicEditorFormsUI === 'function') {
+    syncDynamicEditorFormsUI();
+  }
   updateDevMockAccountsUI();
 
   // Sort date tabs newest first for UI dropdown
@@ -1542,10 +2021,21 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   sheetSelect.disabled = dateSheets.length === 0;
   scopeSelect.disabled = dateSheets.length === 0;
   searchInput.disabled = dateSheets.length === 0;
+  if (searchInput) {
+    if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+      const sampleHeaders = activeSchemaConfig.columns.slice(0, 5).map(c => c.header).join(', ');
+      searchInput.placeholder = `Search across ALL daily tabs (${sampleHeaders}, or Tracking ID)...`;
+    } else {
+      searchInput.placeholder = 'Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)...';
+    }
+  }
 
   btnNewEntry.style.display = 'inline-flex';
   btnRollover.style.display = 'inline-flex';
   btnRepairSchema.disabled = false;
+  if (btnOpenSchemaMapper) {
+    btnOpenSchemaMapper.disabled = false;
+  }
   if (menuNewScratchSheet) {
     menuNewScratchSheet.disabled = false;
   }
@@ -1563,11 +2053,13 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   restoreOpenScratchTabsForWorkbook();
   updateFilePathsBarUI();
 
-  // Check if workbook is a fresh template with "Rename to Current Date" or missing reference tabs (Master Accounts is optional)
+  // Check if workbook is a fresh template with "Rename to Current Date" or missing reference tabs
   const missingParts = [];
   if (dateSheets.length === 0 && !placeholderDateSheet) missingParts.push('Daily MM-DD-YYYY Tab');
-  if (!hasTemplate) missingParts.push('template');
-  if (!hasValidation) missingParts.push('validation lists');
+  if (activeSchemaConfig.isStandardSchema) {
+    if (!hasTemplate) missingParts.push('template');
+    if (!hasValidation) missingParts.push('validation lists');
+  }
 
   if (dateSheets.length === 0 && placeholderDateSheet && missingParts.length === 0) {
     const todayStr = getTodayFormatted();
@@ -1579,17 +2071,21 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     btnBannerBootstrap.textContent = `📅 Set Today's Date (${todayStr})`;
   } else if (missingParts.length > 0) {
     schemaBanner.style.display = 'flex';
-    schemaBannerText.innerHTML = `
-      <strong>✨ Workbook Schema Incomplete:</strong> Missing <code>${escapeHtml(missingParts.join(', '))}</code>.
-      Click Bootstrap to initialize all missing standard tabs and headers non-destructively.
-    `;
-    btnBannerBootstrap.textContent = '🛠️ Bootstrap Schema';
+    schemaBannerText.innerHTML = !activeSchemaConfig.isStandardSchema
+      ? `<strong>📅 Custom Department Workbook Ready:</strong> Detected ${activeSchemaConfig.columns.length} custom columns, but no <code>MM-DD-YYYY</code> daily tab yet. Click below to initialize today's daily tab preserving your custom headers.`
+      : `
+        <strong>✨ Workbook Schema Incomplete:</strong> Missing <code>${escapeHtml(missingParts.join(', '))}</code>.
+        Click Bootstrap to initialize all missing standard tabs and headers non-destructively.
+      `;
+    btnBannerBootstrap.textContent = !activeSchemaConfig.isStandardSchema
+      ? `📅 Initialize Today's Tab (${getTodayFormatted()})`
+      : '🛠️ Bootstrap Schema';
   } else {
     schemaBanner.style.display = 'none';
     btnBannerBootstrap.textContent = '🛠️ Bootstrap Schema';
   }
 
-  if (!options.preserveStatus && !pendingMirrorBuffer) {
+  if (!options.preserveStatus && !pendingMirrorBuffer && !pendingPrimarySaveState) {
     setStatus(`Synced: ${file.name}`, 'ready');
   }
   renderList();
@@ -1624,7 +2120,7 @@ function cellText(row, colIndex) {
   return str === '[object Object]' ? '' : str;
 }
 
-function getWorksheetColumnMap(worksheet) {
+function getStandardWorksheetColumnMapOnly(worksheet) {
   const row1 = worksheet.getRow(1);
   const h9 = cellText(row1, 9).toLowerCase();
   const h10 = cellText(row1, 10).toLowerCase();
@@ -1637,6 +2133,8 @@ function getWorksheetColumnMap(worksheet) {
 
   if (isTemplateLayout) {
     return {
+      isStandardSchema: true,
+      isCustomSchema: false,
       isTemplateLayout: true,
       statusCol: 9,     // Col I: Status
       notesCol: 10,     // Col J: Action Taken/Notes
@@ -1646,12 +2144,34 @@ function getWorksheetColumnMap(worksheet) {
   }
 
   return {
+    isStandardSchema: true,
+    isCustomSchema: false,
     isTemplateLayout: false,
     notesCol: 9,        // Col I: Action Notes
     statusCol: 10,      // Col J: Request Status
     emailSubjCol: null,
     trackingCol: 11     // Col K: Hidden Tracking ID (UUIDv4)
   };
+}
+
+function getWorksheetColumnMap(worksheet) {
+  const ownerWb = worksheet && worksheet.workbook ? worksheet.workbook : workbook;
+  if (ownerWb === workbook && activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
+    return {
+      isStandardSchema: false,
+      isCustomSchema: true,
+      isTemplateLayout: false,
+      columns: activeSchemaConfig.columns,
+      primaryCol: activeSchemaConfig.primaryCol,
+      ticketCol: activeSchemaConfig.ticketCol,
+      secondaryCol: activeSchemaConfig.secondaryCol,
+      statusCol: activeSchemaConfig.statusCol,
+      notesCol: activeSchemaConfig.notesCol,
+      emailSubjCol: null,
+      trackingCol: activeSchemaConfig.trackingCol
+    };
+  }
+  return getStandardWorksheetColumnMapOnly(worksheet);
 }
 
 function buildTemplateBrokerFormula(rowNumber, brokerVal, masterVal) {
@@ -1717,12 +2237,46 @@ function applyStandardSheetFormatting(ws) {
   ws.getColumn(11).hidden = true;
 }
 
-function bootstrapWorkbookSchemaInMemory(wb) {
+function applyCustomHeadersSheetFormatting(ws, customHeadersList) {
+  const cleanHeaders = Array.isArray(customHeadersList)
+    ? customHeadersList.map(h => String(h || '').trim()).filter(Boolean)
+    : [];
+  const headersWithTracking = [...cleanHeaders];
+  if (!headersWithTracking.some(h => /^(tracking\s*id|tracking_id|uuid|guid)$/i.test(h))) {
+    headersWithTracking.push('Tracking ID');
+  }
+
+  const headerRow = ws.getRow(1);
+  headerRow.height = 22;
+
+  headersWithTracking.forEach((title, idx) => {
+    const colIdx = idx + 1;
+    const isTracking = idx === headersWithTracking.length - 1 && /^(tracking\s*id|tracking_id|uuid|guid)$/i.test(title);
+    ws.getColumn(colIdx).width = isTracking ? 38 : Math.max(16, Math.min(34, title.length + 8));
+    const cell = headerRow.getCell(colIdx);
+    cell.value = title;
+    cell.font = { bold: true, color: { argb: 'FFF8FAFC' }, size: 11 };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E293B' }
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    if (isTracking) {
+      ws.getColumn(colIdx).hidden = true;
+    }
+  });
+
+  headerRow.commit();
+}
+
+function bootstrapWorkbookSchemaInMemory(wb, customHeadersList = null) {
   const todayStr = getTodayFormatted();
   let templateWs = null;
   let validationWs = null;
   let placeholderDateWs = null;
   let hasAnyDateTab = false;
+  let customHeaderSourceWs = null;
 
   wb.eachSheet((ws) => {
     const raw = ws.name.trim();
@@ -1731,17 +2285,46 @@ function bootstrapWorkbookSchemaInMemory(wb) {
     else if (isTemplatePlaceholderTab(raw)) placeholderDateWs = ws;
     else if (lower === 'template') templateWs = ws;
     else if (lower === 'validation lists' || lower === 'validation list') validationWs = ws;
+    else if (!isProtectedReferenceSheetName(raw) && !customHeaderSourceWs) {
+      const det = extractDetectedRow1HeadersFromSheet(ws);
+      if (det.columns.length >= 2 && !isBrokerStandardHeaderRow(ws)) {
+        customHeaderSourceWs = ws;
+      }
+    }
   });
 
-  // 1. Ensure template sheet exists (preserve existing Template columns if already present)
+  // 1. Ensure template sheet exists (preserve existing or custom department columns if present)
   if (!templateWs) {
     templateWs = wb.addWorksheet('template');
-    applyStandardSheetFormatting(templateWs);
+    if (Array.isArray(customHeadersList) && customHeadersList.length > 0) {
+      applyCustomHeadersSheetFormatting(templateWs, customHeadersList);
+    } else if (customHeaderSourceWs) {
+      cloneTemplateStructure(customHeaderSourceWs, templateWs);
+      const det = extractDetectedRow1HeadersFromSheet(templateWs);
+      const trkCol = det.existingTrackingCol || (det.maxCol + 1);
+      if (!det.existingTrackingCol) {
+        templateWs.getRow(1).getCell(trkCol).value = 'Tracking ID';
+        templateWs.getRow(1).commit();
+      }
+      templateWs.getColumn(trkCol).hidden = true;
+    } else {
+      applyStandardSheetFormatting(templateWs);
+    }
   } else {
-    const tplMap = getWorksheetColumnMap(templateWs);
-    templateWs.getColumn(tplMap.trackingCol).hidden = true;
-    if (tplMap.emailSubjCol) {
-      templateWs.getColumn(tplMap.emailSubjCol).hidden = false;
+    const det = extractDetectedRow1HeadersFromSheet(templateWs);
+    if (!isBrokerStandardHeaderRow(templateWs) && det.columns.length > 0) {
+      const trkCol = det.existingTrackingCol || (det.maxCol + 1);
+      if (!det.existingTrackingCol) {
+        templateWs.getRow(1).getCell(trkCol).value = 'Tracking ID';
+        templateWs.getRow(1).commit();
+      }
+      templateWs.getColumn(trkCol).hidden = true;
+    } else {
+      const tplMap = getStandardWorksheetColumnMapOnly(templateWs);
+      templateWs.getColumn(tplMap.trackingCol).hidden = true;
+      if (tplMap.emailSubjCol) {
+        templateWs.getColumn(tplMap.emailSubjCol).hidden = false;
+      }
     }
   }
 
@@ -1774,11 +2357,28 @@ function bootstrapWorkbookSchemaInMemory(wb) {
     createdDateTab = todayStr;
     if (placeholderDateWs) {
       placeholderDateWs.name = todayStr;
-      const colMap = getWorksheetColumnMap(placeholderDateWs);
-      placeholderDateWs.getColumn(colMap.trackingCol).hidden = true;
-      if (colMap.emailSubjCol) {
-        placeholderDateWs.getColumn(colMap.emailSubjCol).hidden = false;
+      const det = extractDetectedRow1HeadersFromSheet(placeholderDateWs);
+      if (!isBrokerStandardHeaderRow(placeholderDateWs) && det.columns.length > 0) {
+        const trkCol = det.existingTrackingCol || (det.maxCol + 1);
+        placeholderDateWs.getColumn(trkCol).hidden = true;
+      } else {
+        const colMap = getStandardWorksheetColumnMapOnly(placeholderDateWs);
+        placeholderDateWs.getColumn(colMap.trackingCol).hidden = true;
+        if (colMap.emailSubjCol) {
+          placeholderDateWs.getColumn(colMap.emailSubjCol).hidden = false;
+        }
       }
+    } else if (customHeaderSourceWs && customHeaderSourceWs.name.toLowerCase() === 'sheet1') {
+      // Rename custom-header Sheet1 directly to today's daily tab so any existing rows on Sheet1 are preserved!
+      customHeaderSourceWs.name = todayStr;
+      const det = extractDetectedRow1HeadersFromSheet(customHeaderSourceWs);
+      const trkCol = det.existingTrackingCol || (det.maxCol + 1);
+      if (!det.existingTrackingCol) {
+        customHeaderSourceWs.getRow(1).getCell(trkCol).value = 'Tracking ID';
+        customHeaderSourceWs.getRow(1).commit();
+      }
+      customHeaderSourceWs.getColumn(trkCol).hidden = true;
+      placeWorksheetFirstInWorkbook(wb, customHeaderSourceWs);
     } else {
       const dailyWs = wb.addWorksheet(todayStr);
       cloneTemplateStructure(templateWs, dailyWs);
@@ -1791,7 +2391,7 @@ function bootstrapWorkbookSchemaInMemory(wb) {
   if (sheet1 && wb.worksheets.length > 1) {
     let sheet1HasData = false;
     sheet1.eachRow({ includeEmpty: false }, (row) => {
-      for (let c = 1; c <= 11; c++) {
+      for (let c = 1; c <= 20; c++) {
         if (cellText(row, c) !== '') sheet1HasData = true;
       }
     });
@@ -1818,33 +2418,39 @@ async function promptCreateNewWorkbook() {
 
   const now = new Date();
   const monthName = now.toLocaleString('en-US', { month: 'long' });
-  const defaultFileName = `Agent Bidder Support Tracker - ${monthName} ${now.getFullYear()}.xlsx`;
+  const activeProf = getActiveTrackerProfile();
+  const isDefaultProf = !activeProf || activeProf.id === DEFAULT_TRACKER_PROFILE_ID;
+  const defaultFileName = isDefaultProf
+    ? `Agent Bidder Support Tracker - ${monthName} ${now.getFullYear()}.xlsx`
+    : `${activeProf.name} - ${monthName} ${now.getFullYear()}.xlsx`;
 
-  let selectOptions = null;
-  if (availableTemplates.length > 0) {
-    selectOptions = [
-      ...availableTemplates.map((t, idx) => ({
-        value: `tpl::${idx}`,
-        label: `📋 From Templates Folder: ${t.name}`
-      })),
-      {
-        value: 'builtin',
-        label: '✨ Built-in Standard Schema (template, validation lists & today\'s tab — no Master Accounts)'
-      }
-    ];
-  }
+  const selectOptions = [
+    ...availableTemplates.map((t, idx) => ({
+      value: `tpl::${idx}`,
+      label: `📋 From Templates Folder: ${t.name}`
+    })),
+    {
+      value: 'builtin',
+      label: '✨ Built-in Broker Support Schema (11 standard columns — no Master Accounts)'
+    },
+    {
+      value: 'custom_cols',
+      label: '🧩 Custom Department Schema (Specify your own Row-1 column headers...)'
+    }
+  ];
 
   const promptResult = await showModalPrompt({
     title: '✨ Create New Monthly Workbook',
     badge: parentDirHandle.name,
     message: availableTemplates.length > 0
-      ? `Choose a template from "${templatesDirHandle.name}" or the built-in schema, and enter a filename for the new monthly tracker (.xlsx):`
-      : 'Enter a filename for the new Excel tracker workbook (.xlsx). It will be initialized with template, validation lists, and today\'s daily tab (Master Accounts excluded).',
-    selectLabel: 'Workbook Blueprint / Template Source',
+      ? `Choose a template from "${templatesDirHandle.name}", the standard schema, or custom department columns, and enter a filename (.xlsx):`
+      : 'Choose the standard schema or custom department columns, and enter a filename for the new monthly tracker (.xlsx):',
+    selectLabel: 'Workbook Blueprint / Schema Source',
     selectOptions,
+    defaultSelectValue: availableTemplates.length > 0 ? 'tpl::0' : (isDefaultProf ? 'builtin' : 'custom_cols'),
     inputLabel: 'Workbook Filename (.xlsx)',
     defaultValue: defaultFileName,
-    confirmText: '✨ Create Workbook',
+    confirmText: '✨ Continue',
     validate: (val) => {
       let checkName = val.trim();
       if (!checkName.toLowerCase().endsWith('.xlsx')) checkName += '.xlsx';
@@ -1858,6 +2464,30 @@ async function promptCreateNewWorkbook() {
 
   const rawName = typeof promptResult === 'object' ? promptResult.value : promptResult;
   const chosenSource = typeof promptResult === 'object' ? promptResult.selectValue : 'builtin';
+
+  let customHeadersList = null;
+  if (chosenSource === 'custom_cols') {
+    const rawColsPrompt = await showModalPrompt({
+      title: '🧩 Define Custom Department Columns',
+      badge: 'Row-1 Headers',
+      message:
+        'Enter your department tracker\'s column headers separated by commas.\n' +
+        '(A hidden immutable UUIDv4 "Tracking ID" column will be added automatically at the end.)',
+      inputLabel: 'Comma-Separated Column Headers',
+      defaultValue: 'Subject / Item, Ticket #, Account #, Department Action, Notes, Status',
+      confirmText: '✨ Create Custom Workbook',
+      validate: (val) => {
+        const parts = String(val || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (parts.length < 2) {
+          return 'Please enter at least 2 column headers separated by commas.';
+        }
+        return null;
+      }
+    });
+    if (!rawColsPrompt) return;
+    const rawColsStr = typeof rawColsPrompt === 'object' ? rawColsPrompt.value : rawColsPrompt;
+    customHeadersList = String(rawColsStr).split(',').map(s => s.trim()).filter(Boolean);
+  }
 
   let fileName = rawName.trim();
   if (!fileName.toLowerCase().endsWith('.xlsx')) {
@@ -1901,11 +2531,15 @@ async function promptCreateNewWorkbook() {
       originalArchiveState = null;
     }
 
-    bootstrapWorkbookSchemaInMemory(newWb);
+    bootstrapWorkbookSchemaInMemory(newWb, customHeadersList);
+    if (customHeadersList) {
+      saveSchemaOverrideForWorkbook(fileName, { mode: 'custom' }, activeProfileId);
+    }
 
     const newFileHandle = await parentDirHandle.getFileHandle(fileName, { create: true });
     workingFileHandle = newFileHandle;
     workbook = newWb;
+    resolveWorkbookSchemaConfig(workbook, fileName);
 
     const saved = await saveWorkbookToDisk();
     if (saved) {
@@ -1938,6 +2572,8 @@ async function handleRepairCurrentWorkbookSchema() {
       const templateSheet = findTemplateSheet();
       if (templateSheet) {
         cloneTemplateStructure(templateSheet, ws);
+      } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+        applyCustomHeadersSheetFormatting(ws, activeSchemaConfig.columns.map(c => c.header));
       } else {
         applyStandardSheetFormatting(ws);
       }
@@ -2044,6 +2680,8 @@ btnAddBlankTab.addEventListener('click', async () => {
 
     if (templateSheet) {
       cloneTemplateStructure(templateSheet, newSheet);
+    } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+      applyCustomHeadersSheetFormatting(newSheet, activeSchemaConfig.columns.map(c => c.header));
     } else {
       applyStandardSheetFormatting(newSheet);
     }
@@ -2204,7 +2842,11 @@ btnDeleteTab.addEventListener('click', async () => {
 
   if (workbook.worksheets.length <= 1) {
     const fallbackTemplate = workbook.addWorksheet('template');
-    applyStandardSheetFormatting(fallbackTemplate);
+    if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+      applyCustomHeadersSheetFormatting(fallbackTemplate, activeSchemaConfig.columns.map(c => c.header));
+    } else {
+      applyStandardSheetFormatting(fallbackTemplate);
+    }
   }
 
   workbook.removeWorksheet(ws.id);
@@ -2226,6 +2868,28 @@ function parseValidationSheet(worksheet) {
   const statusesColB = new Set();
   const statusesColE = new Set();
 
+  const row1 = worksheet.getRow(1);
+  const headerByCol = new Map();
+  const setsByCol = new Map();
+  let categoryColIndex = null;
+
+  const maxHeaderScan = Math.min(Math.max(worksheet.columnCount || 12, 12), 30);
+  for (let c = 1; c <= maxHeaderScan; c++) {
+    const rawHeader = cellText(row1, c);
+    if (!rawHeader) continue;
+    const lowerHeader = rawHeader.toLowerCase();
+    headerByCol.set(c, lowerHeader);
+    setsByCol.set(c, new Set());
+    if (
+      c >= 2 &&
+      c !== 5 &&
+      /\b(category|parent|group|bucket|pipeline|department|domain)\b/i.test(rawHeader) &&
+      !categoryColIndex
+    ) {
+      categoryColIndex = c;
+    }
+  }
+
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
     const actionVal = cellText(row, 1);
@@ -2235,6 +2899,27 @@ function parseValidationSheet(worksheet) {
     if (actionVal) actionsSet.add(actionVal);
     if (statusValB) statusesColB.add(statusValB);
     if (statusValE) statusesColE.add(statusValE);
+
+    if (actionVal && categoryColIndex) {
+      const catVal = cellText(row, categoryColIndex);
+      if (catVal) {
+        actionCategoryMap.set(actionVal.toLowerCase(), catVal);
+      }
+    }
+
+    headerByCol.forEach((_, colIdx) => {
+      const cellVal = cellText(row, colIdx);
+      if (cellVal) {
+        setsByCol.get(colIdx).add(cellVal);
+      }
+    });
+  });
+
+  headerByCol.forEach((lowerHeader, colIdx) => {
+    const vals = Array.from(setsByCol.get(colIdx) || []);
+    if (vals.length > 0) {
+      validationListsByHeader.set(lowerHeader, vals);
+    }
   });
 
   validationActions = Array.from(actionsSet);
@@ -2459,6 +3144,14 @@ function getNextEmptyRow(worksheet) {
   let lastRow = 1;
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
+    if (colMap.isCustomSchema) {
+      const hasCustomData =
+        (Array.isArray(colMap.columns) && colMap.columns.some(c => cellText(row, c.colIndex) !== '')) ||
+        (colMap.notesCol && cellText(row, colMap.notesCol) !== '') ||
+        (colMap.statusCol && cellText(row, colMap.statusCol) !== '');
+      if (hasCustomData && rowNumber > lastRow) lastRow = rowNumber;
+      return;
+    }
     const subject = cellText(row, 1);
     const ticket = cellText(row, 2);
     const master = cellText(row, 4);
@@ -2566,6 +3259,38 @@ function cloneTemplateStructure(templateSheet, newSheet) {
 }
 
 function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
+  if (colMap && colMap.isCustomSchema) {
+    const customMap = (item && item.customValues && typeof item.customValues === 'object')
+      ? item.customValues
+      : {};
+    const cols = Array.isArray(colMap.columns) ? colMap.columns : [];
+    cols.forEach(col => {
+      const idx = col.colIndex;
+      const key = `col_${idx}`;
+      let val = customMap[key] !== undefined ? customMap[key] : '';
+      if (!val) {
+        if (idx === colMap.primaryCol && item.subject) val = item.subject;
+        else if (idx === colMap.ticketCol && item.ticket) val = item.ticket;
+        else if (idx === colMap.secondaryCol && item.broker) val = item.broker;
+        else if (idx === colMap.notesCol && item.notes) val = item.notes;
+        else if (idx === colMap.statusCol && item.status) val = item.status;
+      }
+      if (idx === colMap.ticketCol && val) {
+        val = String(val).toUpperCase();
+      }
+      row.getCell(idx).value = val !== undefined && val !== null ? String(val) : '';
+    });
+    if (colMap.notesCol && item.notes !== undefined && customMap[`col_${colMap.notesCol}`] === undefined) {
+      row.getCell(colMap.notesCol).value = item.notes || '';
+    }
+    if (colMap.statusCol && item.status !== undefined && customMap[`col_${colMap.statusCol}`] === undefined) {
+      row.getCell(colMap.statusCol).value = item.status || '';
+    }
+    row.getCell(colMap.trackingCol).value = item.key;
+    row.commit();
+    return;
+  }
+
   const masterUpper = item.master ? item.master.toUpperCase() : '';
   row.getCell(1).value = item.subject;
   row.getCell(2).value = item.ticket ? item.ticket.toUpperCase() : '';
@@ -2616,7 +3341,82 @@ async function serializeWorkbookBuffer() {
   return await repairSavedXlsxArchive(rawBuffer, originalArchiveState);
 }
 
-// --- 8. DUAL-WRITE MIRRORING + AUTO-RETRY & MANUAL RETRY ---
+// --- 8. DUAL-WRITE MIRRORING, PRIMARY FAIL-SAFE CACHE & RETRY ---
+function showPrimarySaveRetryUI() {
+  if (btnRetryPrimarySave) {
+    btnRetryPrimarySave.style.display = 'inline-block';
+    btnRetryPrimarySave.textContent = '💾 Retry Primary Save';
+  }
+  setStatus('⚠️ Staged in Cache (Excel Locked — Close & Retry)', 'locked');
+}
+
+function clearPrimarySaveRetryUI() {
+  pendingPrimarySaveState = null;
+  if (btnRetryPrimarySave) {
+    btnRetryPrimarySave.style.display = 'none';
+  }
+}
+
+async function retryStagedPrimarySaveNow() {
+  if (!workingFileHandle) return;
+  if (btnRetryPrimarySave) {
+    btnRetryPrimarySave.textContent = '⏳ Saving...';
+  }
+
+  let bufferToWrite = null;
+  try {
+    if (workbook) {
+      bufferToWrite = await serializeWorkbookBuffer();
+    } else if (pendingPrimarySaveState && pendingPrimarySaveState.buffer) {
+      bufferToWrite = pendingPrimarySaveState.buffer;
+    }
+  } catch (err) {
+    console.error('Failed to serialize workbook during primary retry:', err);
+    showPrimarySaveRetryUI();
+    return;
+  }
+
+  if (!bufferToWrite) {
+    clearPrimarySaveRetryUI();
+    return;
+  }
+
+  try {
+    const writable = await workingFileHandle.createWritable();
+    await writable.write(bufferToWrite);
+    await writable.close();
+
+    const stagedKey = getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId);
+    await deleteHandleFromIDB(stagedKey);
+    clearPrimarySaveRetryUI();
+
+    const mirrorOk = await attemptMirrorWrite(bufferToWrite, false);
+    await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, {
+      skipStagedRecoveryCheck: true,
+      preserveStatus: !mirrorOk
+    });
+    showToast(`✅ Saved "${workingFileHandle.name}" & cleared staged fail-safe cache!`, 'success');
+  } catch (err) {
+    console.warn('Primary file is still locked during retry:', err);
+    const stagedRecord = {
+      profileId: activeProfileId,
+      workbookName: workingFileHandle.name,
+      savedAt: Date.now(),
+      buffer: bufferToWrite
+    };
+    pendingPrimarySaveState = stagedRecord;
+    await saveHandleToIDB(getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId), stagedRecord);
+    showPrimarySaveRetryUI();
+    showToast('⚠️ Working file is still open in Desktop Excel. Close Excel and click Retry Primary Save.', 'warning');
+  }
+}
+
+if (btnRetryPrimarySave) {
+  btnRetryPrimarySave.addEventListener('click', () => {
+    retryStagedPrimarySaveNow();
+  });
+}
+
 function clearMirrorRetryState() {
   pendingMirrorBuffer = null;
   mirrorRetryCount = 0;
@@ -2659,6 +3459,15 @@ function scheduleMirrorAutoRetry() {
 }
 
 async function attemptMirrorWrite(buffer, isRetry = false) {
+  if (!isActiveProfileMirrorEnabled()) {
+    clearMirrorRetryState();
+    if (workingFileHandle) {
+      setStatus(`Saved: ${workingFileHandle.name} (Mirror Off)`, 'ready');
+    }
+    updateFilePathsBarUI();
+    return true;
+  }
+
   const targetMirrorDir = supervisorDirHandle || parentDirHandle;
   if (!targetMirrorDir || !workingFileHandle) return true;
 
@@ -2734,20 +3543,34 @@ async function saveWorkbookToDisk() {
     return false;
   }
 
-  // 1. Primary Working File Write
+  // 1. Primary Working File Write (with IndexedDB Fail-Safe Staging when Desktop Excel locks the file)
   try {
     const writable = await workingFileHandle.createWritable();
     await writable.write(buffer);
     await writable.close();
+
+    const stagedKey = getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId);
+    await deleteHandleFromIDB(stagedKey);
+    clearPrimarySaveRetryUI();
   } catch (err) {
     console.error('Primary file write error:', err);
-    setStatus('File Locked! Close Excel & Retry', 'locked');
+    const stagedRecord = {
+      profileId: activeProfileId,
+      workbookName: workingFileHandle.name,
+      savedAt: Date.now(),
+      buffer
+    };
+    pendingPrimarySaveState = stagedRecord;
+    await saveHandleToIDB(getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId), stagedRecord);
+    showPrimarySaveRetryUI();
+
     await showModalAlert({
-      title: '🔒 Save Blocked by Windows (File Locked)',
+      title: '🔒 File Locked in Excel — Edits Safely Staged!',
       badge: workingFileHandle.name,
       message:
         `The working workbook ("${workingFileHandle.name}") is currently open and locked in Desktop Excel.\n\n` +
-        'Please close the file in Desktop Excel and click Save again.',
+        `✅ No work was lost: your changes are kept in memory and safely staged in TrackerUI's local fail-safe cache.\n` +
+        `Close the file in Desktop Excel and click "💾 Retry Primary Save" in the bottom status bar.`,
       variant: 'danger'
     });
     return false;
@@ -2757,4 +3580,1557 @@ async function saveWorkbookToDisk() {
   const mirrorOk = await attemptMirrorWrite(buffer, false);
   return mirrorOk ? true : 'mirror-locked';
 }
+
+// ============================================================================
+// 9. MULTI-DEPARTMENT TRACKER WORKSPACE PROFILES (TABS, FOLDERS & SNAPSHOTS)
+// ============================================================================
+function captureActiveProfileSnapshot() {
+  return {
+    parentDirHandle,
+    cachedDirHandle,
+    supervisorDirHandle,
+    cachedSupervisorDirHandle,
+    templatesDirHandle,
+    cachedTemplatesDirHandle,
+    availableTemplates: [...availableTemplates],
+    lastSavedWorkbookName,
+    availableWorkbooks: [...availableWorkbooks],
+    workingFileHandle,
+    workbook,
+    originalArchiveState,
+    allRows: [...allRows],
+    dateSheets: [...dateSheets],
+    scratchSheets: [...scratchSheets],
+    openScratchTabs: [...openScratchTabs],
+    activeWorkspaceTab,
+    selectedSheetValue: sheetSelect ? sheetSelect.value : '',
+    scopeValue: scopeSelect ? scopeSelect.value : 'current',
+    searchQuery: searchInput ? searchInput.value : '',
+    activeSchemaConfig: JSON.parse(JSON.stringify(activeSchemaConfig)),
+    masterAccountsMap: [...masterAccountsMap],
+    hasMasterAccountsSheet,
+    validationActions: [...validationActions],
+    validationStatuses: [...validationStatuses],
+    validationListsByHeader: new Map(validationListsByHeader),
+    actionCategoryMap: new Map(actionCategoryMap),
+    pendingMirrorBuffer,
+    pendingPrimarySaveState,
+    dockEditingTarget: dockEditingTarget ? { ...dockEditingTarget } : null
+  };
+}
+
+function applyProfileSnapshotToGlobals(snap) {
+  parentDirHandle = snap.parentDirHandle || null;
+  cachedDirHandle = snap.cachedDirHandle || null;
+  supervisorDirHandle = snap.supervisorDirHandle || null;
+  cachedSupervisorDirHandle = snap.cachedSupervisorDirHandle || null;
+  templatesDirHandle = snap.templatesDirHandle || null;
+  cachedTemplatesDirHandle = snap.cachedTemplatesDirHandle || null;
+  availableTemplates = Array.isArray(snap.availableTemplates) ? [...snap.availableTemplates] : [];
+  lastSavedWorkbookName = snap.lastSavedWorkbookName || null;
+  availableWorkbooks = Array.isArray(snap.availableWorkbooks) ? [...snap.availableWorkbooks] : [];
+  workingFileHandle = snap.workingFileHandle || null;
+  workbook = snap.workbook || null;
+  originalArchiveState = snap.originalArchiveState || null;
+  allRows = Array.isArray(snap.allRows) ? [...snap.allRows] : [];
+  dateSheets = Array.isArray(snap.dateSheets) ? [...snap.dateSheets] : [];
+  scratchSheets = Array.isArray(snap.scratchSheets) ? [...snap.scratchSheets] : [];
+  openScratchTabs = Array.isArray(snap.openScratchTabs) ? [...snap.openScratchTabs] : [];
+  activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
+  activeSchemaConfig = snap.activeSchemaConfig
+    ? JSON.parse(JSON.stringify(snap.activeSchemaConfig))
+    : {
+        isStandardSchema: true,
+        mode: 'auto',
+        columns: [],
+        primaryCol: 1,
+        ticketCol: 2,
+        secondaryCol: 3,
+        statusCol: 10,
+        notesCol: 9,
+        trackingCol: 11
+      };
+  masterAccountsMap = Array.isArray(snap.masterAccountsMap) ? [...snap.masterAccountsMap] : [];
+  hasMasterAccountsSheet = Boolean(snap.hasMasterAccountsSheet);
+  validationActions = Array.isArray(snap.validationActions) ? [...snap.validationActions] : [];
+  validationStatuses = Array.isArray(snap.validationStatuses) ? [...snap.validationStatuses] : [];
+  validationListsByHeader = snap.validationListsByHeader instanceof Map
+    ? new Map(snap.validationListsByHeader)
+    : new Map();
+  actionCategoryMap = snap.actionCategoryMap instanceof Map
+    ? new Map(snap.actionCategoryMap)
+    : new Map();
+  pendingMirrorBuffer = snap.pendingMirrorBuffer || null;
+  pendingPrimarySaveState = snap.pendingPrimarySaveState || null;
+  dockEditingTarget = snap.dockEditingTarget ? { ...snap.dockEditingTarget } : null;
+
+  // Rebuild workbookSelect UI
+  if (workbookSelect) {
+    workbookSelect.innerHTML = '';
+    availableWorkbooks.forEach((wbItem, idx) => {
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.textContent = wbItem.name;
+      if (workingFileHandle && wbItem.name === workingFileHandle.name) {
+        opt.selected = true;
+      }
+      workbookSelect.appendChild(opt);
+    });
+    workbookPickerWrap.style.display = availableWorkbooks.length > 0 ? 'flex' : 'none';
+  }
+
+  btnReconnect.style.display = (!parentDirHandle && cachedDirHandle) ? 'inline-flex' : 'none';
+  btnLinkFile.style.display = parentDirHandle ? 'none' : 'inline-flex';
+  btnNewWorkbook.disabled = !parentDirHandle;
+
+  updateAgentDirUI();
+  updateSupervisorDirUI();
+  updateTemplatesDirUI();
+
+  if (workbook && workingFileHandle) {
+    if (typeof renderTableHeader === 'function') renderTableHeader();
+    populateReferenceControls();
+    if (typeof syncDynamicEditorFormsUI === 'function') syncDynamicEditorFormsUI();
+    populateSheetDropdown(snap.selectedSheetValue || null);
+    if (scopeSelect) scopeSelect.value = snap.scopeValue || 'current';
+    if (searchInput) {
+      searchInput.value = snap.searchQuery || '';
+      searchInput.disabled = dateSheets.length === 0;
+      if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+        const sampleHeaders = activeSchemaConfig.columns.slice(0, 5).map(c => c.header).join(', ');
+        searchInput.placeholder = `Search across ALL daily tabs (${sampleHeaders}, or Tracking ID)...`;
+      } else {
+        searchInput.placeholder = 'Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)...';
+      }
+    }
+    sheetSelect.disabled = dateSheets.length === 0;
+    scopeSelect.disabled = dateSheets.length === 0;
+    btnNewEntry.style.display = 'inline-flex';
+    btnRollover.style.display = 'inline-flex';
+    btnRepairSchema.disabled = false;
+    if (btnOpenSchemaMapper) btnOpenSchemaMapper.disabled = false;
+    if (menuNewScratchSheet) menuNewScratchSheet.disabled = false;
+    btnAddBlankTab.disabled = false;
+    if (btnRolloverPrevSheet) btnRolloverPrevSheet.disabled = dateSheets.length === 0;
+    btnRenameTab.disabled = dateSheets.length === 0;
+    btnDeleteTab.disabled = dateSheets.length === 0;
+    btnDeleteMode.disabled = allRows.length === 0;
+    schemaBanner.style.display = 'none';
+
+    renderSheetTabsBar();
+    updateSheetStepperState();
+    if (bottomEditorDock) {
+      bottomEditorDock.style.display = 'block';
+      syncBottomDockStateAfterLoad();
+    }
+    if (pendingPrimarySaveState) {
+      showPrimarySaveRetryUI();
+    } else if (pendingMirrorBuffer) {
+      scheduleMirrorAutoRetry();
+    } else {
+      clearPrimarySaveRetryUI();
+      clearMirrorRetryState();
+      setStatus(`Synced: ${workingFileHandle.name}`, 'ready');
+    }
+    renderList();
+    if (typeof setActiveWorkspaceTab === 'function') {
+      setActiveWorkspaceTab(DAILY_TRACKER_WS_TAB);
+    }
+  } else {
+    resetActiveTrackerUIDisconnectedState();
+  }
+}
+
+async function switchTrackerProfile(targetProfileId) {
+  const targetProf = trackerProfiles.find(p => p.id === targetProfileId);
+  if (!targetProf) return;
+
+  if (targetProfileId === activeProfileId) {
+    if (activeWorkspaceTab !== DAILY_TRACKER_WS_TAB && typeof setActiveWorkspaceTab === 'function') {
+      setActiveWorkspaceTab(DAILY_TRACKER_WS_TAB);
+    }
+    return;
+  }
+
+  commitActiveScratchInlineEdit();
+  if (hasAnyPendingScratchMutations() && workbook) {
+    await flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true });
+  }
+
+  trackerProfileRuntimeCache.set(activeProfileId, captureActiveProfileSnapshot());
+
+  if (mirrorCountdownInterval) {
+    clearInterval(mirrorCountdownInterval);
+    mirrorCountdownInterval = null;
+  }
+  selectedForDelete.clear();
+  activeKeyFilter = null;
+  activeFieldFilter = null;
+  editingTarget = null;
+  dockEditingTarget = null;
+
+  activeProfileId = targetProfileId;
+  persistTrackerProfiles();
+  syncMirrorCopyCheckboxUI();
+
+  if (trackerProfileRuntimeCache.has(targetProfileId)) {
+    const cachedSnap = trackerProfileRuntimeCache.get(targetProfileId);
+    applyProfileSnapshotToGlobals(cachedSnap);
+    if (typeof syncWorkspaceTabsUI === 'function') syncWorkspaceTabsUI();
+    return;
+  }
+
+  // Fresh profile activation in this session: clear runtime globals and load IDB handles
+  parentDirHandle = null;
+  cachedDirHandle = null;
+  supervisorDirHandle = null;
+  cachedSupervisorDirHandle = null;
+  templatesDirHandle = null;
+  cachedTemplatesDirHandle = null;
+  availableTemplates = [];
+  lastSavedWorkbookName = null;
+  availableWorkbooks = [];
+  workingFileHandle = null;
+  workbook = null;
+  originalArchiveState = null;
+  allRows = [];
+  dateSheets = [];
+  scratchSheets = [];
+  openScratchTabs = [];
+  activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
+  pendingMirrorBuffer = null;
+  pendingPrimarySaveState = null;
+  clearPrimarySaveRetryUI();
+  clearMirrorRetryState();
+
+  if (typeof setActiveWorkspaceTab === 'function') {
+    setActiveWorkspaceTab(DAILY_TRACKER_WS_TAB);
+  }
+  resetActiveTrackerUIDisconnectedState();
+
+  if ('indexedDB' in window) {
+    const idbKeys = getProfileIDBKeys(activeProfileId);
+    const [savedAgent, savedSup, savedTpl, savedWb] = await Promise.all([
+      getHandleFromIDB(idbKeys.agentKey),
+      getHandleFromIDB(idbKeys.supervisorKey),
+      getHandleFromIDB(idbKeys.templatesKey),
+      getHandleFromIDB(idbKeys.lastWbKey)
+    ]);
+    if (savedWb && typeof savedWb === 'string') lastSavedWorkbookName = savedWb;
+    if (savedSup) cachedSupervisorDirHandle = savedSup;
+    if (savedTpl) cachedTemplatesDirHandle = savedTpl;
+    if (savedAgent) {
+      cachedDirHandle = savedAgent;
+      setReconnectButtonText(`Reconnect (${savedAgent.name})`);
+      btnReconnect.style.display = 'inline-flex';
+      updateAgentDirUI();
+      updateSupervisorDirUI();
+      updateTemplatesDirUI();
+      if (autoReconnectEnabled) {
+        await attemptReconnectFolders({ requestPermissionIfNeeded: true, silent: true });
+      }
+    }
+  }
+  if (typeof syncWorkspaceTabsUI === 'function') syncWorkspaceTabsUI();
+}
+
+async function createTrackerProfileInteractive() {
+  closeToolsMenu();
+  const suggestedNum = trackerProfiles.length + 1;
+  const rawInput = await showModalPrompt({
+    title: '＋ Add Department Tracker Tab',
+    badge: 'Multi-Tracker',
+    message:
+      'Create an independent Tracker Workspace tab for another department or workflow. ' +
+      'Each Tracker Tab links to its own folder and automatically adapts to standard or custom Row-1 Excel headers.',
+    selectLabel: 'Supervisor (VIEW ONLY) Mirroring',
+    selectOptions: [
+      { value: 'mirror_on', label: '✅ Enable (VIEW ONLY).xlsx Mirror Copy (Default)' },
+      { value: 'mirror_off', label: '📄 Working File Only (Disable Mirror Copy)' }
+    ],
+    defaultSelectValue: 'mirror_on',
+    inputLabel: 'Department / Tracker Tab Name',
+    defaultValue: `Dept ${suggestedNum} Tracker`,
+    placeholder: 'e.g., Titles Dept Tracker, Escalations, Arbitration',
+    confirmText: '＋ Add Tracker Tab',
+    validate: (val) => {
+      if (val.length > 40) return 'Please keep the tab name under 40 characters.';
+      if (trackerProfiles.some(p => p.name.toLowerCase() === val.toLowerCase())) {
+        return `A tracker tab named "${val}" already exists.`;
+      }
+      return null;
+    }
+  });
+  if (!rawInput) return;
+
+  const tabName = (typeof rawInput === 'object' ? rawInput.value : rawInput).trim();
+  const mirrorChoice = (typeof rawInput === 'object' && rawInput.selectValue) ? rawInput.selectValue : 'mirror_on';
+  const newId = `dept_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
+  trackerProfiles.push({
+    id: newId,
+    name: tabName,
+    mirrorEnabled: mirrorChoice !== 'mirror_off'
+  });
+  persistTrackerProfiles();
+
+  await switchTrackerProfile(newId);
+  showToast(`Added "${tabName}" workspace tab. Select its Agent Folder to load workbooks.`, 'success');
+}
+
+async function renameActiveTrackerProfileInteractive(targetProfileId = activeProfileId) {
+  closeToolsMenu();
+  const prof = trackerProfiles.find(p => p.id === targetProfileId);
+  if (!prof) return;
+
+  const rawNewName = await showModalPrompt({
+    title: '✏️ Rename Tracker Tab',
+    badge: prof.name,
+    message: `Enter a display name for the "${prof.name}" workspace tab:`,
+    inputLabel: 'Tracker Tab Name',
+    defaultValue: prof.name,
+    placeholder: 'e.g., Broker Support, Titles Dept',
+    confirmText: 'Save Name',
+    validate: (val) => {
+      if (val.length > 40) return 'Please keep the tab name under 40 characters.';
+      if (trackerProfiles.some(p => p.id !== prof.id && p.name.toLowerCase() === val.toLowerCase())) {
+        return `Another tracker tab is already named "${val}".`;
+      }
+      return null;
+    }
+  });
+  if (!rawNewName) return;
+  const cleanName = (typeof rawNewName === 'object' ? rawNewName.value : rawNewName).trim();
+  if (!cleanName || cleanName === prof.name) return;
+
+  prof.name = cleanName;
+  persistTrackerProfiles();
+  if (typeof syncWorkspaceTabsUI === 'function') syncWorkspaceTabsUI();
+  updateStatusBarTelemetry();
+  showToast(`Renamed tracker tab to "${cleanName}".`, 'success');
+}
+
+async function removeTrackerProfileInteractive(targetProfileId) {
+  if (!targetProfileId || targetProfileId === DEFAULT_TRACKER_PROFILE_ID) {
+    return showModalAlert({
+      title: 'Primary Tracker Tab Protected',
+      message: 'The primary Daily Tracker tab cannot be removed (you can rename it or change its folder anytime).'
+    });
+  }
+  const prof = trackerProfiles.find(p => p.id === targetProfileId);
+  if (!prof) return;
+
+  const confirmed = await showModalConfirm({
+    title: `Remove "${prof.name}" Tab?`,
+    badge: 'Workspace Tab Only',
+    message:
+      `Remove the "${prof.name}" workspace tab from TrackerUI?\n\n` +
+      `Your Excel (.xlsx) files on disk will NOT be deleted or modified.`,
+    confirmText: 'Remove Tab',
+    variant: 'danger'
+  });
+  if (!confirmed) return;
+
+  if (activeProfileId === targetProfileId) {
+    await switchTrackerProfile(DEFAULT_TRACKER_PROFILE_ID);
+  }
+
+  const idbKeys = getProfileIDBKeys(targetProfileId);
+  await Promise.all([
+    deleteHandleFromIDB(idbKeys.agentKey),
+    deleteHandleFromIDB(idbKeys.supervisorKey),
+    deleteHandleFromIDB(idbKeys.templatesKey),
+    deleteHandleFromIDB(idbKeys.lastWbKey)
+  ]);
+
+  trackerProfiles = trackerProfiles.filter(p => p.id !== targetProfileId);
+  trackerProfileRuntimeCache.delete(targetProfileId);
+  persistTrackerProfiles();
+  if (typeof syncWorkspaceTabsUI === 'function') syncWorkspaceTabsUI();
+  updateStatusBarTelemetry();
+  showToast(`Removed "${prof.name}" workspace tab.`, 'info');
+}
+
+if (btnAddTrackerProfile) {
+  btnAddTrackerProfile.addEventListener('click', createTrackerProfileInteractive);
+}
+if (menuAddTrackerProfile) {
+  menuAddTrackerProfile.addEventListener('click', createTrackerProfileInteractive);
+}
+if (menuRenameTrackerProfile) {
+  menuRenameTrackerProfile.addEventListener('click', () => renameActiveTrackerProfileInteractive(activeProfileId));
+}
+
+// ============================================================================
+// 10. DYNAMIC COLUMN ROLE MAPPER MODAL (#schemaMapperModal)
+// ============================================================================
+let schemaMapperDetectedState = null;
+
+function buildRoleSelectOptionsHtml(cols, selectedColIdx, allowNone = true) {
+  let html = allowNone ? '<option value="">— None / Not Used —</option>' : '';
+  cols.forEach(c => {
+    const sel = Number(selectedColIdx) === c.colIndex ? ' selected' : '';
+    const letter = colNumberToExcelLetters(c.colIndex);
+    html += `<option value="${c.colIndex}"${sel}>Col ${letter} (${c.colIndex}): ${escapeHtml(c.header)}</option>`;
+  });
+  return html;
+}
+
+function refreshSchemaMapperPreviewUI() {
+  if (!schemaMapperDetectedState || !schemaDetectedColsPreview) return;
+  const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
+  const effectiveStandard =
+    modeVal === 'standard' ||
+    (modeVal === 'auto' && schemaMapperDetectedState.autoIsStandard);
+
+  [
+    schemaPrimaryColSelect,
+    schemaStatusColSelect,
+    schemaNotesColSelect,
+    schemaTicketColSelect,
+    schemaSecondaryColSelect
+  ].forEach(sel => {
+    if (sel) sel.disabled = effectiveStandard;
+  });
+
+  if (schemaMapperModeBadge) {
+    if (effectiveStandard) {
+      schemaMapperModeBadge.textContent = modeVal === 'auto' ? 'Auto: Standard 11-Col' : 'Standard 11-Col';
+      schemaMapperModeBadge.className = 'badge badge-complete';
+    } else {
+      schemaMapperModeBadge.textContent = modeVal === 'auto' ? 'Auto: Custom Dept Schema' : 'Custom Dept Schema';
+      schemaMapperModeBadge.className = 'badge badge-progress';
+    }
+  }
+
+  const pCol = Number(schemaPrimaryColSelect?.value) || null;
+  const stCol = Number(schemaStatusColSelect?.value) || null;
+  const nCol = Number(schemaNotesColSelect?.value) || null;
+  const tCol = Number(schemaTicketColSelect?.value) || null;
+  const secCol = Number(schemaSecondaryColSelect?.value) || null;
+
+  const cols = schemaMapperDetectedState.columns;
+  if (cols.length === 0) {
+    schemaDetectedColsPreview.innerHTML = '<div class="control-label">No Row-1 headers detected on active sheets.</div>';
+    return;
+  }
+
+  schemaDetectedColsPreview.innerHTML = cols.map(c => {
+    const letter = colNumberToExcelLetters(c.colIndex);
+    const roles = [];
+    if (!effectiveStandard) {
+      if (c.colIndex === pCol) roles.push('Primary');
+      if (c.colIndex === stCol) roles.push('Status');
+      if (c.colIndex === nCol) roles.push('Notes');
+      if (c.colIndex === tCol) roles.push('Ticket #');
+      if (c.colIndex === secCol) roles.push('Secondary');
+    }
+    const valOpts = findValidationOptionsForHeader(c.header);
+    const roleTag = roles.length > 0
+      ? `<span class="schema-col-role-tag">${escapeHtml(roles.join(' + '))}</span>`
+      : '';
+    const valTag = valOpts.length > 0
+      ? `<span class="schema-col-role-tag" title="Bound to validation lists dropdown">▾ ${valOpts.length} opts</span>`
+      : '';
+    return `
+      <span class="schema-col-chip">
+        <span class="col-letter">Col ${letter}</span>
+        <span>${escapeHtml(c.header)}</span>
+        ${roleTag}${valTag}
+      </span>
+    `;
+  }).join('');
+}
+
+function openSchemaMapperModal() {
+  closeToolsMenu();
+  if (!workbook || !workingFileHandle || !schemaMapperModal) return;
+
+  const headerWs = findPrimarySchemaHeaderWorksheet(workbook);
+  const detected = headerWs ? extractDetectedRow1HeadersFromSheet(headerWs) : { columns: [], maxCol: 0, existingTrackingCol: null };
+  const autoIsStandard = headerWs ? isBrokerStandardHeaderRow(headerWs) : true;
+  const cols = detected.columns.length > 0
+    ? detected.columns
+    : STANDARD_HEADERS.slice(0, 10).map((h, i) => ({ colIndex: i + 1, header: h }));
+
+  const savedOverride = getSavedSchemaOverrideForWorkbook(workingFileHandle.name, activeProfileId);
+  const currentMode = (savedOverride && savedOverride.mode) ? savedOverride.mode : (activeSchemaConfig.mode || 'auto');
+
+  schemaMapperDetectedState = {
+    columns: cols,
+    autoIsStandard,
+    trackingCol: detected.existingTrackingCol || (Math.max(...cols.map(c => c.colIndex), 0) + 1)
+  };
+
+  if (schemaMapperSubtitle) {
+    schemaMapperSubtitle.textContent = `Workbook: ${workingFileHandle.name} • Source Sheet: ${headerWs ? headerWs.name : 'Default'}`;
+  }
+  if (schemaModeSelect) {
+    schemaModeSelect.value = ['auto', 'custom', 'standard'].includes(currentMode) ? currentMode : 'auto';
+  }
+
+  const defaultPrimary = activeSchemaConfig.primaryCol || cols[0].colIndex;
+  const defaultStatus = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.statusCol || '');
+  const defaultNotes = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.notesCol || '');
+  const defaultTicket = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.ticketCol || '');
+  const defaultSecondary = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.secondaryCol || '');
+
+  // If currently standard, pre-populate sensible inferred defaults in case user switches dropdown to 'custom'
+  const findInfer = (re) => {
+    const hit = cols.find(c => re.test(c.header));
+    return hit ? hit.colIndex : '';
+  };
+
+  if (schemaPrimaryColSelect) {
+    schemaPrimaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultPrimary || findInfer(/subject|title|request|vin|lot|item|account/i) || cols[0].colIndex, false);
+  }
+  if (schemaStatusColSelect) {
+    schemaStatusColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultStatus !== '' ? defaultStatus : findInfer(/status|state|stage|disposition/i), true);
+  }
+  if (schemaNotesColSelect) {
+    schemaNotesColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultNotes !== '' ? defaultNotes : findInfer(/note|comment|remark|action taken|update/i), true);
+  }
+  if (schemaTicketColSelect) {
+    schemaTicketColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultTicket !== '' ? defaultTicket : findInfer(/ticket|case|incident|ref/i), true);
+  }
+  if (schemaSecondaryColSelect) {
+    schemaSecondaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultSecondary !== '' ? defaultSecondary : findInfer(/broker|account|dealer|owner|assigned|dept/i), true);
+  }
+  if (schemaTrackingColInfo) {
+    const trkIdx = activeSchemaConfig.isStandardSchema ? 11 : schemaMapperDetectedState.trackingCol;
+    schemaTrackingColInfo.textContent = `Col ${colNumberToExcelLetters(trkIdx)} (${trkIdx}) — Hidden UUIDv4 Tracking ID`;
+  }
+
+  refreshSchemaMapperPreviewUI();
+  schemaMapperModal.classList.add('open');
+}
+
+if (btnOpenSchemaMapper) {
+  btnOpenSchemaMapper.addEventListener('click', openSchemaMapperModal);
+}
+if (schemaModeSelect) {
+  schemaModeSelect.addEventListener('change', refreshSchemaMapperPreviewUI);
+}
+[
+  schemaPrimaryColSelect,
+  schemaStatusColSelect,
+  schemaNotesColSelect,
+  schemaTicketColSelect,
+  schemaSecondaryColSelect
+].forEach(el => {
+  if (el) el.addEventListener('change', refreshSchemaMapperPreviewUI);
+});
+
+if (btnCancelSchemaMapper) {
+  btnCancelSchemaMapper.addEventListener('click', () => {
+    schemaMapperModal.classList.remove('open');
+  });
+}
+if (schemaMapperModal) {
+  schemaMapperModal.addEventListener('click', (e) => {
+    if (e.target === schemaMapperModal) schemaMapperModal.classList.remove('open');
+  });
+}
+
+if (btnResetSchemaMapper) {
+  btnResetSchemaMapper.addEventListener('click', async () => {
+    if (!workingFileHandle) return;
+    saveSchemaOverrideForWorkbook(workingFileHandle.name, null, activeProfileId);
+    schemaMapperModal.classList.remove('open');
+    await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, { skipStagedRecoveryCheck: true });
+    showToast('Reset column mapping to Auto-Detect.', 'info');
+  });
+}
+
+if (schemaMapperForm) {
+  schemaMapperForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!workingFileHandle) return;
+    const mode = schemaModeSelect ? schemaModeSelect.value : 'auto';
+    const parseOptCol = (sel) => {
+      if (!sel || sel.value === '') return null;
+      const n = parseInt(sel.value, 10);
+      return Number.isFinite(n) && n >= 1 ? n : null;
+    };
+    const override = {
+      mode,
+      primaryCol: parseOptCol(schemaPrimaryColSelect) || 1,
+      statusCol: parseOptCol(schemaStatusColSelect),
+      notesCol: parseOptCol(schemaNotesColSelect),
+      ticketCol: parseOptCol(schemaTicketColSelect),
+      secondaryCol: parseOptCol(schemaSecondaryColSelect)
+    };
+    saveSchemaOverrideForWorkbook(workingFileHandle.name, override, activeProfileId);
+    schemaMapperModal.classList.remove('open');
+    await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, { skipStagedRecoveryCheck: true });
+    showToast(`Saved column role mapping for "${workingFileHandle.name}".`, 'success');
+  });
+}
+
+// ============================================================================
+// 11. BACKGROUND WEB WORKER PARSER & SUPERVISOR MULTI-WORKBOOK MASTER ROLLUP
+// ============================================================================
+let rollupWorkerInstance = null;
+let rollupWorkerFailed = false;
+let rollupWorkerReqSeq = 0;
+const rollupWorkerPendingMap = new Map();
+
+function discoverExcelJsScriptUrl() {
+  if (typeof document !== 'undefined' && document.scripts) {
+    for (const s of Array.from(document.scripts)) {
+      if (s.src && /exceljs/i.test(s.src)) {
+        return s.src;
+      }
+    }
+  }
+  return 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+}
+
+function getOrCreateRollupWorker() {
+  if (rollupWorkerFailed || typeof Worker === 'undefined' || typeof Blob === 'undefined') {
+    return null;
+  }
+  if (rollupWorkerInstance) return rollupWorkerInstance;
+
+  const excelJsUrl = discoverExcelJsScriptUrl();
+  const workerSource = `
+    let excelReady = false;
+    try {
+      importScripts(${JSON.stringify(excelJsUrl)});
+      excelReady = Boolean(self.ExcelJS);
+    } catch (err) {
+      excelReady = false;
+    }
+
+    const DATE_RE = /^\\d{1,2}-\\d{1,2}-\\d{2,4}$/;
+    function parseDateMs(name) {
+      const p = String(name || '').trim().split('-').map(Number);
+      if (p.length !== 3) return 0;
+      let [m, d, y] = p;
+      if (y < 100) y += 2000;
+      return new Date(y, m - 1, d).getTime();
+    }
+    function cellStr(row, c) {
+      const v = row.getCell(c).value;
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') {
+        if (v instanceof Date) return v.toISOString().split('T')[0];
+        if (Array.isArray(v.richText)) return v.richText.map(t => t.text || '').join('').trim();
+        if (v.text !== undefined && v.text !== null && typeof v.text !== 'object') return String(v.text).trim();
+        if (v.result !== undefined && v.result !== null && typeof v.result !== 'object') return String(v.result).trim();
+        return '';
+      }
+      return String(v).trim();
+    }
+
+    self.onmessage = async (evt) => {
+      const { id, fileName, buffer } = evt.data || {};
+      if (!excelReady || !self.ExcelJS) {
+        self.postMessage({ id, ok: false, error: 'ExcelJS unavailable in Worker' });
+        return;
+      }
+      try {
+        const wb = new self.ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        const categoryPairs = [];
+        const dailySheets = [];
+        let templateWs = null;
+
+        wb.eachSheet((ws) => {
+          const raw = ws.name.trim();
+          const low = raw.toLowerCase();
+          if (DATE_RE.test(raw)) {
+            dailySheets.push({ ws, name: raw, ms: parseDateMs(raw) });
+          } else if (low === 'template') {
+            templateWs = ws;
+          } else if (low === 'validation lists' || low === 'validation list') {
+            const r1 = ws.getRow(1);
+            let catCol = null;
+            for (let c = 2; c <= 16; c++) {
+              const h = cellStr(r1, c);
+              if (c !== 5 && /\\b(category|parent|group|bucket|pipeline|department|domain)\\b/i.test(h)) {
+                catCol = c;
+                break;
+              }
+            }
+            if (catCol) {
+              ws.eachRow({ includeEmpty: false }, (r, rn) => {
+                if (rn === 1) return;
+                const act = cellStr(r, 1);
+                const cat = cellStr(r, catCol);
+                if (act && cat) categoryPairs.push([act.toLowerCase(), cat]);
+              });
+            }
+          }
+        });
+
+        dailySheets.sort((a, b) => a.ms - b.ms);
+        const headerWs = dailySheets.length > 0 ? dailySheets[dailySheets.length - 1].ws : templateWs;
+        let isStandard = true;
+        let pCol = 1, tCol = 2, secCol = 3, actCol = 6, nCol = 9, stCol = 10, trkCol = 11;
+        let maxScanCol = 11;
+
+        if (headerWs) {
+          const r1 = headerWs.getRow(1);
+          const h1 = cellStr(r1, 1).toLowerCase();
+          const h3 = cellStr(r1, 3).toLowerCase();
+          const h4 = cellStr(r1, 4).toLowerCase();
+          const h6 = cellStr(r1, 6).toLowerCase();
+          let stdHits = 0;
+          if (h1.includes('subject')) stdHits++;
+          if (h3.includes('broker') || h3.includes('account')) stdHits++;
+          if (h4.includes('master')) stdHits++;
+          if (h6.includes('action')) stdHits++;
+          isStandard = stdHits >= 3;
+
+          if (isStandard) {
+            const h9 = cellStr(r1, 9).toLowerCase();
+            const h10 = cellStr(r1, 10).toLowerCase();
+            const h11 = cellStr(r1, 11).toLowerCase();
+            if (h9.includes('status') || h10.includes('action taken') || h11.includes('sent email')) {
+              stCol = 9; nCol = 10; trkCol = 12; maxScanCol = 12;
+            }
+          } else {
+            const cols = [];
+            let foundTrk = null;
+            for (let c = 1; c <= 40; c++) {
+              const h = cellStr(r1, c);
+              if (!h) continue;
+              if (/^(tracking\\s*id|tracking_id|uuid|guid)$/i.test(h)) {
+                foundTrk = c;
+                continue;
+              }
+              cols.push({ c, h });
+            }
+            if (cols.length > 0) {
+              const pick = (re) => { const f = cols.find(x => re.test(x.h)); return f ? f.c : null; };
+              stCol = pick(/status|state|stage|disposition/i);
+              nCol = pick(/note|comment|remark|action taken|update/i);
+              tCol = pick(/ticket|case|incident|ref/i);
+              actCol = pick(/action|type|category|reason|issue|subtype|request type/i);
+              pCol = pick(/subject|title|summary|request|vin|lot|item/i) || cols[0].c;
+              secCol = pick(/broker|account|dealer|customer|owner|assigned|dept/i) || (cols[1] ? cols[1].c : null);
+              maxScanCol = Math.max(...cols.map(x => x.c));
+              trkCol = foundTrk || (maxScanCol + 1);
+            }
+          }
+        }
+
+        const rows = [];
+        for (const { ws, name, ms } of dailySheets) {
+          ws.eachRow({ includeEmpty: false }, (r, rn) => {
+            if (rn === 1) return;
+            let hasAny = false;
+            for (let c = 1; c <= maxScanCol; c++) {
+              if (c !== trkCol && cellStr(r, c) !== '') { hasAny = true; break; }
+            }
+            if (!hasAny) return;
+
+            const subj = pCol ? cellStr(r, pCol) : '';
+            const tkt = tCol ? cellStr(r, tCol).toUpperCase() : '';
+            let acct = '';
+            if (isStandard) {
+              const brk = cellStr(r, 3);
+              const mst = cellStr(r, 4).toUpperCase();
+              acct = brk && mst ? (brk + ' (' + mst + ')') : (brk || mst);
+            } else if (secCol) {
+              acct = cellStr(r, secCol);
+            }
+            const act = actCol ? cellStr(r, actCol) : '';
+            const nts = nCol ? cellStr(r, nCol) : '';
+            const st = (stCol ? cellStr(r, stCol) : '') || 'Pending';
+            const key = (trkCol ? cellStr(r, trkCol).toLowerCase() : '') || '';
+
+            rows.push({
+              workbookName: fileName,
+              sheetName: name,
+              sheetMs: ms,
+              rowNumber: rn,
+              subject: subj || '(Untitled)',
+              ticket: tkt,
+              account: acct,
+              action: act || (isStandard ? '' : 'Custom Dept Entry'),
+              notes: nts,
+              status: st,
+              key,
+              isStandard
+            });
+          });
+        }
+
+        self.postMessage({ id, ok: true, rows, categoryPairs });
+      } catch (e) {
+        self.postMessage({ id, ok: false, error: e && e.message ? e.message : String(e) });
+      }
+    };
+  `;
+
+  try {
+    const blob = new Blob([workerSource], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    const worker = new Worker(url);
+    worker.onmessage = (evt) => {
+      const data = evt.data || {};
+      const pending = rollupWorkerPendingMap.get(data.id);
+      if (!pending) return;
+      rollupWorkerPendingMap.delete(data.id);
+      if (data.ok) {
+        pending.resolve({ rows: data.rows || [], categoryPairs: data.categoryPairs || [], usedWorker: true });
+      } else {
+        pending.reject(new Error(data.error || 'Worker parse error'));
+      }
+    };
+    worker.onerror = (err) => {
+      rollupWorkerFailed = true;
+      rollupWorkerPendingMap.forEach(p => p.reject(err));
+      rollupWorkerPendingMap.clear();
+      try { worker.terminate(); } catch (_) { /* ignore */ }
+      rollupWorkerInstance = null;
+    };
+    rollupWorkerInstance = worker;
+    return worker;
+  } catch (err) {
+    rollupWorkerFailed = true;
+    return null;
+  }
+}
+
+async function parseWorkbookBufferMainThreadFallback(sanitizedBuffer, fileName) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(sanitizedBuffer);
+  const categoryPairs = [];
+  const dailySheets = [];
+  let templateWs = null;
+
+  wb.eachSheet((ws) => {
+    const raw = ws.name.trim();
+    const low = raw.toLowerCase();
+    if (DATE_TAB_REGEX.test(raw)) {
+      dailySheets.push({ ws, name: raw, ms: parseDateTab(raw) });
+    } else if (low === 'template') {
+      templateWs = ws;
+    } else if (low === 'validation lists' || low === 'validation list') {
+      const r1 = ws.getRow(1);
+      let catCol = null;
+      for (let c = 2; c <= 16; c++) {
+        const h = cellText(r1, c);
+        if (c !== 5 && /\b(category|parent|group|bucket|pipeline|department|domain)\b/i.test(h)) {
+          catCol = c;
+          break;
+        }
+      }
+      if (catCol) {
+        ws.eachRow({ includeEmpty: false }, (r, rn) => {
+          if (rn === 1) return;
+          const act = cellText(r, 1);
+          const cat = cellText(r, catCol);
+          if (act && cat) categoryPairs.push([act.toLowerCase(), cat]);
+        });
+      }
+    }
+  });
+
+  dailySheets.sort((a, b) => a.ms - b.ms);
+  const headerWs = dailySheets.length > 0 ? dailySheets[dailySheets.length - 1].ws : templateWs;
+  const isStandard = headerWs ? isBrokerStandardHeaderRow(headerWs) : true;
+
+  let pCol = 1, tCol = 2, secCol = 3, actCol = 6, nCol = 9, stCol = 10, trkCol = 11, maxScanCol = 11;
+  if (headerWs && isStandard) {
+    const stdMap = getStandardWorksheetColumnMapOnly(headerWs);
+    stCol = stdMap.statusCol;
+    nCol = stdMap.notesCol;
+    trkCol = stdMap.trackingCol;
+    maxScanCol = trkCol;
+  } else if (headerWs) {
+    const det = extractDetectedRow1HeadersFromSheet(headerWs);
+    if (det.columns.length > 0) {
+      const pick = (re) => { const f = det.columns.find(x => re.test(x.header)); return f ? f.colIndex : null; };
+      stCol = pick(/status|state|stage|disposition/i);
+      nCol = pick(/note|comment|remark|action taken|update/i);
+      tCol = pick(/ticket|case|incident|ref/i);
+      actCol = pick(/action|type|category|reason|issue|subtype|request type/i);
+      pCol = pick(/subject|title|summary|request|vin|lot|item/i) || det.columns[0].colIndex;
+      secCol = pick(/broker|account|dealer|customer|owner|assigned|dept/i) || (det.columns[1] ? det.columns[1].colIndex : null);
+      maxScanCol = det.maxCol;
+      trkCol = det.existingTrackingCol || (det.maxCol + 1);
+    }
+  }
+
+  const rows = [];
+  for (const { ws, name, ms } of dailySheets) {
+    ws.eachRow({ includeEmpty: false }, (r, rn) => {
+      if (rn === 1) return;
+      let hasAny = false;
+      for (let c = 1; c <= maxScanCol; c++) {
+        if (c !== trkCol && cellText(r, c) !== '') { hasAny = true; break; }
+      }
+      if (!hasAny) return;
+      const subj = pCol ? cellText(r, pCol) : '';
+      const tkt = tCol ? cellText(r, tCol).toUpperCase() : '';
+      let acct = '';
+      if (isStandard) {
+        const brk = cellText(r, 3);
+        const mst = cellText(r, 4).toUpperCase();
+        acct = brk && mst ? `${brk} (${mst})` : (brk || mst);
+      } else if (secCol) {
+        acct = cellText(r, secCol);
+      }
+      const act = actCol ? cellText(r, actCol) : '';
+      const nts = nCol ? cellText(r, nCol) : '';
+      const st = (stCol ? cellText(r, stCol) : '') || 'Pending';
+      const key = trkCol ? cellText(r, trkCol).toLowerCase() : '';
+      rows.push({
+        workbookName: fileName,
+        sheetName: name,
+        sheetMs: ms,
+        rowNumber: rn,
+        subject: subj || '(Untitled)',
+        ticket: tkt,
+        account: acct,
+        action: act || (isStandard ? '' : 'Custom Dept Entry'),
+        notes: nts,
+        status: st,
+        key,
+        isStandard
+      });
+    });
+  }
+
+  return { rows, categoryPairs, usedWorker: false };
+}
+
+async function parseWorkbookBufferInBackground(rawBuffer, fileName) {
+  const sanitized = sanitizeXlsxBufferForExcelJS(rawBuffer);
+  const worker = getOrCreateRollupWorker();
+  if (worker) {
+    try {
+      const reqId = ++rollupWorkerReqSeq;
+      const workerCopy = sanitized.slice(0);
+      return await new Promise((resolve, reject) => {
+        rollupWorkerPendingMap.set(reqId, { resolve, reject });
+        worker.postMessage({ id: reqId, fileName, buffer: workerCopy }, [workerCopy]);
+      });
+    } catch (workerErr) {
+      rollupWorkerFailed = true;
+      console.warn('Web Worker parse fallback to main thread:', workerErr);
+    }
+  }
+  return await parseWorkbookBufferMainThreadFallback(sanitized, fileName);
+}
+
+// --- Supervisor Master Rollup State & Controller ---
+let rollupCustomDirHandle = null;
+let masterRollupState = {
+  folderName: '',
+  filesScanned: [],
+  rawRows: [],
+  dedupedRows: [],
+  localCategoryMap: new Map(),
+  usedWorker: false
+};
+
+function consolidateRollupRowsPerWorkbook(rawRows) {
+  const groups = [];
+  rawRows.forEach(row => {
+    let matched = null;
+    if (row.key) {
+      matched = groups.find(g => g.workbookName === row.workbookName && g.key && g.key === row.key);
+    }
+    if (!matched && row.ticket) {
+      const tokens = splitNormalizedTicketTokens(row.ticket);
+      if (tokens.length > 0) {
+        matched = groups.find(g =>
+          g.workbookName === row.workbookName &&
+          g.ticketTokens.some(t => tokens.includes(t))
+        );
+      }
+    }
+    if (!matched) {
+      const normSubj = row.subject.trim().toLowerCase();
+      if (normSubj && normSubj !== '(untitled)') {
+        matched = groups.find(g =>
+          g.workbookName === row.workbookName &&
+          !g.key &&
+          !row.key &&
+          g.normSubj === normSubj &&
+          g.account.toLowerCase() === row.account.toLowerCase()
+        );
+      }
+    }
+
+    if (matched) {
+      const ticketMerge = mergeCommaDelimitedTickets(matched.latest.ticket, row.ticket);
+      matched.ticketTokens = ticketMerge.allTokens;
+      if (row.sheetMs >= matched.latest.sheetMs) {
+        matched.latest = {
+          ...row,
+          ticket: ticketMerge.merged,
+          action: row.action || matched.latest.action,
+          account: row.account || matched.latest.account,
+          notes: row.notes || matched.latest.notes
+        };
+      } else {
+        matched.latest.ticket = ticketMerge.merged;
+      }
+      if (row.key && !matched.key) matched.key = row.key;
+      matched.occurrences++;
+    } else {
+      const tTokens = splitNormalizedTicketTokens(row.ticket);
+      groups.push({
+        workbookName: row.workbookName,
+        key: row.key || '',
+        normSubj: row.subject.trim().toLowerCase(),
+        account: row.account || '',
+        ticketTokens: tTokens,
+        occurrences: 1,
+        latest: { ...row, ticket: tTokens.join(', ') || row.ticket }
+      });
+    }
+  });
+
+  return groups.map(g => ({
+    ...g.latest,
+    occurrences: g.occurrences
+  }));
+}
+
+function resolveRollupRowParentCategory(row) {
+  const clean = String(row.action || '').trim();
+  if (clean) {
+    const low = clean.toLowerCase();
+    if (masterRollupState.localCategoryMap.has(low)) {
+      return masterRollupState.localCategoryMap.get(low);
+    }
+  }
+  return resolveActionParentCategory(clean);
+}
+
+async function scanAndAggregateRollupFolder() {
+  const targetDir = rollupCustomDirHandle || supervisorDirHandle || parentDirHandle;
+  if (!targetDir) {
+    if (masterRollupSubtitle) {
+      masterRollupSubtitle.textContent = 'No folder connected yet — click "Select Folder..." to choose a Supervisor or Team folder.';
+    }
+    if (masterRollupSummaryGrid) masterRollupSummaryGrid.innerHTML = '';
+    if (masterRollupCategoryBar) masterRollupCategoryBar.innerHTML = '';
+    if (masterRollupBody) {
+      masterRollupBody.innerHTML = '<tr><td colspan="9" class="empty-table-cell">Click <strong>Select Folder...</strong> in the top-right to scan team tracker workbooks.</td></tr>';
+    }
+    if (btnExportMasterRollupXlsx) btnExportMasterRollupXlsx.disabled = true;
+    return;
+  }
+
+  const mode = masterRollupSourceMode ? masterRollupSourceMode.value : 'auto';
+  if (masterRollupSubtitle) {
+    masterRollupSubtitle.textContent = `Scanning "${targetDir.name}"...`;
+  }
+  if (masterRollupBody) {
+    masterRollupBody.innerHTML = '<tr><td colspan="9" class="empty-table-cell">⏳ Parsing workbooks in background...</td></tr>';
+  }
+
+  try {
+    const candidates = [];
+    for await (const entry of targetDir.values()) {
+      if (entry.kind !== 'file') continue;
+      const name = entry.name;
+      const lower = name.toLowerCase();
+      if (!lower.endsWith('.xlsx')) continue;
+      if (name.startsWith('~$')) continue;
+      if (/^master_tracker_rollup_/i.test(name)) continue;
+      const isMirror = lower.endsWith('(view only).xlsx');
+      const baseKey = lower.replace(/\s*\(view only\)\.xlsx$/i, '.xlsx');
+      candidates.push({ name, handle: entry, isMirror, baseKey });
+    }
+
+    let selectedEntries = [];
+    if (mode === 'mirrors') {
+      selectedEntries = candidates.filter(c => c.isMirror);
+    } else if (mode === 'working') {
+      selectedEntries = candidates.filter(c => !c.isMirror);
+    } else {
+      // Auto: prefer (VIEW ONLY).xlsx mirror per base workbook when present, else working file
+      const byBase = new Map();
+      candidates.forEach(c => {
+        const existing = byBase.get(c.baseKey);
+        if (!existing || (c.isMirror && !existing.isMirror)) {
+          byBase.set(c.baseKey, c);
+        }
+      });
+      selectedEntries = Array.from(byBase.values());
+    }
+
+    selectedEntries.sort((a, b) => a.name.localeCompare(b.name));
+
+    const allParsedRows = [];
+    const localCatMap = new Map();
+    let anyWorkerUsed = false;
+
+    for (const item of selectedEntries) {
+      try {
+        const file = await item.handle.getFile();
+        const buf = await file.arrayBuffer();
+        const displayWbName = item.name.replace(/\s*\(VIEW ONLY\)\.xlsx$/i, '.xlsx');
+        const res = await parseWorkbookBufferInBackground(buf, displayWbName);
+        if (res.usedWorker) anyWorkerUsed = true;
+        (res.categoryPairs || []).forEach(([actLow, cat]) => localCatMap.set(actLow, cat));
+        (res.rows || []).forEach(r => allParsedRows.push(r));
+      } catch (fileErr) {
+        console.warn(`Skipped unreadable workbook "${item.name}" in Master Rollup:`, fileErr);
+      }
+    }
+
+    masterRollupState = {
+      folderName: targetDir.name,
+      filesScanned: selectedEntries.map(e => e.name.replace(/\s*\(VIEW ONLY\)\.xlsx$/i, '.xlsx')),
+      rawRows: allParsedRows.map(r => ({ ...r, parentCategory: '' })),
+      dedupedRows: [],
+      localCategoryMap: localCatMap,
+      usedWorker: anyWorkerUsed
+    };
+
+    masterRollupState.rawRows.forEach(r => {
+      r.parentCategory = resolveRollupRowParentCategory(r);
+    });
+    masterRollupState.dedupedRows = consolidateRollupRowsPerWorkbook(masterRollupState.rawRows).map(r => ({
+      ...r,
+      parentCategory: resolveRollupRowParentCategory(r)
+    }));
+
+    if (masterRollupWorkerBadge) {
+      masterRollupWorkerBadge.textContent = anyWorkerUsed ? '⚡ Web Worker Parser' : 'Local Async Parser';
+    }
+    if (masterRollupSubtitle) {
+      masterRollupSubtitle.textContent = `Folder: ${targetDir.name} • Scanned ${selectedEntries.length} workbook(s)`;
+    }
+
+    populateMasterRollupFilterDropdowns();
+    renderMasterRollupUI();
+  } catch (err) {
+    console.error('Master Rollup scan error:', err);
+    if (masterRollupBody) {
+      masterRollupBody.innerHTML = `<tr><td colspan="9" class="empty-table-cell">Could not scan folder: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+function populateMasterRollupFilterDropdowns() {
+  const uniqueWbs = Array.from(new Set(masterRollupState.filesScanned)).sort((a, b) => a.localeCompare(b));
+  if (masterRollupWorkbookFilter) {
+    const prev = masterRollupWorkbookFilter.value;
+    masterRollupWorkbookFilter.innerHTML = '<option value="__ALL__">All Workbooks</option>' +
+      uniqueWbs.map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('');
+    if (uniqueWbs.includes(prev)) masterRollupWorkbookFilter.value = prev;
+  }
+
+  const baseList = (masterRollupDedupCheck && masterRollupDedupCheck.checked)
+    ? masterRollupState.dedupedRows
+    : masterRollupState.rawRows;
+  const uniqueCats = Array.from(new Set(baseList.map(r => r.parentCategory))).sort((a, b) => a.localeCompare(b));
+  if (masterRollupCategoryFilter) {
+    const prevCat = masterRollupCategoryFilter.value;
+    masterRollupCategoryFilter.innerHTML = '<option value="__ALL__">All Parent Categories</option>' +
+      uniqueCats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    if (uniqueCats.includes(prevCat)) masterRollupCategoryFilter.value = prevCat;
+  }
+}
+
+function getFilteredMasterRollupRows() {
+  const sourceRows = (masterRollupDedupCheck && masterRollupDedupCheck.checked)
+    ? masterRollupState.dedupedRows
+    : masterRollupState.rawRows;
+
+  const wbFilter = masterRollupWorkbookFilter ? masterRollupWorkbookFilter.value : '__ALL__';
+  const catFilter = masterRollupCategoryFilter ? masterRollupCategoryFilter.value : '__ALL__';
+  const stFilter = masterRollupStatusFilter ? masterRollupStatusFilter.value : '__ALL__';
+  const q = (masterRollupSearchInput ? masterRollupSearchInput.value : '').trim().toLowerCase();
+
+  return sourceRows
+    .filter(r => {
+      if (wbFilter !== '__ALL__' && r.workbookName !== wbFilter) return false;
+      if (catFilter !== '__ALL__' && r.parentCategory !== catFilter) return false;
+      if (stFilter === '__OPEN__' && isCompletedStatus(r.status)) return false;
+      if (stFilter === '__COMPLETE__' && !isCompletedStatus(r.status)) return false;
+      if (q) {
+        const hay = `${r.workbookName} ${r.sheetName} ${r.subject} ${r.ticket} ${r.account} ${r.action} ${r.parentCategory} ${r.notes} ${r.status}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => b.sheetMs - a.sheetMs || a.workbookName.localeCompare(b.workbookName));
+}
+
+function renderMasterRollupUI() {
+  const baseRows = (masterRollupDedupCheck && masterRollupDedupCheck.checked)
+    ? masterRollupState.dedupedRows
+    : masterRollupState.rawRows;
+  const filtered = getFilteredMasterRollupRows();
+
+  const totalCount = baseRows.length;
+  const completedCount = baseRows.filter(r => isCompletedStatus(r.status)).length;
+  const openCount = totalCount - completedCount;
+  const escalatedCount = baseRows.filter(r => /escalat|overdue|waiting/i.test(r.status || '')).length;
+  const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+  if (masterRollupSummaryGrid) {
+    masterRollupSummaryGrid.innerHTML = `
+      <div class="rollup-kpi-card">
+        <span class="rollup-kpi-label">Workbooks Scanned</span>
+        <span class="rollup-kpi-value">${masterRollupState.filesScanned.length}</span>
+      </div>
+      <div class="rollup-kpi-card">
+        <span class="rollup-kpi-label">${masterRollupDedupCheck?.checked ? 'Unique Requests' : 'Total Daily Rows'}</span>
+        <span class="rollup-kpi-value">${totalCount}</span>
+      </div>
+      <div class="rollup-kpi-card">
+        <span class="rollup-kpi-label">Open / Unfinished</span>
+        <span class="rollup-kpi-value kpi-warn">${openCount}</span>
+      </div>
+      <div class="rollup-kpi-card">
+        <span class="rollup-kpi-label">Escalated / Waiting</span>
+        <span class="rollup-kpi-value">${escalatedCount}</span>
+      </div>
+      <div class="rollup-kpi-card">
+        <span class="rollup-kpi-label">Completed (${pct}%)</span>
+        <span class="rollup-kpi-value kpi-good">${completedCount}</span>
+      </div>
+    `;
+  }
+
+  // Category Breakdown Pills
+  if (masterRollupCategoryBar) {
+    const countsByCat = new Map();
+    baseRows.forEach(r => {
+      countsByCat.set(r.parentCategory, (countsByCat.get(r.parentCategory) || 0) + 1);
+    });
+    const activeCat = masterRollupCategoryFilter ? masterRollupCategoryFilter.value : '__ALL__';
+    const sortedCats = Array.from(countsByCat.entries()).sort((a, b) => b[1] - a[1]);
+    masterRollupCategoryBar.innerHTML = sortedCats.length === 0
+      ? ''
+      : [
+          `<button type="button" class="rollup-cat-pill ${activeCat === '__ALL__' ? 'active' : ''}" data-cat="__ALL__">All Categories <strong>(${totalCount})</strong></button>`,
+          ...sortedCats.map(([cat, cnt]) => `
+            <button type="button" class="rollup-cat-pill ${activeCat === cat ? 'active' : ''}" data-cat="${escapeHtml(cat)}">
+              ${escapeHtml(cat)} <strong>(${cnt})</strong>
+            </button>
+          `)
+        ].join('');
+  }
+
+  if (masterRollupStatsText) {
+    masterRollupStatsText.textContent = `${filtered.length} of ${totalCount} shown`;
+  }
+  if (btnExportMasterRollupXlsx) {
+    btnExportMasterRollupXlsx.disabled = filtered.length === 0;
+  }
+
+  if (!masterRollupBody) return;
+  if (filtered.length === 0) {
+    masterRollupBody.innerHTML = '<tr><td colspan="9" class="empty-table-cell">No aggregated requests match the current filter.</td></tr>';
+    return;
+  }
+
+  const maxRender = 500;
+  const slice = filtered.slice(0, maxRender);
+  masterRollupBody.innerHTML = slice.map(r => {
+    const statusBadgeClass = isCompletedStatus(r.status)
+      ? 'badge-complete'
+      : (/escalat|overdue/i.test(r.status) ? 'badge-escalated' : (/progress|waiting/i.test(r.status) ? 'badge-progress' : 'badge-pending'));
+    const occNote = r.occurrences && r.occurrences > 1 ? ` <span class="control-label" title="Rolled across ${r.occurrences} daily tabs">(${r.occurrences}d)</span>` : '';
+    return `
+      <tr>
+        <td><strong>${escapeHtml(r.workbookName.replace(/\.xlsx$/i, ''))}</strong></td>
+        <td><span class="key-chip" style="cursor:default;">${escapeHtml(r.sheetName)}</span>${occNote}</td>
+        <td>${escapeHtml(r.subject)}</td>
+        <td>${r.ticket ? `<code>${escapeHtml(r.ticket)}</code>` : '—'}</td>
+        <td>${escapeHtml(r.account || '—')}</td>
+        <td>${escapeHtml(r.action || '—')}</td>
+        <td><span class="badge badge-progress">${escapeHtml(r.parentCategory)}</span></td>
+        <td class="notes-cell" title="${escapeHtml(r.notes)}">${escapeHtml(r.notes ? r.notes.slice(0, 140) : '—')}</td>
+        <td><span class="badge ${statusBadgeClass}">${escapeHtml(r.status)}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function exportMasterRollupToXlsx() {
+  const rows = getFilteredMasterRollupRows();
+  if (rows.length === 0) return;
+
+  try {
+    const outWb = new ExcelJS.Workbook();
+    const ws = outWb.addWorksheet('Master Rollup');
+    const headers = [
+      'Workbook',
+      'Latest Daily Tab',
+      'Days Tracked',
+      'Subject / Primary',
+      'Ticket Number',
+      'Account / Subtitle',
+      'Requested Action / Subtype',
+      'Parent Category',
+      'Action Notes',
+      'Status',
+      'Tracking ID'
+    ];
+    const widths = [26, 16, 14, 34, 20, 24, 24, 24, 42, 16, 38];
+    const r1 = ws.getRow(1);
+    r1.height = 22;
+    headers.forEach((h, i) => {
+      ws.getColumn(i + 1).width = widths[i];
+      const cell = r1.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, color: { argb: 'FFF8FAFC' }, size: 11 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    });
+    r1.commit();
+
+    rows.forEach((r, idx) => {
+      const row = ws.getRow(idx + 2);
+      row.getCell(1).value = r.workbookName;
+      row.getCell(2).value = r.sheetName;
+      row.getCell(3).value = r.occurrences || 1;
+      row.getCell(4).value = r.subject;
+      row.getCell(5).value = r.ticket;
+      row.getCell(6).value = r.account;
+      row.getCell(7).value = r.action;
+      row.getCell(8).value = r.parentCategory;
+      row.getCell(9).value = r.notes;
+      row.getCell(10).value = r.status;
+      row.getCell(11).value = r.key;
+      row.commit();
+    });
+
+    // Sheet 2: Category & Status Summary
+    const sumWs = outWb.addWorksheet('Category Summary');
+    sumWs.getColumn(1).width = 28;
+    sumWs.getColumn(2).width = 16;
+    sumWs.getColumn(3).width = 16;
+    sumWs.getColumn(4).width = 16;
+    const sr1 = sumWs.getRow(1);
+    ['Parent Category', 'Total Requests', 'Open', 'Completed'].forEach((h, i) => {
+      const c = sr1.getCell(i + 1);
+      c.value = h;
+      c.font = { bold: true, color: { argb: 'FFF8FAFC' }, size: 11 };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    });
+    sr1.commit();
+
+    const byCat = new Map();
+    rows.forEach(r => {
+      const entry = byCat.get(r.parentCategory) || { total: 0, open: 0, done: 0 };
+      entry.total++;
+      if (isCompletedStatus(r.status)) entry.done++;
+      else entry.open++;
+      byCat.set(r.parentCategory, entry);
+    });
+    Array.from(byCat.entries())
+      .sort((a, b) => b[1].total - a[1].total)
+      .forEach(([cat, stats], idx) => {
+        const sr = sumWs.getRow(idx + 2);
+        sr.getCell(1).value = cat;
+        sr.getCell(2).value = stats.total;
+        sr.getCell(3).value = stats.open;
+        sr.getCell(4).value = stats.done;
+        sr.commit();
+      });
+
+    const buf = await outWb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Master_Tracker_Rollup_${getTodayFormatted()}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast(`Exported ${rows.length} aggregated rows to Master_Tracker_Rollup_${getTodayFormatted()}.xlsx`, 'success');
+  } catch (err) {
+    console.error('Export Master Rollup error:', err);
+    showModalAlert({ title: 'Export Error', message: err.message, variant: 'danger' });
+  }
+}
+
+async function openMasterRollupModal() {
+  closeToolsMenu();
+  if (!masterRollupModal) return;
+  masterRollupModal.classList.add('open');
+  await scanAndAggregateRollupFolder();
+}
+
+if (menuOpenMasterRollup) {
+  menuOpenMasterRollup.addEventListener('click', openMasterRollupModal);
+}
+if (btnPickMasterRollupFolder) {
+  btnPickMasterRollupFolder.addEventListener('click', async () => {
+    try {
+      if (typeof window.showDirectoryPicker !== 'function') return;
+      rollupCustomDirHandle = await window.showDirectoryPicker({ mode: 'read' });
+      await scanAndAggregateRollupFolder();
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        showModalAlert({ title: 'Folder Selection Error', message: err.message });
+      }
+    }
+  });
+}
+if (btnRefreshMasterRollup) {
+  btnRefreshMasterRollup.addEventListener('click', scanAndAggregateRollupFolder);
+}
+if (btnExportMasterRollupXlsx) {
+  btnExportMasterRollupXlsx.addEventListener('click', exportMasterRollupToXlsx);
+}
+if (btnCloseMasterRollup) {
+  btnCloseMasterRollup.addEventListener('click', () => masterRollupModal.classList.remove('open'));
+}
+if (masterRollupModal) {
+  masterRollupModal.addEventListener('click', (e) => {
+    if (e.target === masterRollupModal) masterRollupModal.classList.remove('open');
+  });
+}
+if (masterRollupSourceMode) {
+  masterRollupSourceMode.addEventListener('change', scanAndAggregateRollupFolder);
+}
+if (masterRollupDedupCheck) {
+  masterRollupDedupCheck.addEventListener('change', () => {
+    populateMasterRollupFilterDropdowns();
+    renderMasterRollupUI();
+  });
+}
+[masterRollupWorkbookFilter, masterRollupCategoryFilter, masterRollupStatusFilter].forEach(el => {
+  if (el) el.addEventListener('change', renderMasterRollupUI);
+});
+if (masterRollupSearchInput) {
+  masterRollupSearchInput.addEventListener('input', renderMasterRollupUI);
+}
+if (masterRollupCategoryBar) {
+  masterRollupCategoryBar.addEventListener('click', (e) => {
+    const pill = e.target.closest('.rollup-cat-pill');
+    if (!pill || !masterRollupCategoryFilter) return;
+    masterRollupCategoryFilter.value = pill.dataset.cat || '__ALL__';
+    renderMasterRollupUI();
+  });
+}
+
+// ============================================================================
+// 12. PORTABLE WORKSPACE CONFIG (.JSON) EXPORT & IMPORT
+// ============================================================================
+function exportWorkspaceConfigJson() {
+  closeToolsMenu();
+  const payload = {
+    schema: 'TrackerUI_WorkspaceConfig_v1',
+    appVersion: APP_VERSION,
+    exportedAt: new Date().toISOString(),
+    preferences: {
+      themePreference,
+      fontScalePercent,
+      autoReconnectEnabled
+    },
+    trackerProfiles,
+    schemaOverrides: schemaOverridesStore,
+    actionCategoryOverrides: actionCategoryOverridesStore,
+    referenceDefaults: {
+      statuses: validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES,
+      actions: validationActions.length > 0 ? validationActions : DEFAULT_ACTIONS
+    }
+  };
+
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `trackerui-config-${getTodayFormatted()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast('Exported portable workspace configuration (.json).', 'success');
+}
+
+async function importWorkspaceConfigJsonFile(file) {
+  if (!file) return;
+  try {
+    const rawText = await file.text();
+    const parsed = JSON.parse(rawText);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Invalid JSON configuration object.');
+    }
+
+    if (parsed.preferences && typeof parsed.preferences === 'object') {
+      if (['auto', 'light', 'dark'].includes(parsed.preferences.themePreference)) {
+        setThemePreference(parsed.preferences.themePreference, { persist: true, announce: false });
+      }
+      if (Number.isFinite(Number(parsed.preferences.fontScalePercent))) {
+        applyFontScaleToDOM(Number(parsed.preferences.fontScalePercent), { persist: true });
+      }
+      if (typeof parsed.preferences.autoReconnectEnabled === 'boolean') {
+        setAutoReconnectPreference(parsed.preferences.autoReconnectEnabled);
+      }
+    }
+
+    if (Array.isArray(parsed.trackerProfiles) && parsed.trackerProfiles.length > 0) {
+      const mergedProfiles = [...trackerProfiles];
+      parsed.trackerProfiles.forEach(inc => {
+        if (!inc || typeof inc.id !== 'string' || !inc.id.trim()) return;
+        const cleanId = inc.id.trim();
+        const cleanName = String(inc.name || 'Tracker').trim() || 'Tracker';
+        const existing = mergedProfiles.find(p => p.id === cleanId);
+        if (existing) {
+          existing.name = cleanName;
+          existing.mirrorEnabled = inc.mirrorEnabled !== false;
+        } else {
+          mergedProfiles.push({
+            id: cleanId,
+            name: cleanName,
+            mirrorEnabled: inc.mirrorEnabled !== false
+          });
+        }
+      });
+      trackerProfiles = mergedProfiles;
+      persistTrackerProfiles();
+    }
+
+    if (parsed.schemaOverrides && typeof parsed.schemaOverrides === 'object' && !Array.isArray(parsed.schemaOverrides)) {
+      schemaOverridesStore = { ...schemaOverridesStore, ...parsed.schemaOverrides };
+      localStorage.setItem(SCHEMA_OVERRIDES_STORAGE_KEY, JSON.stringify(schemaOverridesStore));
+    }
+
+    if (parsed.actionCategoryOverrides && typeof parsed.actionCategoryOverrides === 'object' && !Array.isArray(parsed.actionCategoryOverrides)) {
+      actionCategoryOverridesStore = { ...actionCategoryOverridesStore, ...parsed.actionCategoryOverrides };
+      localStorage.setItem(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY, JSON.stringify(actionCategoryOverridesStore));
+    }
+
+    syncMirrorCopyCheckboxUI();
+    if (workbook && workingFileHandle) {
+      await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, { skipStagedRecoveryCheck: true });
+    } else if (typeof syncWorkspaceTabsUI === 'function') {
+      syncWorkspaceTabsUI();
+    }
+    showToast(`Imported workspace configuration from "${file.name}".`, 'success');
+  } catch (err) {
+    console.error('Config JSON import error:', err);
+    await showModalAlert({
+      title: 'Could Not Import Config (.json)',
+      message: err.message,
+      variant: 'danger'
+    });
+  }
+}
+
+if (btnExportConfigJson) {
+  btnExportConfigJson.addEventListener('click', exportWorkspaceConfigJson);
+}
+if (btnImportConfigJson && configJsonFileInput) {
+  btnImportConfigJson.addEventListener('click', () => {
+    closeToolsMenu();
+    configJsonFileInput.value = '';
+    configJsonFileInput.click();
+  });
+  configJsonFileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importWorkspaceConfigJsonFile(file);
+  });
+}
+
 

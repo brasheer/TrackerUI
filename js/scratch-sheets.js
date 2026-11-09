@@ -422,11 +422,20 @@ function getPersistedOpenScratchTabsMap() {
   }
 }
 
+function getScratchPersistenceWorkbookKey() {
+  if (!workingFileHandle || !workingFileHandle.name) return '';
+  if (!activeProfileId || activeProfileId === DEFAULT_TRACKER_PROFILE_ID) {
+    return workingFileHandle.name;
+  }
+  return `${activeProfileId}::${workingFileHandle.name}`;
+}
+
 function persistOpenScratchTabsForWorkbook() {
-  if (!workingFileHandle || !workingFileHandle.name) return;
+  const storageWbKey = getScratchPersistenceWorkbookKey();
+  if (!storageWbKey) return;
   try {
     const map = getPersistedOpenScratchTabsMap();
-    map[workingFileHandle.name] = [...openScratchTabs];
+    map[storageWbKey] = [...openScratchTabs];
     localStorage.setItem(SCRATCH_OPEN_TABS_STORAGE_KEY, JSON.stringify(map));
   } catch (e) {
     console.warn('Could not persist open scratch tabs:', e);
@@ -434,13 +443,16 @@ function persistOpenScratchTabsForWorkbook() {
 }
 
 function restoreOpenScratchTabsForWorkbook() {
-  if (!workingFileHandle || !workingFileHandle.name) {
+  const storageWbKey = getScratchPersistenceWorkbookKey();
+  if (!storageWbKey) {
     openScratchTabs = [];
     activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
     return;
   }
   const map = getPersistedOpenScratchTabsMap();
-  const savedList = Array.isArray(map[workingFileHandle.name]) ? map[workingFileHandle.name] : [];
+  const savedList = Array.isArray(map[storageWbKey])
+    ? map[storageWbKey]
+    : (Array.isArray(map[workingFileHandle.name]) ? map[workingFileHandle.name] : []);
   const validNamesByLower = new Map(scratchSheets.map(s => [s.name.toLowerCase(), s.name]));
 
   const restored = [];
@@ -555,73 +567,144 @@ function updateScratchUndoRedoButtonsUI() {
 
 function renderWorkspaceTabsBar() {
   if (!workspaceTabsBar || !workspaceTabsList) return;
-  if (!workbook) {
+  const hasMultiProfiles = Array.isArray(trackerProfiles) && trackerProfiles.length > 1;
+  if (!workbook && !hasMultiProfiles) {
     workspaceTabsBar.style.display = 'none';
     return;
   }
 
   workspaceTabsBar.style.display = 'flex';
-  renderScratchMenuDropdown();
+  if (scratchSheetMenuWrap) {
+    scratchSheetMenuWrap.style.display = workbook ? 'inline-flex' : 'none';
+  }
+  if (workbook) {
+    renderScratchMenuDropdown();
+  }
 
-  const openRequestsCount = allRows.filter(r => !isCompletedStatus(r.status)).length;
   workspaceTabsList.innerHTML = '';
 
-  // 1. Primary Pinned Daily Tracker Tab
-  const dailyBtn = document.createElement('button');
-  dailyBtn.type = 'button';
-  dailyBtn.className = `ws-app-tab${activeWorkspaceTab === DAILY_TRACKER_WS_TAB ? ' active' : ''}`;
-  dailyBtn.setAttribute('role', 'tab');
-  dailyBtn.setAttribute('aria-selected', String(activeWorkspaceTab === DAILY_TRACKER_WS_TAB));
-  dailyBtn.innerHTML = `
-    <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="2.5" y="3" width="15" height="14" rx="2"></rect>
-      <line x1="2.5" y1="7.5" x2="17.5" y2="7.5"></line>
-      <line x1="7" y1="11.5" x2="13.5" y2="11.5"></line>
-      <line x1="7" y1="14.2" x2="11.5" y2="14.2"></line>
-    </svg>
-    <span>Daily Tracker</span>
-    <span class="ws-tab-pill-count" title="${openRequestsCount} open requests across daily tabs">${openRequestsCount}</span>
-  `;
-  dailyBtn.addEventListener('click', () => {
-    switchToWorkspaceTab(DAILY_TRACKER_WS_TAB);
-  });
-  workspaceTabsList.appendChild(dailyBtn);
+  // 1. Pinned Department / Tracker Workspace Profile Tabs
+  const profilesToRender = Array.isArray(trackerProfiles) && trackerProfiles.length > 0
+    ? trackerProfiles
+    : [{ id: DEFAULT_TRACKER_PROFILE_ID, name: 'Daily Tracker', mirrorEnabled: true }];
 
-  // 2. Open Custom / Scratch Sheet App Tabs
-  openScratchTabs.forEach(sheetName => {
-    const isActive = activeWorkspaceTab === sheetName;
-    const isDirty = hasAnyPendingScratchMutations(sheetName);
-    const meta = scratchSheets.find(s => s.name === sheetName);
-    const rowCount = meta ? meta.nonEmptyRows : 0;
+  profilesToRender.forEach(prof => {
+    const isCurrentProf = prof.id === activeProfileId;
+    const isActiveTab = isCurrentProf && activeWorkspaceTab === DAILY_TRACKER_WS_TAB;
 
-    const tabBtn = document.createElement('button');
-    tabBtn.type = 'button';
-    tabBtn.className = `ws-app-tab${isActive ? ' active' : ''}`;
-    tabBtn.setAttribute('role', 'tab');
-    tabBtn.setAttribute('aria-selected', String(isActive));
-    tabBtn.title = `Scratch Sheet: ${sheetName} (${rowCount} non-empty rows)`;
-    tabBtn.innerHTML = `
+    let openCount = null;
+    let isCustomDept = false;
+    if (isCurrentProf && workbook) {
+      openCount = allRows.filter(r => !isCompletedStatus(r.status)).length;
+      isCustomDept = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema);
+    } else if (!isCurrentProf && trackerProfileRuntimeCache.has(prof.id)) {
+      const snap = trackerProfileRuntimeCache.get(prof.id);
+      if (snap && snap.workbook && Array.isArray(snap.allRows)) {
+        openCount = snap.allRows.filter(r => !isCompletedStatus(r.status)).length;
+        isCustomDept = Boolean(snap.activeSchemaConfig && !snap.activeSchemaConfig.isStandardSchema);
+      }
+    }
+
+    const canCloseProfile = prof.id !== DEFAULT_TRACKER_PROFILE_ID;
+    const countBadgeHtml = openCount !== null
+      ? `<span class="ws-tab-pill-count" title="${openCount} open request(s)">${openCount}</span>`
+      : '';
+    const customTagHtml = isCustomDept
+      ? `<span class="ws-tab-schema-tag" title="Dynamic custom column schema active">Custom</span>`
+      : '';
+    const closeBtnHtml = canCloseProfile
+      ? `<span class="ws-tab-close-btn" data-close-profile-tab="${escapeHtml(prof.id)}" title="Remove ${escapeHtml(prof.name)} workspace tab (Excel files stay untouched)" aria-label="Remove ${escapeHtml(prof.name)} tab">×</span>`
+      : '';
+
+    const profBtn = document.createElement('button');
+    profBtn.type = 'button';
+    profBtn.className = `ws-app-tab${isActiveTab ? ' active' : ''}`;
+    profBtn.setAttribute('role', 'tab');
+    profBtn.setAttribute('aria-selected', String(isActiveTab));
+    profBtn.title = `${prof.name}${prof.mirrorEnabled === false ? ' (Mirror Off)' : ''} — Double-click to rename`;
+    profBtn.innerHTML = `
       <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <rect x="3" y="3" width="14" height="14" rx="2"></rect>
-        <line x1="3" y1="8" x2="17" y2="8"></line>
-        <line x1="8" y1="8" x2="8" y2="17"></line>
+        <rect x="2.5" y="3" width="15" height="14" rx="2"></rect>
+        <line x1="2.5" y1="7.5" x2="17.5" y2="7.5"></line>
+        <line x1="7" y1="11.5" x2="13.5" y2="11.5"></line>
+        <line x1="7" y1="14.2" x2="11.5" y2="14.2"></line>
       </svg>
-      <span>${escapeHtml(sheetName)}</span>
-      ${isDirty ? '<span class="ws-tab-dirty-dot" title="Unsaved edits pending"></span>' : `<span class="ws-tab-pill-count">${rowCount}</span>`}
-      <span class="ws-tab-close-btn" data-close-scratch-tab="${escapeHtml(sheetName)}" title="Close ${escapeHtml(sheetName)} tab (sheet stays saved in workbook)" aria-label="Close ${escapeHtml(sheetName)} tab">×</span>
+      <span>${escapeHtml(prof.name)}</span>
+      ${customTagHtml}
+      ${countBadgeHtml}
+      ${closeBtnHtml}
     `;
 
-    tabBtn.addEventListener('click', (e) => {
-      const closeTarget = e.target.closest('[data-close-scratch-tab]');
-      if (closeTarget) {
+    profBtn.addEventListener('click', (e) => {
+      const closeProfileEl = e.target.closest('[data-close-profile-tab]');
+      if (closeProfileEl) {
         e.stopPropagation();
-        closeScratchSheetAppTab(sheetName);
+        if (typeof removeTrackerProfileInteractive === 'function') {
+          removeTrackerProfileInteractive(prof.id);
+        }
         return;
       }
-      switchToWorkspaceTab(sheetName);
+      if (isCurrentProf) {
+        switchToWorkspaceTab(DAILY_TRACKER_WS_TAB);
+      } else if (typeof switchTrackerProfile === 'function') {
+        switchTrackerProfile(prof.id);
+      }
     });
-    workspaceTabsList.appendChild(tabBtn);
+
+    profBtn.addEventListener('dblclick', (e) => {
+      if (e.target.closest('[data-close-profile-tab]')) return;
+      if (typeof renameActiveTrackerProfileInteractive === 'function') {
+        renameActiveTrackerProfileInteractive(prof.id);
+      }
+    });
+
+    workspaceTabsList.appendChild(profBtn);
   });
+
+  // 2. Open Custom / Scratch Sheet App Tabs (for the active workbook)
+  if (workbook && openScratchTabs.length > 0) {
+    const sep = document.createElement('span');
+    sep.className = 'ws-tabs-divider';
+    sep.setAttribute('aria-hidden', 'true');
+    workspaceTabsList.appendChild(sep);
+  }
+
+  if (workbook) {
+    openScratchTabs.forEach(sheetName => {
+      const isActive = activeWorkspaceTab === sheetName;
+      const isDirty = hasAnyPendingScratchMutations(sheetName);
+      const meta = scratchSheets.find(s => s.name === sheetName);
+      const rowCount = meta ? meta.nonEmptyRows : 0;
+
+      const tabBtn = document.createElement('button');
+      tabBtn.type = 'button';
+      tabBtn.className = `ws-app-tab${isActive ? ' active' : ''}`;
+      tabBtn.setAttribute('role', 'tab');
+      tabBtn.setAttribute('aria-selected', String(isActive));
+      tabBtn.title = `Scratch Sheet: ${sheetName} (${rowCount} non-empty rows)`;
+      tabBtn.innerHTML = `
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="14" height="14" rx="2"></rect>
+          <line x1="3" y1="8" x2="17" y2="8"></line>
+          <line x1="8" y1="8" x2="8" y2="17"></line>
+        </svg>
+        <span>${escapeHtml(sheetName)}</span>
+        ${isDirty ? '<span class="ws-tab-dirty-dot" title="Unsaved edits pending"></span>' : `<span class="ws-tab-pill-count">${rowCount}</span>`}
+        <span class="ws-tab-close-btn" data-close-scratch-tab="${escapeHtml(sheetName)}" title="Close ${escapeHtml(sheetName)} tab (sheet stays saved in workbook)" aria-label="Close ${escapeHtml(sheetName)} tab">×</span>
+      `;
+
+      tabBtn.addEventListener('click', (e) => {
+        const closeTarget = e.target.closest('[data-close-scratch-tab]');
+        if (closeTarget) {
+          e.stopPropagation();
+          closeScratchSheetAppTab(sheetName);
+          return;
+        }
+        switchToWorkspaceTab(sheetName);
+      });
+      workspaceTabsList.appendChild(tabBtn);
+    });
+  }
 }
 
 function closeScratchFillDropdown() {
@@ -683,6 +766,10 @@ async function switchToWorkspaceTab(targetTab) {
 
   activeWorkspaceTab = targetTab;
   syncWorkspaceTabsUI();
+}
+
+function setActiveWorkspaceTab(targetTab) {
+  return switchToWorkspaceTab(targetTab);
 }
 
 function openScratchSheetInAppTab(sheetName) {

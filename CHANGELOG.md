@@ -8,7 +8,27 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.16.1` (Current — `meerkat`)
+### `v1.17.0` (Current — `meerkat`)
+- **🎯 Grab Ticket Number from Email Subject (`[XXXX-XX-XXXX]`, `js/core-ui.js`, `js/request-editors.js`)**:
+  - Added **`🎯 Grab Ticket`** buttons (`#btnDockGrabTicket`, `#btnModalGrabTicket`, and dynamic custom ticket inputs) to extract bracketed hyphenated ticket IDs (e.g., `[ABCD-12-3456]`, `[1234-56-7890]`, including multiple matches) from the Subject, normalize to uppercase, and merge comma-delimited into Ticket Number without duplicates.
+- **📥 Sync from Previous Entry ("Pull from Prior Tab", `js/request-editors.js`)**:
+  - Added **`📥 Pull Prior` / `📥 Pull from Prior Tab`** (`#btnDockPullPrior`, `#btnModalPullPrior`) to look backward across older `MM-DD-YYYY` tabs (`parseDateTab < currentDate`), match prior instances by UUIDv4 key, Ticket #, composite identity, or Subject, non-destructively populate only currently blank fields, and merge Ticket Numbers comma-delimited without duplicates.
+- **🔄 Forward Batch Sync Across Daily Tabs (`js/request-editors.js`)**:
+  - Added **`🔄 Sync Forward`** in the Bottom Editor Dock (`#btnDockSyncForward`) and Ticket Details modal (`#btnTicketSyncForward`) to propagate newly added data onto rolled-over instances across newer daily tabs (`parseDateTab > sourceDate`).
+  - Strictly non-destructive: fills only blank fields on forward tabs while comma-merging Ticket Numbers (`TICKET-A, TICKET-B`) and presenting a confirmation diff preview before saving.
+- **🗂️ Multi-Department Tracker Tabs & Dynamic Column Schema Engine (`#workspaceTabsBar`, `#schemaMapperModal`)**:
+  - Generalized `#workspaceTabsBar` into named **Tracker Workspace Profiles** (`＋ Tracker Tab` / `#btnAddTrackerProfile`, double-click to rename, `×` to close secondary tabs), each persisting its own `agentFolderHandle`, `supervisorFolderHandle`, `templatesFolderHandle`, active workbook, and optional `(VIEW ONLY).xlsx` mirror toggle (`#chkEnableMirrorCopy`) in `IndexedDB`.
+  - Added automatic Row-1 header discovery (`resolveWorkbookSchemaConfig`) and **`Configure Column Mapping...`** (`#schemaMapperModal`) supporting custom department workbooks with arbitrary column counts/headers, automatic `validation lists` column dropdown binding, hidden immutable UUIDv4 `Tracking ID` column (`maxVisibleCol + 1`), dynamic `#tableHead` / `#listBody` rendering, dynamic Dock & Modal editor grids (`#dockDynamicFieldsGrid`, `#modalDynamicFieldsGrid`), custom-schema New Workbook creation (`custom_cols`), and Smart Rollover support.
+- **🛡️ IndexedDB Local Fail-Safe Primary Save Cache (`#btnRetryPrimarySave`, `js/workbook-io.js`)**:
+  - When Desktop Excel locks the primary working `.xlsx` file during save, TrackerUI now stages the serialized workbook buffer in `IndexedDB` (`TrackerUI_DirectoryDB`), keeps in-memory edits intact, displays **`💾 Retry Primary Save`** in `#statusBar`, and offers 1-click fail-safe recovery on reload.
+- **📊 Supervisor Multi-Workbook Master Rollup, Category Pipeline & Background Web Worker (`#masterRollupModal`, `js/workbook-io.js`)**:
+  - Added **`Supervisor Multi-Workbook Rollup...`** (`#menuOpenMasterRollup`) scanning multiple `.xlsx` / `(VIEW ONLY).xlsx` files via a background `Worker` (`parseWorkbookBufferInBackground` with graceful local async fallback), consolidating rolled-over rows per unique request, classifying **Subtype → Parent Category** (`resolveActionParentCategory` + `validation lists` category column), rendering KPI cards + clickable category breakdown pills + unified cross-workbook search/filter table, and exporting multi-sheet `.xlsx` rollups (`#btnExportMasterRollupXlsx`).
+- **⚙️ Portable Workspace Config (`.json`) Export & Import (`#btnExportConfigJson`, `#btnImportConfigJson`)**:
+  - Added 1-click export and import of workspace preferences, Multi-Department Tracker Profiles, custom column schema overrides, and category mappings as portable `.json` files in **Tools & Setup**.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v23'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.17.0` in [`index.html`](index.html).
+
+### `v1.16.1`
 - **Fixed Scratch Sheet `Enter` / Continuous Typing Focus & Auto-Save Interruption (`js/scratch-sheets.js`)**:
   - Fixed a race condition where pressing `Enter` to commit a cell started a 1.2s background auto-save timer (`scheduleScratchAutoSave`) that fired `commitActiveScratchInlineEdit()` *while* typing in the next cell below—destroying the active inline `<input>`, dropping DOM focus to `document.body` during `.xlsx` buffer serialization, and causing subsequent keystrokes to overwrite partial cell text.
   - Background auto-save (`isUserActivelyInteractingWithScratch`) now defers whenever an inline cell editor, formula input, or pointer drag is active, resets its debounce timer on every inline keystroke, tracks `scratchMutationVersion` across async disk writes so in-flight saves never drop newer edits, restores `#scratchGridWrap` focus cleanly, and moves the selection down 1 row (`Shift+Enter` up 1 row) when pressing `Enter` on the grid (`F2` or double-click edits existing text in place).

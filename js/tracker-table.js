@@ -29,6 +29,110 @@ function indexWorksheetRows(worksheet, sheetName) {
     }
   });
 
+  if (colMap.isCustomSchema) {
+    const customCols = Array.isArray(colMap.columns) ? colMap.columns : [];
+    const inferredActionColObj = customCols.find(c =>
+      c.colIndex !== colMap.primaryCol &&
+      c.colIndex !== colMap.statusCol &&
+      c.colIndex !== colMap.notesCol &&
+      /\b(action|subtype|issue|category|reason|request\s*type|type)\b/i.test(c.header)
+    );
+
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const customValues = {};
+      let hasAnyVisibleValue = false;
+      customCols.forEach(c => {
+        let v = cellText(row, c.colIndex);
+        if (c.colIndex === colMap.ticketCol && v) {
+          v = v.toUpperCase();
+        }
+        customValues[`col_${c.colIndex}`] = v;
+        if (v !== '') hasAnyVisibleValue = true;
+      });
+
+      const statusRaw = colMap.statusCol ? (customValues[`col_${colMap.statusCol}`] || cellText(row, colMap.statusCol)) : '';
+      const notesRaw = colMap.notesCol ? (customValues[`col_${colMap.notesCol}`] || cellText(row, colMap.notesCol)) : '';
+      if (statusRaw !== '' || notesRaw !== '') hasAnyVisibleValue = true;
+      if (!hasAnyVisibleValue) return;
+
+      const finalStatus = colMap.statusCol ? (statusRaw || defaultStatusVal) : (statusRaw || 'Open');
+      if (colMap.statusCol && !customValues[`col_${colMap.statusCol}`]) {
+        customValues[`col_${colMap.statusCol}`] = finalStatus;
+      }
+
+      const subject = colMap.primaryCol ? (customValues[`col_${colMap.primaryCol}`] || '') : '';
+      const ticket = colMap.ticketCol ? (customValues[`col_${colMap.ticketCol}`] || '').toUpperCase() : '';
+      const broker = colMap.secondaryCol ? (customValues[`col_${colMap.secondaryCol}`] || '') : '';
+      const action = inferredActionColObj ? (customValues[`col_${inferredActionColObj.colIndex}`] || '') : '';
+
+      let key = cellText(row, colMap.trackingCol).toLowerCase();
+      if (!key) {
+        const cacheKey = `${workingFileHandle ? workingFileHandle.name : 'wb'}::${sheetName}::${rowNumber}`;
+        const candidateRow = {
+          subject,
+          ticket,
+          broker,
+          master: '',
+          bidder: '',
+          action,
+          yard: '',
+          lots: '',
+          customValues,
+          isCustomSchema: true,
+          key: ''
+        };
+
+        let inheritedPriorKey = '';
+        for (let i = allRows.length - 1; i >= 0; i--) {
+          const prior = allRows[i];
+          if (prior.sheetName === sheetName) continue;
+          if (usedKeysOnSheet.has(prior.key)) continue;
+          if (areRowsSameUniqueRequest(prior, candidateRow)) {
+            inheritedPriorKey = prior.key;
+            break;
+          }
+        }
+
+        if (inheritedPriorKey) {
+          key = inheritedPriorKey;
+          legacyBackfillMap.set(cacheKey, key);
+        } else if (legacyBackfillMap.has(cacheKey) && !usedKeysOnSheet.has(legacyBackfillMap.get(cacheKey))) {
+          key = legacyBackfillMap.get(cacheKey);
+        } else {
+          key = generateTrackingGuid();
+          legacyBackfillMap.set(cacheKey, key);
+        }
+
+        usedKeysOnSheet.add(key);
+        row.getCell(colMap.trackingCol).value = key;
+        row.commit();
+      } else {
+        usedKeysOnSheet.add(key);
+      }
+
+      allRows.push({
+        sheetName,
+        rowNumber,
+        subject,
+        ticket,
+        broker,
+        master: '',
+        bidder: '',
+        action,
+        yard: '',
+        lots: '',
+        notes: notesRaw,
+        status: finalStatus,
+        key,
+        customValues,
+        isCustomSchema: true
+      });
+    });
+    return;
+  }
+
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
 
@@ -282,30 +386,131 @@ sheetSelect.addEventListener('change', () => {
   onActiveSheetChanged();
 });
 
-// --- 5. RENDER LIST VIEW, AUTOMATIC GLOBAL SEARCH, & DELETE SELECTION MODE ---
+// --- 5. DYNAMIC TABLE HEADER, LIST VIEW, GLOBAL SEARCH & BATCH SELECTION ---
 function getRowCompositeId(sheetName, rowNumber) {
   return `${sheetName}::${rowNumber}`;
+}
+
+function getActiveTableColSpan() {
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
+    return 4 + activeSchemaConfig.columns.length;
+  }
+  return 12;
+}
+
+function renderTableHeader() {
+  if (!tableHead) return;
+  const selectColClass = isDeleteMode ? 'delete-col' : 'select-col';
+
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
+    // Reset incompatible sortState if left over from standard schema
+    if (sortState.column && !['date', 'key'].includes(sortState.column) && !sortState.column.startsWith('col_')) {
+      sortState = { column: null, direction: 'asc' };
+    }
+    const trkLetter = colNumberToExcelLetters(activeSchemaConfig.trackingCol || (activeSchemaConfig.columns.length + 1));
+    const customThsHtml = activeSchemaConfig.columns.map(c => {
+      const sortKey = `col_${c.colIndex}`;
+      return `
+        <th class="sortable-th" data-sort="${sortKey}" title="Click to sort by ${escapeHtml(c.header)}">
+          <span>${escapeHtml(c.header)}</span><span class="sort-indicator" data-ind="${sortKey}">↕</span>
+        </th>
+      `;
+    }).join('');
+
+    tableHead.innerHTML = `
+      <tr>
+        <th id="thDeleteSelect" class="${selectColClass}" title="Select rows for batch status update or deletion">
+          <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
+        </th>
+        <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
+          <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
+        </th>
+        <th class="sortable-th" data-sort="key" title="Click to sort by Tracking ID">
+          <span>Tracking ID (Col ${escapeHtml(trkLetter)})</span><span class="sort-indicator" data-ind="key">↕</span>
+        </th>
+        ${customThsHtml}
+        <th>Actions</th>
+      </tr>
+    `;
+    syncSelectAllCheckboxes();
+    return;
+  }
+
+  if (sortState.column && sortState.column.startsWith('col_')) {
+    sortState = { column: null, direction: 'asc' };
+  }
+
+  tableHead.innerHTML = `
+    <tr>
+      <th id="thDeleteSelect" class="${selectColClass}" title="Select rows for batch status update or deletion">
+        <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
+      </th>
+      <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
+        <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="key" title="Click to sort by Tracking ID">
+        <span>Tracking ID (Col K)</span><span class="sort-indicator" data-ind="key">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="subject" title="Click to sort by Subject">
+        <span>Subject</span><span class="sort-indicator" data-ind="subject">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="ticket" title="Click to sort by Ticket #">
+        <span>Ticket #</span><span class="sort-indicator" data-ind="ticket">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="broker" title="Click to sort by Broker Name">
+        <span>Broker</span><span class="sort-indicator" data-ind="broker">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="master" title="Click Master or Bidder to sort">
+        <span class="th-sub-sort" data-sort="master" title="Sort by Master #">Master<span class="sort-indicator" data-ind="master">↕</span></span>
+        <span class="th-sep">/</span>
+        <span class="th-sub-sort" data-sort="bidder" title="Sort by Bidder #">Bidder<span class="sort-indicator" data-ind="bidder">↕</span></span>
+      </th>
+      <th class="sortable-th" data-sort="action" title="Click to sort by Requested Action">
+        <span>Action</span><span class="sort-indicator" data-ind="action">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="yard" title="Click Yard or Lots to sort">
+        <span class="th-sub-sort" data-sort="yard" title="Sort by Yard #">Yard<span class="sort-indicator" data-ind="yard">↕</span></span>
+        <span class="th-sep">/</span>
+        <span class="th-sub-sort" data-sort="lots" title="Sort by Lot Numbers">Lots<span class="sort-indicator" data-ind="lots">↕</span></span>
+      </th>
+      <th class="sortable-th" data-sort="notes" title="Click to sort by Action Notes">
+        <span>Action Notes</span><span class="sort-indicator" data-ind="notes">↕</span>
+      </th>
+      <th class="sortable-th" data-sort="status" title="Click to sort by Status">
+        <span>Status</span><span class="sort-indicator" data-ind="status">↕</span>
+      </th>
+      <th>Actions</th>
+    </tr>
+  `;
+  syncSelectAllCheckboxes();
 }
 
 function createShadowNewRowElement(colSpan, currentSheet) {
   if (!workbook || isDeleteMode || !currentSheet || !DATE_TAB_REGEX.test(currentSheet)) {
     return null;
   }
+  const isCustom = activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0;
+  const ghostPillsHtml = isCustom
+    ? activeSchemaConfig.columns.slice(0, 5).map(c => `<span class="shadow-ghost-pill">${escapeHtml(c.header)}</span>`).join('')
+    : `
+        <span class="shadow-ghost-pill">Subject</span>
+        <span class="shadow-ghost-pill">Ticket #</span>
+        <span class="shadow-ghost-pill">Broker &amp; Master #</span>
+        <span class="shadow-ghost-pill">Requested Action</span>
+        <span class="shadow-ghost-pill">Yard / Lots</span>
+      `;
+
   const tr = document.createElement('tr');
   tr.className = 'shadow-new-row';
-  tr.title = `Click to add a new support request to ${currentSheet}`;
+  tr.title = `Click to add a new request to ${currentSheet}`;
   tr.innerHTML = `
     <td colspan="${colSpan}">
       <div class="shadow-row-inner">
         <div class="shadow-row-left">
           <span class="shadow-plus-btn" aria-hidden="true">＋</span>
-          <span class="shadow-row-label">Add new support request to <strong>${escapeHtml(currentSheet)}</strong>...</span>
+          <span class="shadow-row-label">Add new request to <strong>${escapeHtml(currentSheet)}</strong>...</span>
           <div class="shadow-ghost-pills">
-            <span class="shadow-ghost-pill">Subject</span>
-            <span class="shadow-ghost-pill">Ticket #</span>
-            <span class="shadow-ghost-pill">Broker &amp; Master #</span>
-            <span class="shadow-ghost-pill">Requested Action</span>
-            <span class="shadow-ghost-pill">Yard / Lots</span>
+            ${ghostPillsHtml}
           </div>
         </div>
         <span class="shadow-action-pill">＋ New Request</span>
@@ -329,6 +534,17 @@ const SORT_COLUMN_LABELS = {
   notes: 'Action Notes',
   status: 'Status'
 };
+
+function getSortColumnLabel(colKey) {
+  if (!colKey) return '';
+  if (SORT_COLUMN_LABELS[colKey]) return SORT_COLUMN_LABELS[colKey];
+  if (colKey.startsWith('col_') && activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) {
+    const colIdx = parseInt(colKey.replace('col_', ''), 10);
+    const hit = activeSchemaConfig.columns.find(c => c.colIndex === colIdx);
+    if (hit) return hit.header;
+  }
+  return colKey;
+}
 
 function extractLotTokens(lotsStr) {
   if (!lotsStr) return [];
@@ -366,9 +582,34 @@ function renderClickableLotsHtml(lotsStr) {
     .join('');
 }
 
+function renderClickableTicketTokensHtml(ticketStr, filterField = 'ticket', filterLabel = 'Ticket #') {
+  const trimmed = String(ticketStr || '').trim();
+  if (!trimmed || trimmed === '—') return '—';
+  const tokens = splitNormalizedTicketTokens(trimmed);
+  if (tokens.length <= 1) {
+    const activeClass = isFieldFilterActive(filterField, trimmed) ? ' active-filter-match' : '';
+    return `<span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(trimmed)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+  }
+  return tokens
+    .map(tok => {
+      const activeClass = isFieldFilterActive(filterField, tok) ? ' active-filter-match' : '';
+      return `<span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(tok)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(tok)}">${escapeHtml(tok)}</span>`;
+    })
+    .join(', ');
+}
+
 function doesItemMatchFieldFilter(item, filter) {
   if (!filter || !filter.value) return true;
   const target = filter.value.trim().toLowerCase();
+  if (filter.field && filter.field.startsWith('col_')) {
+    const rawVal = item.customValues ? (item.customValues[filter.field] || '') : '';
+    if (activeSchemaConfig && `col_${activeSchemaConfig.ticketCol}` === filter.field) {
+      const tokens = splitNormalizedTicketTokens(rawVal).map(t => t.toLowerCase());
+      return tokens.includes(target) || rawVal.trim().toLowerCase() === target;
+    }
+    return String(rawVal).trim().toLowerCase() === target;
+  }
+
   switch (filter.field) {
     case 'key':
       return item.key.trim().toLowerCase() === target;
@@ -382,8 +623,10 @@ function doesItemMatchFieldFilter(item, filter) {
       const tokens = extractLotTokens(item.lots).map(t => t.toLowerCase());
       return tokens.includes(target) || item.lots.trim().toLowerCase() === target;
     }
-    case 'ticket':
-      return item.ticket.trim().toLowerCase() === target;
+    case 'ticket': {
+      const tTokens = splitNormalizedTicketTokens(item.ticket).map(t => t.toLowerCase());
+      return tTokens.includes(target) || item.ticket.trim().toLowerCase() === target;
+    }
     case 'broker':
       return item.broker.trim().toLowerCase() === target;
     case 'action':
@@ -420,6 +663,13 @@ function toggleFieldFilter(field, label, rawValue) {
   renderList();
 }
 
+function getItemSortCellValue(item, col) {
+  if (col && col.startsWith('col_')) {
+    return String((item.customValues && item.customValues[col]) || '').trim();
+  }
+  return String(item[col] || '').trim();
+}
+
 function sortRowsList(rows) {
   if (!sortState.column) return rows;
   const col = sortState.column;
@@ -432,8 +682,8 @@ function sortRowsList(rows) {
       return primary * dirMultiplier;
     }
 
-    const valA = String(a[col] || '').trim();
-    const valB = String(b[col] || '').trim();
+    const valA = getItemSortCellValue(a, col);
+    const valB = getItemSortCellValue(b, col);
 
     // Always push empty cells to the bottom regardless of sort direction
     if (!valA && !valB) {
@@ -496,12 +746,12 @@ function updateSortAndFilterUI(matchCount) {
       filterKeyText.textContent = `${activeFilter.value} (${matchCount} match${matchCount === 1 ? '' : 'es'})`;
       filterKeyText.style.display = 'inline-block';
       if (hasSort) {
-        const sortLabel = SORT_COLUMN_LABELS[sortState.column] || sortState.column;
+        const sortLabel = getSortColumnLabel(sortState.column);
         const arrow = sortState.direction === 'asc' ? '▲ Asc' : '▼ Desc';
         filterBannerDesc.textContent += ` • Sorted by ${sortLabel} (${arrow}) —`;
       }
     } else if (hasSort) {
-      const sortLabel = SORT_COLUMN_LABELS[sortState.column] || sortState.column;
+      const sortLabel = getSortColumnLabel(sortState.column);
       const arrow = sortState.direction === 'asc' ? '▲ Ascending' : '▼ Descending';
       filterBannerTitle.textContent = 'Column Sort Active:';
       filterBannerDesc.textContent = `Sorting visible requests by`;
@@ -523,11 +773,31 @@ function clearAllSortAndFilters() {
   renderList();
 }
 
+function buildItemSearchHaystack(item) {
+  const customParts = item.customValues ? Object.values(item.customValues) : [];
+  return [
+    item.subject,
+    item.ticket,
+    item.broker,
+    item.master,
+    item.bidder,
+    item.action,
+    item.yard,
+    item.lots,
+    item.notes,
+    item.status,
+    ...customParts,
+    item.key,
+    item.sheetName
+  ].join(' ').toLowerCase();
+}
+
 function renderList() {
   const query = searchInput.value.trim().toLowerCase();
   const scope = scopeSelect.value;
   const currentSheet = sheetSelect.value;
   const activeFilter = activeFieldFilter || (activeKeyFilter ? { field: 'key', label: 'Tracking ID', value: activeKeyFilter } : null);
+  const isCustomSchema = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0);
 
   if (searchScopeHint) {
     searchScopeHint.style.display = (query.length > 0 || activeFilter) ? 'inline-block' : 'none';
@@ -542,20 +812,12 @@ function renderList() {
     if (activeFilter) {
       if (!doesItemMatchFieldFilter(item, activeFilter)) return false;
       if (query.length > 0) {
-        const haystack = [
-          item.subject, item.ticket, item.broker, item.master,
-          item.bidder, item.action, item.yard, item.lots, item.notes, item.key, item.sheetName
-        ].join(' ').toLowerCase();
-        return haystack.includes(query);
+        return buildItemSearchHaystack(item).includes(query);
       }
       return true;
     }
     if (query.length > 0) {
-      const haystack = [
-        item.subject, item.ticket, item.broker, item.master,
-        item.bidder, item.action, item.yard, item.lots, item.notes, item.key, item.sheetName
-      ].join(' ').toLowerCase();
-      return haystack.includes(query);
+      return buildItemSearchHaystack(item).includes(query);
     }
     if (scope === 'current' && item.sheetName !== currentSheet) {
       return false;
@@ -578,7 +840,7 @@ function renderList() {
   }
 
   listBody.innerHTML = '';
-  const colSpan = 12;
+  const colSpan = getActiveTableColSpan();
   if (sorted.length === 0) {
     let prevSheetForEmpty = null;
     if (
@@ -650,8 +912,81 @@ function renderList() {
     </td>`;
 
     const keyActiveClass = isFieldFilterActive('key', item.key) ? ' active-filter-match' : '';
+
+    if (isCustomSchema) {
+      const customCellsHtml = activeSchemaConfig.columns.map(c => {
+        const fieldKey = `col_${c.colIndex}`;
+        const rawVal = (item.customValues && item.customValues[fieldKey] !== undefined)
+          ? String(item.customValues[fieldKey])
+          : '';
+        const trimmedVal = rawVal.trim();
+
+        if (c.colIndex === activeSchemaConfig.statusCol) {
+          const stText = trimmedVal || item.status || 'Pending';
+          const stDone = isCompletedStatus(stText);
+          const stActive = isFieldFilterActive(fieldKey, stText) ? ' active-filter-match' : '';
+          return `
+            <td>
+              <span class="badge clickable-badge ${stDone ? 'badge-complete' : 'badge-pending'}${stActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(stText)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(stText)}">
+                ${escapeHtml(stText)}
+              </span>
+            </td>
+          `;
+        }
+
+        if (c.colIndex === activeSchemaConfig.notesCol) {
+          const cNote = trimmedVal || '—';
+          const cLong = cNote.length > 45 || cNote.includes('\n');
+          return `
+            <td class="notes-cell">
+              <div class="notes-preview" id="note-${idx}-${c.colIndex}">${escapeHtml(cNote)}</div>
+              ${cLong ? `<span class="notes-toggle" data-target="note-${idx}-${c.colIndex}">[+ Expand]</span>` : ''}
+            </td>
+          `;
+        }
+
+        if (c.colIndex === activeSchemaConfig.ticketCol) {
+          return `<td>${renderClickableTicketTokensHtml(trimmedVal, fieldKey, c.header)}</td>`;
+        }
+
+        if (!trimmedVal) {
+          return '<td>—</td>';
+        }
+        const cellActive = isFieldFilterActive(fieldKey, trimmedVal) ? ' active-filter-match' : '';
+        return `
+          <td>
+            <span class="clickable-cell${cellActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(trimmedVal)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(trimmedVal)}">
+              ${escapeHtml(trimmedVal)}
+            </span>
+          </td>
+        `;
+      }).join('');
+
+      tr.innerHTML = `
+        ${rowCheckboxCell}
+        <td style="white-space:nowrap;">
+          <button type="button" class="clickable-date-tab" data-date-tab="${escapeHtml(item.sheetName)}" title="Click to switch to daily tab ${escapeHtml(item.sheetName)}">
+            ${escapeHtml(item.sheetName)}
+          </button>
+        </td>
+        <td>
+          <span class="key-chip${keyActiveClass}" title="Click to filter by Tracking ID: ${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
+            🔍 ${escapeHtml(shortGuid)}
+          </span>
+        </td>
+        ${customCellsHtml}
+        <td>
+          <div class="row-actions-group">
+            <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Details &amp; Aggregated Timestamped Notes">Details</button>
+            <button type="button" class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="Load into Bottom Editor (Double-click for Modal)">Edit</button>
+          </div>
+        </td>
+      `;
+      listBody.appendChild(tr);
+      return;
+    }
+
     const subjectActiveClass = isFieldFilterActive('subject', item.subject) ? ' active-filter-match' : '';
-    const ticketActiveClass = isFieldFilterActive('ticket', item.ticket) ? ' active-filter-match' : '';
     const brokerActiveClass = isFieldFilterActive('broker', item.broker) ? ' active-filter-match' : '';
     const masterActiveClass = isFieldFilterActive('master', item.master) ? ' active-filter-match' : '';
     const bidderActiveClass = isFieldFilterActive('bidder', item.bidder) ? ' active-filter-match' : '';
@@ -663,9 +998,7 @@ function renderList() {
       ? `<span class="clickable-cell${subjectActiveClass}" data-filter-field="subject" data-filter-label="Subject" data-filter-val="${escapeHtml(item.subject)}" title="Click to show all requests with Subject: ${escapeHtml(item.subject)}">${escapeHtml(item.subject)}</span>`
       : '—';
 
-    const ticketHtml = item.ticket
-      ? `<span class="clickable-code${ticketActiveClass}" data-filter-field="ticket" data-filter-label="Ticket #" data-filter-val="${escapeHtml(item.ticket)}" title="Click to show all requests with Ticket # ${escapeHtml(item.ticket)}">${escapeHtml(item.ticket)}</span>`
-      : '—';
+    const ticketHtml = renderClickableTicketTokensHtml(item.ticket, 'ticket', 'Ticket #');
 
     const brokerHtml = item.broker
       ? `<span class="clickable-cell${brokerActiveClass}" data-filter-field="broker" data-filter-label="Broker" data-filter-val="${escapeHtml(item.broker)}" title="Click to show all requests for Broker: ${escapeHtml(item.broker)}">${escapeHtml(item.broker)}</span>`
@@ -753,8 +1086,9 @@ function setDeleteMode(enabled) {
       : 'Batch Delete Requests Mode';
   }
   deleteBanner.style.display = isDeleteMode ? 'flex' : 'none';
-  if (thDeleteSelect) {
-    thDeleteSelect.className = isDeleteMode ? 'delete-col' : 'select-col';
+  const liveThSelect = document.getElementById('thDeleteSelect');
+  if (liveThSelect) {
+    liveThSelect.className = isDeleteMode ? 'delete-col' : 'select-col';
   }
   updateDeleteSelectionUI();
   renderList();
@@ -772,6 +1106,16 @@ function updateDeleteSelectionUI() {
   if (batchSelectedCountEl) {
     batchSelectedCountEl.textContent = String(count);
   }
+  const hasStatusCol = activeSchemaConfig.isStandardSchema || Boolean(activeSchemaConfig.statusCol);
+  if (batchStatusSelect) {
+    batchStatusSelect.disabled = !hasStatusCol;
+  }
+  if (btnApplyBatchStatus) {
+    btnApplyBatchStatus.disabled = !hasStatusCol;
+    btnApplyBatchStatus.title = hasStatusCol
+      ? 'Update status on all selected rows'
+      : 'Assign a Status column via Configure Column Mapping to enable batch status updates';
+  }
   if (batchActionDock) {
     const showBatchDock = !isDeleteMode && count > 0 && Boolean(workbook);
     batchActionDock.style.display = showBatchDock ? 'block' : 'none';
@@ -781,11 +1125,12 @@ function updateDeleteSelectionUI() {
 }
 
 function syncSelectAllCheckboxes() {
+  const liveChkHeader = document.getElementById('chkSelectAllHeader');
   if (!workbook || currentlyVisibleRows.length === 0) {
-    if (chkSelectAllHeader) {
-      chkSelectAllHeader.checked = false;
-      chkSelectAllHeader.indeterminate = false;
-      chkSelectAllHeader.disabled = true;
+    if (liveChkHeader) {
+      liveChkHeader.checked = false;
+      liveChkHeader.indeterminate = false;
+      liveChkHeader.disabled = true;
     }
     if (chkSelectAllBanner) {
       chkSelectAllBanner.checked = false;
@@ -794,8 +1139,8 @@ function syncSelectAllCheckboxes() {
     return;
   }
 
-  if (chkSelectAllHeader) {
-    chkSelectAllHeader.disabled = false;
+  if (liveChkHeader) {
+    liveChkHeader.disabled = false;
   }
 
   let visibleSelectedCount = 0;
@@ -808,9 +1153,9 @@ function syncSelectAllCheckboxes() {
   const allVisibleSelected = visibleSelectedCount === currentlyVisibleRows.length;
   const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
 
-  if (chkSelectAllHeader) {
-    chkSelectAllHeader.checked = allVisibleSelected;
-    chkSelectAllHeader.indeterminate = someVisibleSelected;
+  if (liveChkHeader) {
+    liveChkHeader.checked = allVisibleSelected;
+    liveChkHeader.indeterminate = someVisibleSelected;
   }
   if (chkSelectAllBanner) {
     chkSelectAllBanner.checked = isDeleteMode && allVisibleSelected;
@@ -839,9 +1184,14 @@ btnCancelDeleteMode.addEventListener('click', () => {
   setDeleteMode(false);
 });
 
-chkSelectAllHeader.addEventListener('change', (e) => {
-  handleToggleSelectAllVisible(e.target.checked);
-});
+if (tableHead) {
+  tableHead.addEventListener('change', (e) => {
+    const hdrChk = e.target.closest('#chkSelectAllHeader');
+    if (hdrChk) {
+      handleToggleSelectAllVisible(hdrChk.checked);
+    }
+  });
+}
 
 chkSelectAllBanner.addEventListener('change', (e) => {
   handleToggleSelectAllVisible(e.target.checked);
@@ -879,6 +1229,12 @@ listBody.addEventListener('change', (e) => {
 
 async function handleApplyBatchStatusUpdate() {
   if (selectedForDelete.size === 0 || !workbook || !batchStatusSelect) return;
+  if (!activeSchemaConfig.isStandardSchema && !activeSchemaConfig.statusCol) {
+    return showModalAlert({
+      title: 'No Status Column Mapped',
+      message: 'Open Tools & Setup → Configure Column Mapping to assign a Status column for this custom workbook.'
+    });
+  }
   const targetStatus = batchStatusSelect.value.trim();
   if (!targetStatus) return;
 
@@ -926,7 +1282,7 @@ async function handleApplyBatchStatusUpdate() {
     }
   }
 
-  // 1 & 2. Map via immutable UUIDv4 keys (hidden Col K/L) & strictly preserve existing UUIDv4s
+  // 1 & 2. Map via immutable UUIDv4 keys (hidden Tracking ID col) & strictly preserve existing UUIDv4s
   const batchTargets = rowsToMutate.map(item => ({
     itemRef: item,
     sheetName: item.sheetName,
@@ -938,13 +1294,19 @@ async function handleApplyBatchStatusUpdate() {
   ensureStatusOptionExists(targetStatus);
   batchTargets.forEach(target => {
     target.itemRef.status = targetStatus;
+    if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.statusCol && target.itemRef.customValues) {
+      target.itemRef.customValues[`col_${activeSchemaConfig.statusCol}`] = targetStatus;
+    }
     if (
       dockEditingTarget &&
       dockEditingTarget.sheetName === target.sheetName &&
-      dockEditingTarget.rowNumber === target.rowNumber &&
-      dockStatus
+      dockEditingTarget.rowNumber === target.rowNumber
     ) {
-      dockStatus.value = targetStatus;
+      if (dockStatus) dockStatus.value = targetStatus;
+      if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.statusCol && dockDynamicFieldsGrid) {
+        const dynStEl = dockDynamicFieldsGrid.querySelector(`[data-custom-col="${activeSchemaConfig.statusCol}"]`);
+        if (dynStEl) dynStEl.value = targetStatus;
+      }
     }
   });
 
@@ -954,7 +1316,7 @@ async function handleApplyBatchStatusUpdate() {
   renderSheetTabsBar();
   renderList();
 
-  // 5. Mutate ExcelJS cells (preserving existing Column K/L UUIDv4s) & perform ONE single batch write-back
+  // 5. Mutate ExcelJS cells (preserving existing Tracking ID UUIDv4s) & perform ONE single batch write-back
   if (btnApplyBatchStatus) btnApplyBatchStatus.disabled = true;
   try {
     batchTargets.forEach(target => {
@@ -967,7 +1329,9 @@ async function handleApplyBatchStatusUpdate() {
       }
 
       const excelRow = ws.getRow(target.rowNumber);
-      excelRow.getCell(colMap.statusCol).value = targetStatus;
+      if (colMap.statusCol) {
+        excelRow.getCell(colMap.statusCol).value = targetStatus;
+      }
 
       // Guarantee existing UUIDv4 in hidden Tracking ID column is never lost or regenerated
       const existingCellKey = cellText(excelRow, colMap.trackingCol).trim();
@@ -979,8 +1343,9 @@ async function handleApplyBatchStatusUpdate() {
 
     const saveResult = await saveWorkbookToDisk();
     if (!saveResult) {
-      // Primary working file was locked in Desktop Excel — reload from disk so state stays truthful
-      await loadWorkbookFromDisk(sheetSelect.value);
+      if (!pendingPrimarySaveState) {
+        await loadWorkbookFromDisk(sheetSelect.value);
+      }
       return;
     }
 
@@ -989,7 +1354,9 @@ async function handleApplyBatchStatusUpdate() {
       'success'
     );
   } finally {
-    if (btnApplyBatchStatus) btnApplyBatchStatus.disabled = false;
+    if (btnApplyBatchStatus) {
+      btnApplyBatchStatus.disabled = !(activeSchemaConfig.isStandardSchema || Boolean(activeSchemaConfig.statusCol));
+    }
   }
 }
 

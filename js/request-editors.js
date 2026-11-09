@@ -1,10 +1,11 @@
 // ============================================================================
 // request-editors.js — Docked Bottom Request Editor, Modal Request Editor,
-//                      Cross-Tab Status Sync, Ticket Details Timeline Modal &
-//                      Supervisor View-Only Mirror Inspector
+//                      Grab Ticket ([XXXX-XX-XXXX]), Pull from Prior Tab,
+//                      Forward Batch Sync, Dynamic Custom Schema Forms,
+//                      Ticket Details Timeline & View-Only Mirror Inspector
 // ============================================================================
 
-// --- 6. BOTTOM EDITOR DOCK + MODAL EDITOR + CROSS-TAB STATUS PROPAGATION ---
+// --- 6. BOTTOM EDITOR DOCK + MODAL EDITOR + CROSS-TAB SYNC & DYNAMIC FORMS ---
 function ensureSelectOptionExists(selectEl, statusValue) {
   if (!selectEl || !statusValue) return;
   const exists = Array.from(selectEl.options).some(opt => opt.value === statusValue);
@@ -20,6 +21,16 @@ function ensureStatusOptionExists(statusValue) {
   ensureSelectOptionExists(fStatus, statusValue);
   ensureSelectOptionExists(dockStatus, statusValue);
   ensureSelectOptionExists(batchStatusSelect, statusValue);
+  if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.statusCol) {
+    if (dockDynamicFieldsGrid) {
+      const dockSel = dockDynamicFieldsGrid.querySelector(`select[data-custom-col="${activeSchemaConfig.statusCol}"]`);
+      ensureSelectOptionExists(dockSel, statusValue);
+    }
+    if (modalDynamicFieldsGrid) {
+      const modSel = modalDynamicFieldsGrid.querySelector(`select[data-custom-col="${activeSchemaConfig.statusCol}"]`);
+      ensureSelectOptionExists(modSel, statusValue);
+    }
+  }
 }
 
 function formatCurrentTimestampPrefix() {
@@ -61,6 +72,683 @@ if (btnModalInsertTimestamp) {
   });
 }
 
+// --- DYNAMIC CUSTOM SCHEMA FORM RENDERING (DOCK & MODAL) ---
+function buildDynamicFieldsHtmlForScope(scopePrefix) {
+  if (!activeSchemaConfig || activeSchemaConfig.isStandardSchema || !Array.isArray(activeSchemaConfig.columns)) {
+    return '';
+  }
+  const isDock = scopePrefix === 'dock';
+  const defaultStatusesList = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
+
+  return activeSchemaConfig.columns.map(col => {
+    const idx = col.colIndex;
+    const colLetter = colNumberToExcelLetters(idx);
+    const inputId = `${scopePrefix}CustomCol_${idx}`;
+    const isPrimary = idx === activeSchemaConfig.primaryCol;
+    const isStatus = idx === activeSchemaConfig.statusCol;
+    const isNotes = idx === activeSchemaConfig.notesCol;
+    const isTicket = idx === activeSchemaConfig.ticketCol;
+    const labelText = `${escapeHtml(col.header)} (Col ${escapeHtml(colLetter)})${isPrimary ? ' *' : ''}`;
+
+    if (isNotes) {
+      const groupClass = isDock ? 'form-group dock-col-notes' : 'form-group full';
+      return `
+        <div class="${groupClass}">
+          <div class="dock-notes-label-row">
+            <label for="${inputId}">${labelText}</label>
+            <button type="button" class="btn-timestamp-chip" data-dyn-timestamp="${inputId}" title="Insert current date &amp; time stamp">
+              + Insert Timestamp
+            </button>
+          </div>
+          <textarea id="${inputId}" data-custom-col="${idx}" rows="${isDock ? 2 : 4}" placeholder="Enter ${escapeHtml(col.header)}..."></textarea>
+        </div>
+      `;
+    }
+
+    if (isStatus) {
+      const statusOpts = (Array.isArray(col.dropdownOptions) && col.dropdownOptions.length > 0)
+        ? col.dropdownOptions
+        : defaultStatusesList;
+      const optionsHtml = statusOpts
+        .map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`)
+        .join('');
+      return `
+        <div class="form-group">
+          <label for="${inputId}">${labelText}</label>
+          <select id="${inputId}" data-custom-col="${idx}">
+            ${optionsHtml}
+          </select>
+        </div>
+      `;
+    }
+
+    const hasDatalist = Array.isArray(col.dropdownOptions) && col.dropdownOptions.length > 0;
+    const datalistId = hasDatalist ? `${scopePrefix}CustomList_${idx}` : '';
+    const datalistHtml = hasDatalist
+      ? `<datalist id="${datalistId}">${col.dropdownOptions.map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`
+      : '';
+    const groupClass = isPrimary
+      ? (isDock ? 'form-group dock-col-subject' : 'form-group full')
+      : 'form-group';
+
+    const headerLabelBlock = isTicket
+      ? `<div class="dock-notes-label-row">
+           <label for="${inputId}">${labelText}</label>
+           <button type="button" class="btn-timestamp-chip" data-dyn-grab-ticket="${scopePrefix}" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from primary subject column">
+             🎯 Grab Ticket
+           </button>
+         </div>`
+      : `<label for="${inputId}">${labelText}</label>`;
+
+    return `
+      <div class="${groupClass}">
+        ${headerLabelBlock}
+        <input type="text" id="${inputId}" data-custom-col="${idx}" ${hasDatalist ? `list="${datalistId}"` : ''} placeholder="${escapeHtml(col.header)}..." ${isPrimary ? 'required' : ''}>
+        ${datalistHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+function syncDynamicEditorFormsUI() {
+  const isCustom = Boolean(
+    activeSchemaConfig &&
+    !activeSchemaConfig.isStandardSchema &&
+    Array.isArray(activeSchemaConfig.columns) &&
+    activeSchemaConfig.columns.length > 0
+  );
+
+  if (dockStandardFieldsGrid && dockDynamicFieldsGrid) {
+    dockStandardFieldsGrid.style.display = isCustom ? 'none' : 'grid';
+    dockDynamicFieldsGrid.style.display = isCustom ? 'grid' : 'none';
+    if (dockSubject) dockSubject.required = !isCustom;
+    if (dockBroker) dockBroker.required = !isCustom;
+    dockDynamicFieldsGrid.innerHTML = isCustom ? buildDynamicFieldsHtmlForScope('dock') : '';
+  }
+
+  if (modalStandardFieldsGrid && modalDynamicFieldsGrid) {
+    modalStandardFieldsGrid.style.display = isCustom ? 'none' : 'grid';
+    modalDynamicFieldsGrid.style.display = isCustom ? 'grid' : 'none';
+    if (fSubject) fSubject.required = !isCustom;
+    if (fBroker) fBroker.required = !isCustom;
+    modalDynamicFieldsGrid.innerHTML = isCustom ? buildDynamicFieldsHtmlForScope('modal') : '';
+  }
+
+  // Toggle Grab Ticket buttons visibility for custom schemas when no ticket column is mapped
+  const showCustomTicketBtn = isCustom ? Boolean(activeSchemaConfig.ticketCol) : true;
+  if (btnDockGrabTicket) btnDockGrabTicket.style.display = !isCustom ? 'inline-flex' : 'none';
+  if (btnModalGrabTicket) btnModalGrabTicket.style.display = !isCustom ? 'inline-flex' : 'none';
+  if (dockDynamicFieldsGrid) {
+    dockDynamicFieldsGrid.querySelectorAll('[data-dyn-grab-ticket]').forEach(b => {
+      b.style.display = showCustomTicketBtn ? 'inline-flex' : 'none';
+    });
+  }
+}
+
+function handleDynamicGridDelegatedClick(e) {
+  const tsBtn = e.target.closest('[data-dyn-timestamp]');
+  if (tsBtn) {
+    const targetArea = document.getElementById(tsBtn.dataset.dynTimestamp);
+    if (targetArea) insertTimestampIntoTextarea(targetArea);
+    return;
+  }
+  const grabBtn = e.target.closest('[data-dyn-grab-ticket]');
+  if (grabBtn) {
+    handleGrabTicketFromSubject(grabBtn.dataset.dynGrabTicket || 'dock');
+  }
+}
+
+if (dockDynamicFieldsGrid) {
+  dockDynamicFieldsGrid.addEventListener('click', handleDynamicGridDelegatedClick);
+}
+if (modalDynamicFieldsGrid) {
+  modalDynamicFieldsGrid.addEventListener('click', handleDynamicGridDelegatedClick);
+}
+
+function populateDynamicGridFromItem(gridEl, itemOrNull) {
+  if (!gridEl || !activeSchemaConfig || activeSchemaConfig.isStandardSchema) return;
+  const defaultSt = getDefaultStatus();
+  gridEl.querySelectorAll('[data-custom-col]').forEach(inputEl => {
+    const colIdx = Number(inputEl.dataset.customCol);
+    const key = `col_${colIdx}`;
+    if (!itemOrNull) {
+      if (colIdx === activeSchemaConfig.statusCol) {
+        ensureSelectOptionExists(inputEl, defaultSt);
+        inputEl.value = defaultSt;
+      } else {
+        inputEl.value = '';
+      }
+      return;
+    }
+    const val = (itemOrNull.customValues && itemOrNull.customValues[key] !== undefined)
+      ? itemOrNull.customValues[key]
+      : '';
+    if (colIdx === activeSchemaConfig.statusCol) {
+      const st = val || itemOrNull.status || defaultSt;
+      ensureSelectOptionExists(inputEl, st);
+      inputEl.value = st;
+    } else {
+      inputEl.value = val;
+    }
+  });
+}
+
+function readFormPayloadFromScope(scopeMode) {
+  const isDock = scopeMode === 'dock';
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+    const gridEl = isDock ? dockDynamicFieldsGrid : modalDynamicFieldsGrid;
+    const customValues = {};
+    if (gridEl) {
+      gridEl.querySelectorAll('[data-custom-col]').forEach(el => {
+        const idx = Number(el.dataset.customCol);
+        let val = String(el.value || '').trim();
+        if (idx === activeSchemaConfig.ticketCol && val) {
+          val = val.toUpperCase();
+        }
+        customValues[`col_${idx}`] = val;
+      });
+    }
+    const pCol = activeSchemaConfig.primaryCol;
+    const tCol = activeSchemaConfig.ticketCol;
+    const secCol = activeSchemaConfig.secondaryCol;
+    const nCol = activeSchemaConfig.notesCol;
+    const stCol = activeSchemaConfig.statusCol;
+
+    return {
+      isCustomSchema: true,
+      customValues,
+      subject: pCol ? (customValues[`col_${pCol}`] || '') : '',
+      ticket: tCol ? (customValues[`col_${tCol}`] || '').toUpperCase() : '',
+      broker: secCol ? (customValues[`col_${secCol}`] || '') : '',
+      master: '',
+      bidder: '',
+      action: '',
+      yard: '',
+      lots: '',
+      notes: nCol ? (customValues[`col_${nCol}`] || '') : '',
+      status: stCol ? (customValues[`col_${stCol}`] || getDefaultStatus()) : 'Open'
+    };
+  }
+
+  return {
+    isCustomSchema: false,
+    subject: (isDock ? dockSubject.value : fSubject.value) || '',
+    ticket: (isDock ? dockTicket.value : fTicket.value) || '',
+    broker: (isDock ? dockBroker.value : fBroker.value) || '',
+    master: (isDock ? dockMaster.value : fMaster.value) || '',
+    bidder: (isDock ? dockBidder.value : fBidder.value) || '',
+    action: (isDock ? dockAction.value : fAction.value) || '',
+    yard: (isDock ? dockYard.value : fYard.value) || '',
+    lots: (isDock ? dockLots.value : fLots.value) || '',
+    notes: (isDock ? dockNotes.value : fNotes.value) || '',
+    status: (isDock ? dockStatus.value : fStatus.value) || getDefaultStatus()
+  };
+}
+
+// ============================================================================
+// FEATURE 1: GRAB TICKET NUMBER FROM EMAIL SUBJECT ([XXXX-XX-XXXX])
+// ============================================================================
+function handleGrabTicketFromSubject(scopeMode = 'dock') {
+  const isDock = scopeMode === 'dock';
+  const isCustom = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema);
+
+  let subjectStr = '';
+  let ticketInputEl = null;
+
+  if (isCustom) {
+    const gridEl = isDock ? dockDynamicFieldsGrid : modalDynamicFieldsGrid;
+    if (!gridEl) return;
+    if (!activeSchemaConfig.ticketCol) {
+      showToast('Assign a Ticket # column in Configure Column Mapping first.', 'warning');
+      return;
+    }
+    ticketInputEl = gridEl.querySelector(`[data-custom-col="${activeSchemaConfig.ticketCol}"]`);
+    const primaryInputEl = activeSchemaConfig.primaryCol
+      ? gridEl.querySelector(`[data-custom-col="${activeSchemaConfig.primaryCol}"]`)
+      : null;
+    subjectStr = primaryInputEl ? primaryInputEl.value : '';
+    // Also check other text fields if primary column didn't contain the bracketed subject
+    if (!extractBracketedTicketsFromSubject(subjectStr).length) {
+      gridEl.querySelectorAll('input[type="text"], textarea').forEach(inp => {
+        if (inp !== ticketInputEl && !extractBracketedTicketsFromSubject(subjectStr).length) {
+          if (extractBracketedTicketsFromSubject(inp.value).length > 0) {
+            subjectStr = inp.value;
+          }
+        }
+      });
+    }
+  } else {
+    subjectStr = isDock ? (dockSubject ? dockSubject.value : '') : (fSubject ? fSubject.value : '');
+    ticketInputEl = isDock ? dockTicket : fTicket;
+  }
+
+  if (!ticketInputEl) return;
+
+  const extracted = extractBracketedTicketsFromSubject(subjectStr);
+  if (extracted.length === 0) {
+    showToast('No bracketed ticket pattern (e.g. [ABCD-12-3456]) found in Subject.', 'warning');
+    return;
+  }
+
+  const { merged, added } = mergeCommaDelimitedTickets(ticketInputEl.value, extracted);
+  ticketInputEl.value = merged;
+
+  if (added.length > 0) {
+    showToast(`🎯 Grabbed ticket: ${added.join(', ')}`, 'success');
+  } else {
+    showToast(`Ticket ${extracted.join(', ')} is already listed in Ticket Number.`, 'info');
+  }
+}
+
+if (btnDockGrabTicket) {
+  btnDockGrabTicket.addEventListener('click', () => handleGrabTicketFromSubject('dock'));
+}
+if (btnModalGrabTicket) {
+  btnModalGrabTicket.addEventListener('click', () => handleGrabTicketFromSubject('modal'));
+}
+
+// ============================================================================
+// FEATURE 2: SYNC FROM PREVIOUS ENTRY ("PULL FROM PRIOR TAB")
+// ============================================================================
+function stripEmailReplyPrefixes(str) {
+  return String(str || '')
+    .replace(/^\s*((re|fw|fwd)\s*:\s*)+/gi, '')
+    .trim()
+    .toLowerCase();
+}
+
+function findMatchingPriorTabEntries(scopeMode = 'dock') {
+  const isDock = scopeMode === 'dock';
+  const targetObj = isDock ? dockEditingTarget : editingTarget;
+  const refTabName = (targetObj && targetObj.sheetName) ? targetObj.sheetName : (sheetSelect ? sheetSelect.value : '');
+  const refTime = DATE_TAB_REGEX.test(refTabName) ? parseDateTab(refTabName) : Infinity;
+
+  const olderRows = allRows
+    .filter(r => parseDateTab(r.sheetName) < refTime)
+    .sort((a, b) => parseDateTab(b.sheetName) - parseDateTab(a.sheetName) || b.rowNumber - a.rowNumber);
+
+  if (olderRows.length === 0) {
+    return { error: 'No earlier daily tabs exist before this tab.' };
+  }
+
+  const formPayload = readFormPayloadFromScope(scopeMode);
+  const targetKey = targetObj && targetObj.key ? targetObj.key.trim().toLowerCase() : '';
+  const formTicketTokens = splitNormalizedTicketTokens(formPayload.ticket);
+  const cleanFormSubj = stripEmailReplyPrefixes(formPayload.subject);
+
+  // Also check if Subject has a bracketed ticket not yet grabbed!
+  const subjectTickets = extractBracketedTicketsFromSubject(formPayload.subject);
+  const combinedTickets = Array.from(new Set([...formTicketTokens, ...subjectTickets]));
+
+  // Build chronological match chain (newest prior first)
+  const matches = olderRows.filter(prior => {
+    if (targetKey && prior.key && prior.key.trim().toLowerCase() === targetKey) {
+      return true;
+    }
+    if (combinedTickets.length > 0 && prior.ticket) {
+      const priorTokens = splitNormalizedTicketTokens(prior.ticket);
+      if (priorTokens.some(t => combinedTickets.includes(t))) {
+        return true;
+      }
+    }
+    if (typeof areRowsSameUniqueRequest === 'function') {
+      const candidate = { ...formPayload, key: targetKey };
+      if (areRowsSameUniqueRequest(prior, candidate)) {
+        return true;
+      }
+    }
+    if (cleanFormSubj.length >= 5) {
+      const cleanPriorSubj = stripEmailReplyPrefixes(prior.subject);
+      if (cleanPriorSubj && cleanPriorSubj === cleanFormSubj) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (matches.length === 0) {
+    return {
+      error: 'No matching entry found on earlier daily tabs (enter a Subject, Ticket #, or Broker/Lot first).'
+    };
+  }
+  return { matches };
+}
+
+function handlePullFromPriorTab(scopeMode = 'dock') {
+  if (!workbook || allRows.length === 0) return;
+  const isDock = scopeMode === 'dock';
+  const result = findMatchingPriorTabEntries(scopeMode);
+  if (result.error) {
+    showToast(result.error, 'warning');
+    return;
+  }
+
+  const matches = result.matches; // sorted newest-prior -> oldest-prior
+  const sourceTabName = matches[0].sheetName;
+  const updatedLabels = [];
+
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+    const gridEl = isDock ? dockDynamicFieldsGrid : modalDynamicFieldsGrid;
+    if (!gridEl) return;
+
+    activeSchemaConfig.columns.forEach(col => {
+      const idx = col.colIndex;
+      if (idx === activeSchemaConfig.statusCol) return; // Keep current tab's status untouched
+      const el = gridEl.querySelector(`[data-custom-col="${idx}"]`);
+      if (!el) return;
+
+      if (idx === activeSchemaConfig.ticketCol) {
+        const priorTickets = matches.map(m => (m.customValues && m.customValues[`col_${idx}`]) || m.ticket || '').filter(Boolean);
+        const { merged, added } = mergeCommaDelimitedTickets(el.value, priorTickets);
+        if (added.length > 0 && merged !== el.value.trim()) {
+          el.value = merged;
+          updatedLabels.push(col.header);
+        }
+        return;
+      }
+
+      if (el.value.trim() !== '') return; // Strictly non-destructive: never overwrite filled fields
+      const donor = matches.find(m => m.customValues && String(m.customValues[`col_${idx}`] || '').trim() !== '');
+      if (donor) {
+        el.value = String(donor.customValues[`col_${idx}`]).trim();
+        updatedLabels.push(col.header);
+      }
+    });
+  } else {
+    const fields = isDock
+      ? [
+          { key: 'subject', label: 'Subject', el: dockSubject },
+          { key: 'broker', label: 'Broker', el: dockBroker },
+          { key: 'master', label: 'Master #', el: dockMaster },
+          { key: 'bidder', label: 'Bidder #', el: dockBidder },
+          { key: 'action', label: 'Action', el: dockAction },
+          { key: 'yard', label: 'Yard #', el: dockYard },
+          { key: 'lots', label: 'Lots', el: dockLots },
+          { key: 'notes', label: 'Notes', el: dockNotes }
+        ]
+      : [
+          { key: 'subject', label: 'Subject', el: fSubject },
+          { key: 'broker', label: 'Broker', el: fBroker },
+          { key: 'master', label: 'Master #', el: fMaster },
+          { key: 'bidder', label: 'Bidder #', el: fBidder },
+          { key: 'action', label: 'Action', el: fAction },
+          { key: 'yard', label: 'Yard #', el: fYard },
+          { key: 'lots', label: 'Lots', el: fLots },
+          { key: 'notes', label: 'Notes', el: fNotes }
+        ];
+
+    const ticketEl = isDock ? dockTicket : fTicket;
+    if (ticketEl) {
+      const priorTickets = matches.map(m => m.ticket).filter(Boolean);
+      const { merged, added } = mergeCommaDelimitedTickets(ticketEl.value, priorTickets);
+      if (added.length > 0 && merged !== ticketEl.value.trim()) {
+        ticketEl.value = merged;
+        updatedLabels.push('Ticket #');
+      }
+    }
+
+    fields.forEach(({ key, label, el }) => {
+      if (!el || el.value.trim() !== '') return;
+      const donor = matches.find(m => String(m[key] || '').trim() !== '');
+      if (donor) {
+        el.value = String(donor[key]).trim();
+        updatedLabels.push(label);
+      }
+    });
+  }
+
+  if (updatedLabels.length === 0) {
+    showToast(`Matched prior entry on ${sourceTabName}, and all non-empty fields are already filled here.`, 'info');
+  } else {
+    showToast(`📥 Pulled ${updatedLabels.join(', ')} from prior tab (${sourceTabName}).`, 'success');
+  }
+}
+
+if (btnDockPullPrior) {
+  btnDockPullPrior.addEventListener('click', () => handlePullFromPriorTab('dock'));
+}
+if (btnModalPullPrior) {
+  btnModalPullPrior.addEventListener('click', () => handlePullFromPriorTab('modal'));
+}
+
+// ============================================================================
+// FEATURE 3: FORWARD BATCH SYNC ACROSS DAILY TABS (NON-DESTRUCTIVE + TICKET MERGE)
+// ============================================================================
+async function handleForwardBatchSync(triggerSource = 'dock') {
+  if (!workbook) return;
+
+  let sourceSheetName = '';
+  let sourceRowNumber = 0;
+  let sourceKey = '';
+  let sourceSnapshot = null;
+  let saveDockSourceToo = false;
+
+  if (triggerSource === 'dock') {
+    if (!dockEditingTarget) {
+      showToast('Select an existing request row first to sync forward to newer tabs.', 'warning');
+      return;
+    }
+    sourceSheetName = dockEditingTarget.sheetName;
+    sourceRowNumber = dockEditingTarget.rowNumber;
+    sourceKey = dockEditingTarget.key;
+    sourceSnapshot = {
+      ...readFormPayloadFromScope('dock'),
+      sheetName: sourceSheetName,
+      rowNumber: sourceRowNumber,
+      key: sourceKey
+    };
+    saveDockSourceToo = true;
+  } else if (triggerSource === 'details') {
+    if (!activeTicketDetailsTarget) return;
+    const seed = allRows.find(
+      r => r.sheetName === activeTicketDetailsTarget.sheetName && r.rowNumber === activeTicketDetailsTarget.rowNumber
+    ) || allRows.find(r => r.key === activeTicketDetailsTarget.key);
+    if (!seed) return;
+
+    // Consolidate known values across the ticket's history up to each newer tab!
+    const history = findTicketHistoryEntries(seed);
+    sourceSheetName = history[0].sheetName;
+    sourceRowNumber = history[0].rowNumber;
+    sourceKey = seed.key;
+    sourceSnapshot = seed;
+  }
+
+  if (!sourceSnapshot) return;
+
+  const sourceTime = parseDateTab(sourceSheetName);
+  const normKey = String(sourceKey || '').trim().toLowerCase();
+
+  // Find all matching rolled-over rows on newer tabs (or across full forward chain when triggered from Details)
+  const forwardTargets = allRows
+    .filter(r => {
+      const rTime = parseDateTab(r.sheetName);
+      if (triggerSource === 'dock' && rTime <= sourceTime) return false;
+      if (triggerSource === 'details' && rTime <= sourceTime && r.rowNumber === sourceRowNumber) return false;
+      if (normKey && r.key && r.key.trim().toLowerCase() === normKey) return true;
+      return typeof areRowsSameUniqueRequest === 'function' && areRowsSameUniqueRequest(sourceSnapshot, r);
+    })
+    .sort((a, b) => parseDateTab(a.sheetName) - parseDateTab(b.sheetName) || a.rowNumber - b.rowNumber);
+
+  if (forwardTargets.length === 0) {
+    showToast(`No newer daily tabs contain a rolled-over copy of this request after ${sourceSheetName}.`, 'info');
+    return;
+  }
+
+  // Build cumulative donor values chronologically so data added on any earlier tab flows forward cleanly
+  const isCustom = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0);
+  const cumulativeDonor = JSON.parse(JSON.stringify(sourceSnapshot));
+  if (triggerSource === 'details') {
+    const earliest = allRows.find(r => r.sheetName === sourceSheetName && r.rowNumber === sourceRowNumber);
+    if (earliest) {
+      Object.assign(cumulativeDonor, JSON.parse(JSON.stringify(earliest)));
+    }
+  }
+
+  const plannedMutations = [];
+
+  forwardTargets.forEach(targetRow => {
+    const diffs = [];
+    const updatedCopy = JSON.parse(JSON.stringify(targetRow));
+
+    if (isCustom) {
+      if (!updatedCopy.customValues) updatedCopy.customValues = {};
+      if (!cumulativeDonor.customValues) cumulativeDonor.customValues = {};
+
+      activeSchemaConfig.columns.forEach(col => {
+        const idx = col.colIndex;
+        if (idx === activeSchemaConfig.statusCol) return; // Do not clobber forward tab's status
+        const cKey = `col_${idx}`;
+        const donorVal = String(cumulativeDonor.customValues[cKey] || '').trim();
+        const currVal = String(updatedCopy.customValues[cKey] || '').trim();
+
+        if (idx === activeSchemaConfig.ticketCol) {
+          const { merged, added } = mergeCommaDelimitedTickets(currVal, donorVal);
+          if (added.length > 0 && merged !== currVal) {
+            diffs.push(`${col.header}: "${currVal || '(blank)'}" → "${merged}"`);
+            updatedCopy.customValues[cKey] = merged;
+            updatedCopy.ticket = merged;
+          }
+          // Accumulate target's tickets into donor for subsequent even-newer tabs
+          cumulativeDonor.customValues[cKey] = mergeCommaDelimitedTickets(donorVal, updatedCopy.customValues[cKey]).merged;
+          return;
+        }
+
+        if (!currVal && donorVal) {
+          diffs.push(`${col.header}: (blank) → "${donorVal.slice(0, 45)}"`);
+          updatedCopy.customValues[cKey] = donorVal;
+          if (idx === activeSchemaConfig.primaryCol) updatedCopy.subject = donorVal;
+          if (idx === activeSchemaConfig.secondaryCol) updatedCopy.broker = donorVal;
+          if (idx === activeSchemaConfig.notesCol) updatedCopy.notes = donorVal;
+        } else if (currVal && !donorVal) {
+          cumulativeDonor.customValues[cKey] = currVal;
+        }
+      });
+    } else {
+      // 1. Ticket Number: comma-delimited deduplicated merge
+      const { merged: mergedTicket, added: addedTickets } = mergeCommaDelimitedTickets(updatedCopy.ticket, cumulativeDonor.ticket);
+      if (addedTickets.length > 0 && mergedTicket !== String(updatedCopy.ticket || '').trim()) {
+        diffs.push(`Ticket #: "${updatedCopy.ticket || '(blank)'}" → "${mergedTicket}"`);
+        updatedCopy.ticket = mergedTicket;
+      }
+      cumulativeDonor.ticket = mergeCommaDelimitedTickets(cumulativeDonor.ticket, updatedCopy.ticket).merged;
+
+      // 2. Non-destructive fill of blank fields only (never wipes existing values)
+      const syncableFields = [
+        { key: 'subject', label: 'Subject', upper: false },
+        { key: 'broker', label: 'Broker', upper: false },
+        { key: 'master', label: 'Master #', upper: true },
+        { key: 'bidder', label: 'Bidder #', upper: true },
+        { key: 'action', label: 'Action', upper: false },
+        { key: 'yard', label: 'Yard #', upper: true },
+        { key: 'lots', label: 'Lots', upper: false },
+        { key: 'notes', label: 'Notes', upper: false }
+      ];
+
+      syncableFields.forEach(({ key, label, upper }) => {
+        const rawDonor = String(cumulativeDonor[key] || '').trim();
+        const donorVal = upper ? rawDonor.toUpperCase() : rawDonor;
+        const currVal = String(updatedCopy[key] || '').trim();
+
+        if (!currVal && donorVal) {
+          diffs.push(`${label}: (blank) → "${donorVal.slice(0, 45)}"`);
+          updatedCopy[key] = donorVal;
+        } else if (currVal && !donorVal) {
+          cumulativeDonor[key] = upper ? currVal.toUpperCase() : currVal;
+        }
+      });
+    }
+
+    if (normKey && (!updatedCopy.key || updatedCopy.key.toLowerCase() !== normKey)) {
+      updatedCopy.key = normKey;
+    }
+
+    if (diffs.length > 0) {
+      plannedMutations.push({
+        sheetName: targetRow.sheetName,
+        rowNumber: targetRow.rowNumber,
+        updatedItem: updatedCopy,
+        diffs
+      });
+    }
+  });
+
+  if (plannedMutations.length === 0) {
+    showToast('✅ All newer daily tabs already contain these values — nothing needed forward-syncing.', 'info');
+    return;
+  }
+
+  const previewText = plannedMutations
+    .slice(0, 8)
+    .map(m => `• [${m.sheetName} • Row ${m.rowNumber}] ${m.diffs.join('; ')}`)
+    .join('\n');
+  const moreNote = plannedMutations.length > 8 ? `\n...and ${plannedMutations.length - 8} more tab(s).` : '';
+
+  const confirmed = await showModalConfirm({
+    title: `🔄 Sync Data Forward to ${plannedMutations.length} Newer Tab(s)?`,
+    badge: 'Non-Destructive Merge',
+    message:
+      `Propagate newly added details forward without overwriting any existing values (Ticket Numbers merge comma-delimited):\n\n` +
+      `${previewText}${moreNote}`,
+    confirmText: `🔄 Sync ${plannedMutations.length} Tab(s) Now`
+  });
+  if (!confirmed) return;
+
+  const activeTab = sheetSelect ? sheetSelect.value : sourceSheetName;
+  await loadWorkbookFromDisk(activeTab, { skipStagedRecoveryCheck: true });
+
+  // Also write source row if triggered from dock with live edits
+  if (saveDockSourceToo) {
+    const srcWs = workbook.getWorksheet(sourceSheetName);
+    if (srcWs) {
+      const srcMap = getWorksheetColumnMap(srcWs);
+      srcWs.getColumn(srcMap.trackingCol).hidden = true;
+      const srcRow = srcWs.getRow(sourceRowNumber);
+      writeItemToWorksheetRow(srcRow, sourceRowNumber, {
+        ...sourceSnapshot,
+        ticket: sourceSnapshot.ticket ? sourceSnapshot.ticket.toUpperCase() : '',
+        master: sourceSnapshot.master ? sourceSnapshot.master.toUpperCase() : '',
+        bidder: sourceSnapshot.bidder ? sourceSnapshot.bidder.toUpperCase() : '',
+        yard: sourceSnapshot.yard ? sourceSnapshot.yard.toUpperCase() : '',
+        key: sourceKey
+      }, srcMap);
+    }
+  }
+
+  plannedMutations.forEach(mut => {
+    const ws = workbook.getWorksheet(mut.sheetName);
+    if (!ws) return;
+    const colMap = getWorksheetColumnMap(ws);
+    ws.getColumn(colMap.trackingCol).hidden = true;
+    const excelRow = ws.getRow(mut.rowNumber);
+    writeItemToWorksheetRow(excelRow, mut.rowNumber, mut.updatedItem, colMap);
+  });
+
+  const saveResult = await saveWorkbookToDisk();
+  if (saveResult) {
+    await loadWorkbookFromDisk(activeTab, {
+      skipStagedRecoveryCheck: true,
+      preserveStatus: saveResult === 'mirror-locked'
+    });
+    if (ticketDetailsModal && ticketDetailsModal.classList.contains('open') && activeTicketDetailsTarget) {
+      const refreshed = allRows.find(
+        r => r.sheetName === activeTicketDetailsTarget.sheetName && r.rowNumber === activeTicketDetailsTarget.rowNumber
+      ) || allRows.find(r => r.key === activeTicketDetailsTarget.key);
+      if (refreshed) renderTicketDetailsModal(refreshed);
+    }
+    showToast(`🔄 Forward-synced updates across ${plannedMutations.length} newer daily tab(s)!`, 'success');
+  }
+}
+
+if (btnDockSyncForward) {
+  btnDockSyncForward.addEventListener('click', () => handleForwardBatchSync('dock'));
+}
+if (btnTicketSyncForward) {
+  btnTicketSyncForward.addEventListener('click', () => handleForwardBatchSync('details'));
+}
+
+// ============================================================================
+// BOTTOM DOCK COLLAPSE, NEW MODE, EDIT MODE & MODAL EDITORS
+// ============================================================================
 function setBottomDockCollapsed(collapsed, { persist = true } = {}) {
   isBottomDockCollapsed = Boolean(collapsed);
   if (persist) {
@@ -112,6 +800,18 @@ function syncBottomDockStateAfterLoad() {
   setBottomDockNewMode(false);
 }
 
+function focusFirstEditorInput(scopeMode = 'dock') {
+  const isDock = scopeMode === 'dock';
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
+    const gridEl = isDock ? dockDynamicFieldsGrid : modalDynamicFieldsGrid;
+    const firstEl = gridEl ? gridEl.querySelector('input, textarea, select') : null;
+    if (firstEl) firstEl.focus();
+    return;
+  }
+  const stdFirst = isDock ? dockSubject : fSubject;
+  if (stdFirst) stdFirst.focus();
+}
+
 function setBottomDockNewMode(focusInput = false) {
   dockEditingTarget = null;
   if (!bottomEditorDock) return;
@@ -129,14 +829,17 @@ function setBottomDockNewMode(focusInput = false) {
     dockModeBadge.classList.remove('edit-mode');
   }
   if (dockTargetLabel) {
-    dockTargetLabel.textContent = `Creating new support request on ${activeTab} — or click any row above to edit`;
+    dockTargetLabel.textContent = `Creating new request on ${activeTab} — or click any row above to edit`;
   }
   if (dockKeyBadge) {
     dockKeyBadge.style.display = 'none';
     dockKeyBadge.textContent = '';
   }
   if (dockHintText) {
-    dockHintText.textContent = 'Tip: Click any request row in the table above to load it here for instant editing.';
+    dockHintText.textContent = 'Tip: Click any row above to edit, or use 🎯 Grab Ticket / 📥 Pull Prior to auto-fill.';
+  }
+  if (btnDockSyncForward) {
+    btnDockSyncForward.style.display = 'none';
   }
   if (btnDockTicketDetails) {
     btnDockTicketDetails.style.display = 'none';
@@ -156,13 +859,14 @@ function setBottomDockNewMode(focusInput = false) {
   if (dockStatus) {
     dockStatus.value = defaultSt;
   }
+  populateDynamicGridFromItem(dockDynamicFieldsGrid, null);
 
   if (listBody) {
     listBody.querySelectorAll('tr.active-editing-row').forEach(tr => tr.classList.remove('active-editing-row'));
   }
 
-  if (focusInput && dockSubject) {
-    setTimeout(() => dockSubject.focus(), 30);
+  if (focusInput) {
+    setTimeout(() => focusFirstEditorInput('dock'), 30);
   }
 }
 
@@ -194,6 +898,9 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
   if (dockHintText) {
     dockHintText.textContent = `Editing Row ${rowNumber} on ${sheetName}. Unique Tracking ID is preserved automatically on save.`;
   }
+  if (btnDockSyncForward) {
+    btnDockSyncForward.style.display = 'inline-block';
+  }
   if (btnDockTicketDetails) {
     btnDockTicketDetails.style.display = 'inline-block';
   }
@@ -204,18 +911,22 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     btnDockSave.textContent = `Save Changes (${sheetName} • Row ${rowNumber})`;
   }
 
-  if (dockSubject) dockSubject.value = item.subject;
-  if (dockTicket) dockTicket.value = item.ticket;
-  if (dockBroker) dockBroker.value = item.broker;
-  if (dockMaster) dockMaster.value = item.master;
-  if (dockBidder) dockBidder.value = item.bidder;
-  if (dockAction) dockAction.value = item.action;
-  if (dockYard) dockYard.value = item.yard;
-  if (dockLots) dockLots.value = item.lots;
-  if (dockNotes) dockNotes.value = item.notes;
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
+    populateDynamicGridFromItem(dockDynamicFieldsGrid, item);
+  } else {
+    if (dockSubject) dockSubject.value = item.subject;
+    if (dockTicket) dockTicket.value = item.ticket;
+    if (dockBroker) dockBroker.value = item.broker;
+    if (dockMaster) dockMaster.value = item.master;
+    if (dockBidder) dockBidder.value = item.bidder;
+    if (dockAction) dockAction.value = item.action;
+    if (dockYard) dockYard.value = item.yard;
+    if (dockLots) dockLots.value = item.lots;
+    if (dockNotes) dockNotes.value = item.notes;
 
-  ensureStatusOptionExists(item.status);
-  if (dockStatus) dockStatus.value = item.status;
+    ensureStatusOptionExists(item.status);
+    if (dockStatus) dockStatus.value = item.status;
+  }
 
   if (listBody) {
     listBody.querySelectorAll('tr').forEach(tr => {
@@ -224,8 +935,8 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     });
   }
 
-  if (focusInput && dockSubject) {
-    setTimeout(() => dockSubject.focus(), 30);
+  if (focusInput) {
+    setTimeout(() => focusFirstEditorInput('dock'), 30);
   }
 }
 
@@ -287,8 +998,10 @@ async function openNewRequestModal() {
   const defaultSt = getDefaultStatus();
   ensureStatusOptionExists(defaultSt);
   fStatus.value = defaultSt;
+  populateDynamicGridFromItem(modalDynamicFieldsGrid, null);
+
   editModal.classList.add('open');
-  setTimeout(() => fSubject.focus(), 20);
+  setTimeout(() => focusFirstEditorInput('modal'), 20);
 }
 
 btnNewEntry.addEventListener('click', () => {
@@ -309,18 +1022,22 @@ function openEditModal(sheetName, rowNumber) {
   modalKeyEl.textContent = `🔍 ${item.key.slice(0, 8)}...`;
   modalKeyEl.title = item.key;
 
-  fSubject.value = item.subject;
-  fTicket.value = item.ticket;
-  fBroker.value = item.broker;
-  fMaster.value = item.master;
-  fBidder.value = item.bidder;
-  fAction.value = item.action;
-  fYard.value = item.yard;
-  fLots.value = item.lots;
-  fNotes.value = item.notes;
+  if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
+    populateDynamicGridFromItem(modalDynamicFieldsGrid, item);
+  } else {
+    fSubject.value = item.subject;
+    fTicket.value = item.ticket;
+    fBroker.value = item.broker;
+    fMaster.value = item.master;
+    fBidder.value = item.bidder;
+    fAction.value = item.action;
+    fYard.value = item.yard;
+    fLots.value = item.lots;
+    fNotes.value = item.notes;
 
-  ensureStatusOptionExists(item.status);
-  fStatus.value = item.status;
+    ensureStatusOptionExists(item.status);
+    fStatus.value = item.status;
+  }
 
   editModal.classList.add('open');
 }
@@ -332,7 +1049,9 @@ document.getElementById('btnCancelModal').addEventListener('click', () => {
 async function saveRequestToWorkbook(targetInfo, formValues) {
   const currentSheetName = targetInfo ? targetInfo.sheetName : sheetSelect.value;
 
-  await loadWorkbookFromDisk(currentSheetName);
+  if (!pendingPrimarySaveState) {
+    await loadWorkbookFromDisk(currentSheetName, { skipStagedRecoveryCheck: true });
+  }
   const worksheet = workbook.getWorksheet(currentSheetName);
   if (!worksheet) {
     await showModalAlert({
@@ -342,16 +1061,16 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
     return false;
   }
 
-  const subjectVal = formValues.subject.trim();
-  const ticketVal = formValues.ticket.trim().toUpperCase();
-  const brokerVal = formValues.broker.trim();
-  const masterVal = formValues.master.trim().toUpperCase();
-  const bidderVal = formValues.bidder.trim().toUpperCase();
-  const actionVal = formValues.action.trim();
-  const yardVal = formValues.yard.trim().toUpperCase();
-  const lotsVal = formValues.lots.trim();
-  const notesVal = formValues.notes.trim();
-  const statusVal = formValues.status.trim();
+  const subjectVal = String(formValues.subject || '').trim();
+  const ticketVal = String(formValues.ticket || '').trim().toUpperCase();
+  const brokerVal = String(formValues.broker || '').trim();
+  const masterVal = String(formValues.master || '').trim().toUpperCase();
+  const bidderVal = String(formValues.bidder || '').trim().toUpperCase();
+  const actionVal = String(formValues.action || '').trim();
+  const yardVal = String(formValues.yard || '').trim().toUpperCase();
+  const lotsVal = String(formValues.lots || '').trim();
+  const notesVal = String(formValues.notes || '').trim();
+  const statusVal = String(formValues.status || '').trim();
 
   let targetRowNum;
   let trackingKey;
@@ -371,20 +1090,22 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
   }
 
   const row = worksheet.getRow(targetRowNum);
-  row.getCell(1).value = subjectVal;
-  row.getCell(2).value = ticketVal;
-  setBrokerCellWithFormula(row, targetRowNum, brokerVal, masterVal, colMap);
-  row.getCell(4).value = masterVal;
-  row.getCell(5).value = bidderVal;
-  row.getCell(6).value = actionVal;
-  row.getCell(7).value = yardVal;
-  row.getCell(8).value = lotsVal;
-  row.getCell(colMap.notesCol).value = notesVal;
-  row.getCell(colMap.statusCol).value = statusVal;
-  row.getCell(colMap.trackingCol).value = trackingKey;
-  row.commit();
+  writeItemToWorksheetRow(row, targetRowNum, {
+    subject: subjectVal,
+    ticket: ticketVal,
+    broker: brokerVal,
+    master: masterVal,
+    bidder: bidderVal,
+    action: actionVal,
+    yard: yardVal,
+    lots: lotsVal,
+    notes: notesVal,
+    status: statusVal,
+    key: trackingKey,
+    customValues: formValues.customValues || null
+  }, colMap);
 
-  if (targetInfo) {
+  if (targetInfo && colMap.statusCol && statusVal) {
     const editedTime = parseDateTab(currentSheetName);
     const newerInstances = allRows.filter(
       r =>
@@ -408,9 +1129,11 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
           const newerWs = workbook.getWorksheet(inst.sheetName);
           if (newerWs) {
             const newerColMap = getWorksheetColumnMap(newerWs);
-            const nr = newerWs.getRow(inst.rowNumber);
-            nr.getCell(newerColMap.statusCol).value = statusVal;
-            nr.commit();
+            if (newerColMap.statusCol) {
+              const nr = newerWs.getRow(inst.rowNumber);
+              nr.getCell(newerColMap.statusCol).value = statusVal;
+              nr.commit();
+            }
           }
         });
       }
@@ -420,28 +1143,33 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
   const saveResult = await saveWorkbookToDisk();
   if (saveResult) {
     await loadWorkbookFromDisk(currentSheetName, {
+      skipStagedRecoveryCheck: true,
       preserveStatus: saveResult === 'mirror-locked'
     });
     return true;
+  }
+
+  // If primary file was locked and staged in fail-safe cache, re-index in-memory workbook so UI shows the user's staged edit!
+  if (pendingPrimarySaveState && workbook) {
+    allRows = [];
+    const dailyObjs = [];
+    workbook.eachSheet(ws => {
+      const raw = ws.name.trim();
+      if (DATE_TAB_REGEX.test(raw)) dailyObjs.push({ ws, raw });
+    });
+    dailyObjs.sort((a, b) => parseDateTab(a.raw) - parseDateTab(b.raw));
+    dailyObjs.forEach(({ ws, raw }) => indexWorksheetRows(ws, raw));
+    renderSheetTabsBar();
+    renderList();
   }
   return false;
 }
 
 document.getElementById('entryForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const ok = await saveRequestToWorkbook(editingTarget, {
-    subject: fSubject.value,
-    ticket: fTicket.value,
-    broker: fBroker.value,
-    master: fMaster.value,
-    bidder: fBidder.value,
-    action: fAction.value,
-    yard: fYard.value,
-    lots: fLots.value,
-    notes: fNotes.value,
-    status: fStatus.value
-  });
-  if (ok) {
+  const payload = readFormPayloadFromScope('modal');
+  const ok = await saveRequestToWorkbook(editingTarget, payload);
+  if (ok || pendingPrimarySaveState) {
     editModal.classList.remove('open');
   }
 });
@@ -450,25 +1178,17 @@ if (dockEntryForm) {
   dockEntryForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const wasEditing = Boolean(dockEditingTarget);
-    const ok = await saveRequestToWorkbook(dockEditingTarget, {
-      subject: dockSubject.value,
-      ticket: dockTicket.value,
-      broker: dockBroker.value,
-      master: dockMaster.value,
-      bidder: dockBidder.value,
-      action: dockAction.value,
-      yard: dockYard.value,
-      lots: dockLots.value,
-      notes: dockNotes.value,
-      status: dockStatus.value
-    });
+    const payload = readFormPayloadFromScope('dock');
+    const ok = await saveRequestToWorkbook(dockEditingTarget, payload);
     if (ok) {
       if (!wasEditing) {
         setBottomDockNewMode(false);
-        showToast('New support request added and saved.', 'success');
+        showToast('New request added and saved.', 'success');
       } else {
         showToast('Request changes saved to workbook.', 'success');
       }
+    } else if (pendingPrimarySaveState && !wasEditing) {
+      setBottomDockNewMode(false);
     }
   });
 }
@@ -558,37 +1278,67 @@ function renderTicketDetailsModal(seedItem) {
   if (ticketQuickNoteTargetBadge) {
     ticketQuickNoteTargetBadge.textContent = `Target: ${latest.sheetName} (Row ${latest.rowNumber})`;
   }
+  if (ticketQuickNoteForm) {
+    const hasNotesCol = activeSchemaConfig.isStandardSchema || Boolean(activeSchemaConfig.notesCol);
+    ticketQuickNoteForm.style.display = hasNotesCol ? 'block' : 'none';
+  }
 
   if (ticketDetailsMetaGrid) {
     const isDone = isCompletedStatus(latest.status);
-    ticketDetailsMetaGrid.innerHTML = `
-      <div class="ticket-meta-card">
-        <div class="ticket-meta-card-label">Ticket Number</div>
-        <div class="ticket-meta-card-val">${escapeHtml(latest.ticket || '—')}</div>
-      </div>
-      <div class="ticket-meta-card">
-        <div class="ticket-meta-card-label">Current Status (${escapeHtml(latest.sheetName)})</div>
-        <div class="ticket-meta-card-val">
-          <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(latest.status)}</span>
+    if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+      const customCards = activeSchemaConfig.columns
+        .filter(c => c.colIndex !== activeSchemaConfig.notesCol)
+        .map(c => {
+          const val = (latest.customValues && latest.customValues[`col_${c.colIndex}`]) || '';
+          const inner = c.colIndex === activeSchemaConfig.statusCol
+            ? `<span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(val || latest.status)}</span>`
+            : escapeHtml(val || '—');
+          return `
+            <div class="ticket-meta-card">
+              <div class="ticket-meta-card-label">${escapeHtml(c.header)}</div>
+              <div class="ticket-meta-card-val">${inner}</div>
+            </div>
+          `;
+        })
+        .join('');
+      ticketDetailsMetaGrid.innerHTML = `
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Original Creation Tab</div>
+          <div class="ticket-meta-card-val">${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
         </div>
-      </div>
-      <div class="ticket-meta-card">
-        <div class="ticket-meta-card-label">Original Creation Tab</div>
-        <div class="ticket-meta-card-val">${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
-      </div>
-      <div class="ticket-meta-card">
-        <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
-        <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${escapeHtml(latest.master || '—')} / B: ${escapeHtml(latest.bidder || '—')})</div>
-      </div>
-      <div class="ticket-meta-card">
-        <div class="ticket-meta-card-label">Requested Action</div>
-        <div class="ticket-meta-card-val">${escapeHtml(latest.action || '—')}</div>
-      </div>
-      <div class="ticket-meta-card">
-        <div class="ticket-meta-card-label">Yard # &amp; Lot Numbers</div>
-        <div class="ticket-meta-card-val">Y: ${escapeHtml(latest.yard || '—')} • Lots: ${escapeHtml(latest.lots || '—')}</div>
-      </div>
-    `;
+        ${customCards}
+      `;
+    } else {
+      const parentCategory = resolveActionParentCategory(latest.action);
+      ticketDetailsMetaGrid.innerHTML = `
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Ticket Number</div>
+          <div class="ticket-meta-card-val">${escapeHtml(latest.ticket || '—')}</div>
+        </div>
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Current Status (${escapeHtml(latest.sheetName)})</div>
+          <div class="ticket-meta-card-val">
+            <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(latest.status)}</span>
+          </div>
+        </div>
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Original Creation Tab</div>
+          <div class="ticket-meta-card-val">${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
+        </div>
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
+          <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${escapeHtml(latest.master || '—')} / B: ${escapeHtml(latest.bidder || '—')})</div>
+        </div>
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Requested Action &amp; Category</div>
+          <div class="ticket-meta-card-val">${escapeHtml(latest.action || '—')} <span class="badge badge-progress" style="margin-left:4px;">${escapeHtml(parentCategory)}</span></div>
+        </div>
+        <div class="ticket-meta-card">
+          <div class="ticket-meta-card-label">Yard # &amp; Lot Numbers</div>
+          <div class="ticket-meta-card-val">Y: ${escapeHtml(latest.yard || '—')} • Lots: ${escapeHtml(latest.lots || '—')}</div>
+        </div>
+      `;
+    }
   }
 
   if (ticketTimelineList) {
@@ -669,6 +1419,13 @@ if (ticketQuickNoteForm) {
       ? `${latestEntry.notes.replace(/\s+$/, '')}\n${stampedLine}`
       : stampedLine;
 
+    const updatedCustomValues = latestEntry.customValues
+      ? { ...latestEntry.customValues }
+      : null;
+    if (updatedCustomValues && activeSchemaConfig && activeSchemaConfig.notesCol) {
+      updatedCustomValues[`col_${activeSchemaConfig.notesCol}`] = combinedNotes;
+    }
+
     const ok = await saveRequestToWorkbook(
       { sheetName: latestEntry.sheetName, rowNumber: latestEntry.rowNumber, key: latestEntry.key },
       {
@@ -681,11 +1438,12 @@ if (ticketQuickNoteForm) {
         yard: latestEntry.yard,
         lots: latestEntry.lots,
         notes: combinedNotes,
-        status: latestEntry.status
+        status: latestEntry.status,
+        customValues: updatedCustomValues
       }
     );
 
-    if (ok) {
+    if (ok || pendingPrimarySaveState) {
       ticketQuickNoteInput.value = '';
       const refreshedSeed = allRows.find(
         r => r.sheetName === latestEntry.sheetName && r.rowNumber === latestEntry.rowNumber
@@ -698,7 +1456,9 @@ if (ticketQuickNoteForm) {
         };
         renderTicketDetailsModal(refreshedSeed);
       }
-      showToast(`Timestamped note appended to ${latestEntry.sheetName}.`, 'success');
+      if (ok) {
+        showToast(`Timestamped note appended to ${latestEntry.sheetName}.`, 'success');
+      }
     }
   });
 }
@@ -747,6 +1507,8 @@ async function openViewOnlyTrackerModal() {
     viewOnlyState.lastModified = file.lastModified || Date.now();
     viewOnlyState.rows = [];
     viewOnlyState.sheets = [];
+    viewOnlyState.isCustomSchema = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0);
+    viewOnlyState.customColumns = viewOnlyState.isCustomSchema ? [...activeSchemaConfig.columns] : [];
 
     const mirrorWb = new ExcelJS.Workbook();
     await mirrorWb.xlsx.load(sanitizedBuffer);
@@ -763,7 +1525,31 @@ async function openViewOnlyTrackerModal() {
     viewOnlyState.sheets.forEach(sName => {
       const ws = mirrorWb.getWorksheet(sName);
       if (!ws) return;
-      const colMap = getWorksheetColumnMap(ws);
+      if (viewOnlyState.isCustomSchema) {
+        ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const customValues = {};
+          let hasAny = false;
+          viewOnlyState.customColumns.forEach(c => {
+            const v = cellText(row, c.colIndex);
+            customValues[`col_${c.colIndex}`] = v;
+            if (v !== '') hasAny = true;
+          });
+          if (!hasAny) return;
+          const status = activeSchemaConfig.statusCol
+            ? (customValues[`col_${activeSchemaConfig.statusCol}`] || 'Pending')
+            : 'Open';
+          viewOnlyState.rows.push({
+            sheetName: sName,
+            rowNumber,
+            customValues,
+            status
+          });
+        });
+        return;
+      }
+
+      const colMap = getStandardWorksheetColumnMapOnly(ws);
       ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
         if (rowNumber === 1) return;
         const subject = cellText(row, 1);
@@ -815,6 +1601,31 @@ async function openViewOnlyTrackerModal() {
         : 'badge badge-complete';
     }
 
+    if (viewOnlyHead) {
+      if (viewOnlyState.isCustomSchema) {
+        viewOnlyHead.innerHTML = `
+          <tr>
+            <th>Date Tab</th>
+            ${viewOnlyState.customColumns.map(c => `<th>${escapeHtml(c.header)}</th>`).join('')}
+          </tr>
+        `;
+      } else {
+        viewOnlyHead.innerHTML = `
+          <tr>
+            <th>Date Tab</th>
+            <th>Subject</th>
+            <th>Ticket #</th>
+            <th>Broker</th>
+            <th>Master / Bidder</th>
+            <th>Action</th>
+            <th>Yard / Lots</th>
+            <th>Action Notes</th>
+            <th>Status</th>
+          </tr>
+        `;
+      }
+    }
+
     if (viewOnlySheetSelect) {
       viewOnlySheetSelect.innerHTML = '';
       const allOpt = document.createElement('option');
@@ -857,13 +1668,17 @@ function renderViewOnlyTable() {
   if (!viewOnlyBody) return;
   const selectedTab = viewOnlySheetSelect ? viewOnlySheetSelect.value : '__ALL__';
   const query = viewOnlySearchInput ? viewOnlySearchInput.value.trim().toLowerCase() : '';
+  const isCustom = Boolean(viewOnlyState.isCustomSchema && Array.isArray(viewOnlyState.customColumns));
+  const colSpan = isCustom ? (1 + viewOnlyState.customColumns.length) : 9;
 
   const filtered = viewOnlyState.rows.filter(item => {
     if (query.length > 0) {
-      const hay = [
-        item.sheetName, item.subject, item.ticket, item.broker,
-        item.master, item.bidder, item.action, item.yard, item.lots, item.notes, item.status
-      ].join(' ').toLowerCase();
+      const hay = isCustom
+        ? [item.sheetName, ...Object.values(item.customValues || {})].join(' ').toLowerCase()
+        : [
+            item.sheetName, item.subject, item.ticket, item.broker,
+            item.master, item.bidder, item.action, item.yard, item.lots, item.notes, item.status
+          ].join(' ').toLowerCase();
       return hay.includes(query);
     }
     if (selectedTab !== '__ALL__' && item.sheetName !== selectedTab) {
@@ -878,13 +1693,26 @@ function renderViewOnlyTable() {
 
   viewOnlyBody.innerHTML = '';
   if (filtered.length === 0) {
-    viewOnlyBody.innerHTML = `<tr><td colspan="9" class="empty-table-cell">No matching requests in View-Only snapshot.</td></tr>`;
+    viewOnlyBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell">No matching requests in View-Only snapshot.</td></tr>`;
     return;
   }
 
   filtered.forEach(item => {
     const tr = document.createElement('tr');
     const isDone = isCompletedStatus(item.status);
+    if (isCustom) {
+      const cells = viewOnlyState.customColumns.map(c => {
+        const val = (item.customValues && item.customValues[`col_${c.colIndex}`]) || '';
+        if (c.colIndex === activeSchemaConfig.statusCol) {
+          return `<td><span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(val || item.status)}</span></td>`;
+        }
+        return `<td class="cell-sm" style="max-width:260px; white-space:pre-wrap;">${escapeHtml(val || '—')}</td>`;
+      }).join('');
+      tr.innerHTML = `<td class="cell-mono-sm" style="white-space:nowrap;">${escapeHtml(item.sheetName)}</td>${cells}`;
+      viewOnlyBody.appendChild(tr);
+      return;
+    }
+
     tr.innerHTML = `
       <td class="cell-mono-sm" style="white-space:nowrap;">${escapeHtml(item.sheetName)}</td>
       <td>${escapeHtml(item.subject || '—')}</td>
@@ -937,4 +1765,3 @@ if (btnDownloadViewOnly) {
     showToast(`Downloaded copy of "${viewOnlyState.fileName}" (safe to open in Excel).`, 'info');
   });
 }
-

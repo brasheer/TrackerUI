@@ -48,12 +48,41 @@ function areRowsSameUniqueRequest(rowA, rowB) {
   const keyB = String(rowB.key || '').trim().toLowerCase();
   if (keyA && keyB && keyA === keyB) return true;
 
-  const ticketA = normalizeTicketId(rowA.ticket);
-  const ticketB = normalizeTicketId(rowB.ticket);
+  const tokensA = typeof splitNormalizedTicketTokens === 'function'
+    ? splitNormalizedTicketTokens(rowA.ticket)
+    : (normalizeTicketId(rowA.ticket) ? [normalizeTicketId(rowA.ticket).toUpperCase()] : []);
+  const tokensB = typeof splitNormalizedTicketTokens === 'function'
+    ? splitNormalizedTicketTokens(rowB.ticket)
+    : (normalizeTicketId(rowB.ticket) ? [normalizeTicketId(rowB.ticket).toUpperCase()] : []);
+  const hasSharedTicket = tokensA.length > 0 && tokensB.length > 0 && tokensA.some(t => tokensB.includes(t));
 
-  // Explicit, different non-empty Ticket Numbers indicate distinct requests
-  if (ticketA && ticketB && ticketA !== ticketB) {
+  // Explicit, non-overlapping Ticket Numbers indicate distinct requests
+  if (tokensA.length > 0 && tokensB.length > 0 && !hasSharedTicket) {
     return false;
+  }
+
+  // Custom Department Schema identity matching
+  if (rowA.isCustomSchema || rowB.isCustomSchema || (activeSchemaConfig && !activeSchemaConfig.isStandardSchema)) {
+    if (hasSharedTicket) return true;
+    const cols = (activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) ? activeSchemaConfig.columns : [];
+    const cvA = rowA.customValues || {};
+    const cvB = rowB.customValues || {};
+    const pCol = activeSchemaConfig ? activeSchemaConfig.primaryCol : 1;
+    const pA = normalizeMatchText(cvA[`col_${pCol}`] || rowA.subject);
+    const pB = normalizeMatchText(cvB[`col_${pCol}`] || rowB.subject);
+    if (!pA || pA !== pB) return false;
+
+    let populatedMatches = 0;
+    for (const c of cols) {
+      if (c.colIndex === activeSchemaConfig.statusCol || c.colIndex === activeSchemaConfig.notesCol || c.colIndex === activeSchemaConfig.ticketCol) {
+        continue;
+      }
+      const vA = normalizeMatchText(cvA[`col_${c.colIndex}`]);
+      const vB = normalizeMatchText(cvB[`col_${c.colIndex}`]);
+      if (vA && vB && vA !== vB) return false;
+      if (vA && vB && vA === vB) populatedMatches++;
+    }
+    return populatedMatches >= 2 || (populatedMatches >= 1 && cols.length <= 3);
   }
 
   const subjA = normalizeMatchText(rowA.subject);
@@ -78,8 +107,8 @@ function areRowsSameUniqueRequest(rowA, rowB) {
     (brokerA && brokerB && brokerA === brokerB) ||
     (!acctA && !acctB);
 
-  // Case A: Same valid Ticket Number + compatible Lot Numbers & Account
-  if (ticketA && ticketB && ticketA === ticketB) {
+  // Case A: Shared valid Ticket Number + compatible Lot Numbers & Account
+  if (hasSharedTicket) {
     const lotsCompatible = (lotsA === lotsB) || !lotsA || !lotsB;
     if (lotsCompatible && (accountsMatch || !acctA || !acctB)) {
       return true;
@@ -328,10 +357,6 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
   const canonicalRow = entries[entries.length - 1] || baseRow;
   const pickLatestIfUnkeyedMerge = (primaryVal, fieldName) => {
     if (primaryVal && String(primaryVal).trim() !== '') return primaryVal;
-    const allSameKey = entries.every(
-      e => e.key && baseRow.key && e.key.trim().toLowerCase() === baseRow.key.trim().toLowerCase()
-    );
-    if (allSameKey) return primaryVal;
     for (let i = entries.length - 1; i >= 0; i--) {
       const candidate = entries[i][fieldName];
       if (candidate && String(candidate).trim() !== '') return candidate;
@@ -339,11 +364,45 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
     return primaryVal;
   };
 
+  // Merge ticket tokens comma-delimited across daily entries without duplicates
+  const mergedTicket = typeof mergeCommaDelimitedTickets === 'function'
+    ? mergeCommaDelimitedTickets(
+        baseRow.ticket || '',
+        entries.map(e => e.ticket || '')
+      ).merged
+    : pickLatestIfUnkeyedMerge(baseRow.ticket, 'ticket');
+
+  let consolidatedCustomValues = undefined;
+  if (baseRow.customValues || (activeSchemaConfig && !activeSchemaConfig.isStandardSchema)) {
+    consolidatedCustomValues = { ...(baseRow.customValues || {}) };
+    const cols = (activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) ? activeSchemaConfig.columns : [];
+    cols.forEach(c => {
+      const k = `col_${c.colIndex}`;
+      if (c.colIndex === activeSchemaConfig.notesCol) {
+        consolidatedCustomValues[k] = mergedNotes;
+        return;
+      }
+      if (c.colIndex === activeSchemaConfig.ticketCol) {
+        consolidatedCustomValues[k] = mergedTicket;
+        return;
+      }
+      if (!consolidatedCustomValues[k] || String(consolidatedCustomValues[k]).trim() === '') {
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const cand = entries[i].customValues && entries[i].customValues[k];
+          if (cand && String(cand).trim() !== '') {
+            consolidatedCustomValues[k] = cand;
+            break;
+          }
+        }
+      }
+    });
+  }
+
   return {
     ...baseRow,
     key: canonicalRow.key || baseRow.key,
     subject: pickLatestIfUnkeyedMerge(baseRow.subject, 'subject'),
-    ticket: pickLatestIfUnkeyedMerge(baseRow.ticket, 'ticket'),
+    ticket: mergedTicket,
     broker: pickLatestIfUnkeyedMerge(baseRow.broker, 'broker'),
     master: pickLatestIfUnkeyedMerge(baseRow.master, 'master'),
     bidder: pickLatestIfUnkeyedMerge(baseRow.bidder, 'bidder'),
@@ -351,6 +410,7 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
     yard: pickLatestIfUnkeyedMerge(baseRow.yard, 'yard'),
     lots: pickLatestIfUnkeyedMerge(baseRow.lots, 'lots'),
     notes: mergedNotes,
+    ...(consolidatedCustomValues ? { customValues: consolidatedCustomValues } : {}),
     _entries: entries,
     _sourceTabCount: entries.length,
     _firstSheet: entries[0] ? entries[0].sheetName : baseRow.sheetName
@@ -755,9 +815,11 @@ rolloverForm.addEventListener('submit', async (e) => {
         const completedWs = workbook.getWorksheet(completedRow.sheetName);
         if (completedWs) {
           const compColMap = getWorksheetColumnMap(completedWs);
-          const cr = completedWs.getRow(completedRow.rowNumber);
-          cr.getCell(compColMap.statusCol).value = openRow.status;
-          cr.commit();
+          if (compColMap.statusCol) {
+            const cr = completedWs.getRow(completedRow.rowNumber);
+            cr.getCell(compColMap.statusCol).value = openRow.status;
+            cr.commit();
+          }
         }
       }
     });
@@ -782,6 +844,8 @@ rolloverForm.addEventListener('submit', async (e) => {
 
         if (templateSheet) {
           cloneTemplateStructure(templateSheet, targetSheet);
+        } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+          applyCustomHeadersSheetFormatting(targetSheet, activeSchemaConfig.columns.map(c => c.header));
         } else {
           applyStandardSheetFormatting(targetSheet);
         }
@@ -824,11 +888,11 @@ rolloverForm.addEventListener('submit', async (e) => {
 
       if (entry.reopenedOnSource || entry.hasMissingPriorNotes) {
         const excelRow = targetSheet.getRow(entry.targetRow.rowNumber);
-        if (entry.reopenedOnSource) {
+        if (entry.reopenedOnSource && targetColMap.statusCol) {
           excelRow.getCell(targetColMap.statusCol).value = entry.latestRow.status;
           reopenedCount++;
         }
-        if (entry.hasMissingPriorNotes && entry.mergedTargetNotes) {
+        if (entry.hasMissingPriorNotes && entry.mergedTargetNotes && targetColMap.notesCol) {
           excelRow.getCell(targetColMap.notesCol).value = entry.mergedTargetNotes;
           notesSyncedCount++;
         }

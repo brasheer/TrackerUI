@@ -10,12 +10,12 @@ These rules apply to all AI models and coding assistants working in the `Tracker
   - `css/styles.css`: All styles, CSS custom properties, and responsive rules.
   - `js/` Modular Script Files (loaded in order without bundlers):
     - `js/mockMasterAccounts.js`: Dev/localhost mock account records for auto-fill testing.
-    - `js/core-ui.js`: Shared application state, DOM references, Light/Auto/Dark theme & font scaling, modal dialog engine, Tools popover, status bar telemetry, toasts, and PWA Service Worker update checks.
-    - `js/workbook-io.js`: IndexedDB directory handles, folder pickers, OpenXML archive preservation/repair, ExcelJS load/save, dual-write mirroring & auto-retry, schema bootstrapping, daily tab CRUD, and reference sheet auto-fill.
-    - `js/tracker-table.js`: Daily worksheet row indexing & UUIDv4 backfill, sheet stepper/tab strip, request table rendering, global search, sorting, Like-Item filtering, batch status updates, and batch delete.
-    - `js/request-editors.js`: Collapsible bottom editor dock, modal request editor, cross-tab status propagation, ticket details timeline modal, and Supervisor View-Only Mirror inspector.
-    - `js/scratch-sheets.js`: In-app custom scratch sheet workspace tabs, editable spreadsheet grid, right-click context menu, Excel default cell fill colors, app-only striped rows, Data to Columns wizard, formula/value bar, keyboard navigation, and multi-cell TSV clipboard paste.
-    - `js/rollover.js`: Unique request identity matching, chronological notes merging, smart multi-sheet / previous-sheet rollover engine, and startup initialization.
+    - `js/core-ui.js`: Shared application state (including Multi-Department Tracker Profiles & Dynamic Schema state), DOM references, Light/Auto/Dark theme & font scaling, ticket extraction/merge & category helpers, modal dialog engine, Tools popover, status bar telemetry, toasts, and PWA Service Worker update checks.
+    - `js/workbook-io.js`: Profile-scoped IndexedDB directory handles & primary save fail-safe staging, folder pickers, OpenXML archive preservation/repair, ExcelJS load/save, dual-write mirroring & auto-retry, Standard + Custom Department schema discovery & role mapper (`#schemaMapperModal`), Web Worker background parser & Supervisor Multi-Workbook Master Rollup (`#masterRollupModal`), portable `.json` config import/export, daily tab CRUD, and reference sheet auto-fill.
+    - `js/tracker-table.js`: Standard + Custom Department worksheet row indexing & UUIDv4 backfill, sheet stepper/tab strip, dynamic `#tableHead` & `#listBody` rendering, global search, sorting, Like-Item filtering, batch status updates, and batch delete.
+    - `js/request-editors.js`: Collapsible bottom editor dock, modal request editor, dynamic custom schema form grids, `🎯 Grab Ticket` (`[XXXX-XX-XXXX]`), `📥 Pull from Prior Tab`, `🔄 Sync Forward Across Tabs`, cross-tab status propagation, ticket details timeline modal, and Supervisor View-Only Mirror inspector.
+    - `js/scratch-sheets.js`: Multi-Tracker Profile + custom scratch sheet workspace tabs (`#workspaceTabsBar`), editable spreadsheet grid, right-click context menu, Excel default cell fill colors, app-only striped rows, Data to Columns wizard, formula/value bar, keyboard navigation, and multi-cell TSV clipboard paste.
+    - `js/rollover.js`: Unique request identity matching (including multi-ticket token overlap & custom schemas), chronological notes merging, smart multi-sheet / previous-sheet rollover engine, and startup initialization.
   - `manifest.json` & `sw.js`: PWA manifest and offline Service Worker.
   - `assets/icons/`: App icons (`icon.svg`, `icon-192.png`, `icon-512.png`).
 - **Do NOT inline** `<style>` or `<script>` blocks back into `index.html`.

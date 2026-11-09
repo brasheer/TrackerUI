@@ -43,13 +43,81 @@ let scratchAutoSaveTimer = null;
 let scratchIsSaving = false;
 let scratchInlineEditState = null; // { sheetName, row, col, originalRaw, inputEl, tdEl }
 
-// Mirror Retry State
+// Mirror Retry & Primary Save Fail-Safe State
 let pendingMirrorBuffer = null;
 let mirrorCountdownInterval = null;
 let mirrorCountdownSec = 0;
 let mirrorRetryCount = 0;
 const MIRROR_RETRY_INTERVAL_SEC = 15;
 const MIRROR_MAX_AUTO_RETRIES = 20;
+let pendingPrimarySaveState = null; // { profileId, workbookName, savedAt, buffer }
+
+// Multi-Department Tracker Workspace Profiles & Dynamic Column Schema State (v1.17.0)
+const DEFAULT_TRACKER_PROFILE_ID = 'default';
+const TRACKER_PROFILES_STORAGE_KEY = 'trackerui_tracker_profiles_v1';
+const ACTIVE_PROFILE_STORAGE_KEY = 'trackerui_active_profile_id_v1';
+const SCHEMA_OVERRIDES_STORAGE_KEY = 'trackerui_schema_overrides_v1';
+const ACTION_CATEGORY_OVERRIDES_STORAGE_KEY = 'trackerui_action_categories_v1';
+
+function loadSavedTrackerProfiles() {
+  try {
+    const raw = localStorage.getItem(TRACKER_PROFILES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const sanitized = parsed
+          .filter(p => p && typeof p.id === 'string' && p.id.trim() !== '')
+          .map(p => ({
+            id: p.id.trim(),
+            name: String(p.name || 'Daily Tracker').trim() || 'Daily Tracker',
+            mirrorEnabled: p.mirrorEnabled !== false
+          }));
+        if (!sanitized.some(p => p.id === DEFAULT_TRACKER_PROFILE_ID)) {
+          sanitized.unshift({ id: DEFAULT_TRACKER_PROFILE_ID, name: 'Daily Tracker', mirrorEnabled: true });
+        }
+        return sanitized;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not parse saved tracker profiles:', e);
+  }
+  return [{ id: DEFAULT_TRACKER_PROFILE_ID, name: 'Daily Tracker', mirrorEnabled: true }];
+}
+
+let trackerProfiles = loadSavedTrackerProfiles();
+let activeProfileId = (() => {
+  const saved = localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY);
+  if (saved && trackerProfiles.some(p => p.id === saved)) return saved;
+  return DEFAULT_TRACKER_PROFILE_ID;
+})();
+const trackerProfileRuntimeCache = new Map(); // profileId -> runtime snapshot
+
+function loadSavedJsonMapFromStorage(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+    }
+  } catch (_) { /* ignore */ }
+  return {};
+}
+
+let schemaOverridesStore = loadSavedJsonMapFromStorage(SCHEMA_OVERRIDES_STORAGE_KEY);
+let actionCategoryOverridesStore = loadSavedJsonMapFromStorage(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY);
+
+// Active Workbook Dynamic Schema Descriptor (defaults to standard 11-col Broker layout)
+let activeSchemaConfig = {
+  isStandardSchema: true,
+  mode: 'auto',
+  columns: [],
+  primaryCol: 1,
+  ticketCol: 2,
+  secondaryCol: 3,
+  statusCol: 10,
+  notesCol: 9,
+  trackingCol: 11
+};
 
 // Row Selection & Batch / Delete Mode State
 let isDeleteMode = false;
@@ -62,6 +130,8 @@ let masterAccountsMap = []; // [{ broker, master, bidder, yard? }]
 let hasMasterAccountsSheet = false;
 let validationActions = [];
 let validationStatuses = [];
+let validationListsByHeader = new Map(); // lowerHeader -> string[]
+let actionCategoryMap = new Map(); // lowerAction -> parentCategory
 
 const DEV_MOCK_STORAGE_KEY = 'trackerui_dev_mock_accounts';
 function isLocalhostDevEnvironment() {
@@ -223,6 +293,7 @@ if (isNaN(fontScalePercent) || fontScalePercent < FONT_SCALE_MIN || fontScalePer
 // --- DOM ELEMENTS ---
 const metaThemeColor = document.getElementById('metaThemeColor');
 const statusPill = document.getElementById('statusPill');
+const btnRetryPrimarySave = document.getElementById('btnRetryPrimarySave');
 const btnRetryMirror = document.getElementById('btnRetryMirror');
 const workbookPickerWrap = document.getElementById('workbookPickerWrap');
 const workbookSelect = document.getElementById('workbookSelect');
@@ -256,10 +327,15 @@ const btnTemplatesDir = document.getElementById('btnTemplatesDir');
 const templatesDirLabel = document.getElementById('templatesDirLabel');
 const btnResetTemplatesDir = document.getElementById('btnResetTemplatesDir');
 const menuOpenViewOnly = document.getElementById('menuOpenViewOnly');
+const menuOpenMasterRollup = document.getElementById('menuOpenMasterRollup');
+const chkEnableMirrorCopy = document.getElementById('chkEnableMirrorCopy');
 const chkAutoReconnect = document.getElementById('chkAutoReconnect');
 const chkAutoReconnectBar = document.getElementById('chkAutoReconnectBar');
 const btnNewWorkbook = document.getElementById('btnNewWorkbook');
 const btnRepairSchema = document.getElementById('btnRepairSchema');
+const btnOpenSchemaMapper = document.getElementById('btnOpenSchemaMapper');
+const menuAddTrackerProfile = document.getElementById('menuAddTrackerProfile');
+const menuRenameTrackerProfile = document.getElementById('menuRenameTrackerProfile');
 const menuNewScratchSheet = document.getElementById('menuNewScratchSheet');
 const chkDevMockAccounts = document.getElementById('chkDevMockAccounts');
 const devMockStateBadge = document.getElementById('devMockStateBadge');
@@ -269,6 +345,9 @@ const btnRenameTab = document.getElementById('btnRenameTab');
 const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
 const deleteModeLabel = document.getElementById('deleteModeLabel');
+const btnExportConfigJson = document.getElementById('btnExportConfigJson');
+const btnImportConfigJson = document.getElementById('btnImportConfigJson');
+const configJsonFileInput = document.getElementById('configJsonFileInput');
 const btnCheckForUpdates = document.getElementById('btnCheckForUpdates');
 const appVersionTag = document.getElementById('appVersionTag');
 const pwaUpdateBanner = document.getElementById('pwaUpdateBanner');
@@ -469,6 +548,10 @@ const fYard = document.getElementById('fYard');
 const fLots = document.getElementById('fLots');
 const fNotes = document.getElementById('fNotes');
 const btnModalInsertTimestamp = document.getElementById('btnModalInsertTimestamp');
+const btnModalGrabTicket = document.getElementById('btnModalGrabTicket');
+const btnModalPullPrior = document.getElementById('btnModalPullPrior');
+const modalStandardFieldsGrid = document.getElementById('modalStandardFieldsGrid');
+const modalDynamicFieldsGrid = document.getElementById('modalDynamicFieldsGrid');
 const brokerListEl = document.getElementById('brokerList');
 const actionListEl = document.getElementById('actionList');
 
@@ -478,13 +561,18 @@ const dockHeaderToggleZone = document.getElementById('dockHeaderToggleZone');
 const dockModeBadge = document.getElementById('dockModeBadge');
 const dockTargetLabel = document.getElementById('dockTargetLabel');
 const dockKeyBadge = document.getElementById('dockKeyBadge');
+const btnDockPullPrior = document.getElementById('btnDockPullPrior');
+const btnDockSyncForward = document.getElementById('btnDockSyncForward');
 const btnDockTicketDetails = document.getElementById('btnDockTicketDetails');
 const btnDockOpenModal = document.getElementById('btnDockOpenModal');
 const btnDockNewClear = document.getElementById('btnDockNewClear');
 const btnDockToggleCollapse = document.getElementById('btnDockToggleCollapse');
 const dockEntryForm = document.getElementById('dockEntryForm');
+const dockStandardFieldsGrid = document.getElementById('dockStandardFieldsGrid');
+const dockDynamicFieldsGrid = document.getElementById('dockDynamicFieldsGrid');
 const dockSubject = document.getElementById('dockSubject');
 const dockTicket = document.getElementById('dockTicket');
+const btnDockGrabTicket = document.getElementById('btnDockGrabTicket');
 const dockBroker = document.getElementById('dockBroker');
 const dockMaster = document.getElementById('dockMaster');
 const dockBidder = document.getElementById('dockBidder');
@@ -508,6 +596,7 @@ const ticketTimelineList = document.getElementById('ticketTimelineList');
 const ticketQuickNoteForm = document.getElementById('ticketQuickNoteForm');
 const ticketQuickNoteTargetBadge = document.getElementById('ticketQuickNoteTargetBadge');
 const ticketQuickNoteInput = document.getElementById('ticketQuickNoteInput');
+const btnTicketSyncForward = document.getElementById('btnTicketSyncForward');
 const btnTicketEditInDock = document.getElementById('btnTicketEditInDock');
 const btnCloseTicketDetails = document.getElementById('btnCloseTicketDetails');
 
@@ -519,6 +608,7 @@ const btnDownloadViewOnly = document.getElementById('btnDownloadViewOnly');
 const viewOnlySheetSelect = document.getElementById('viewOnlySheetSelect');
 const viewOnlySearchInput = document.getElementById('viewOnlySearchInput');
 const viewOnlyStatsText = document.getElementById('viewOnlyStatsText');
+const viewOnlyHead = document.getElementById('viewOnlyHead');
 const viewOnlyBody = document.getElementById('viewOnlyBody');
 const btnRefreshViewOnly = document.getElementById('btnRefreshViewOnly');
 const btnCloseViewOnly = document.getElementById('btnCloseViewOnly');
@@ -559,6 +649,7 @@ const btnDialogConfirm = document.getElementById('btnDialogConfirm');
 // Workspace Tabs Bar & Editable Scratch Sheet DOM Elements
 const workspaceTabsBar = document.getElementById('workspaceTabsBar');
 const workspaceTabsList = document.getElementById('workspaceTabsList');
+const btnAddTrackerProfile = document.getElementById('btnAddTrackerProfile');
 const scratchSheetMenuWrap = document.getElementById('scratchSheetMenuWrap');
 const btnOpenScratchMenu = document.getElementById('btnOpenScratchMenu');
 const scratchAvailableCountBadge = document.getElementById('scratchAvailableCountBadge');
@@ -619,6 +710,44 @@ const ttcPreviewTitle = document.getElementById('ttcPreviewTitle');
 const ttcPreviewBox = document.getElementById('ttcPreviewBox');
 const btnCancelTextToColumns = document.getElementById('btnCancelTextToColumns');
 const btnConfirmTextToColumns = document.getElementById('btnConfirmTextToColumns');
+
+// Dynamic Column Role Mapper Modal DOM Elements (v1.17.0)
+const schemaMapperModal = document.getElementById('schemaMapperModal');
+const schemaMapperSubtitle = document.getElementById('schemaMapperSubtitle');
+const schemaMapperModeBadge = document.getElementById('schemaMapperModeBadge');
+const schemaMapperForm = document.getElementById('schemaMapperForm');
+const schemaModeSelect = document.getElementById('schemaModeSelect');
+const schemaPrimaryColSelect = document.getElementById('schemaPrimaryColSelect');
+const schemaStatusColSelect = document.getElementById('schemaStatusColSelect');
+const schemaNotesColSelect = document.getElementById('schemaNotesColSelect');
+const schemaTicketColSelect = document.getElementById('schemaTicketColSelect');
+const schemaSecondaryColSelect = document.getElementById('schemaSecondaryColSelect');
+const schemaTrackingColInfo = document.getElementById('schemaTrackingColInfo');
+const schemaDetectedColsPreview = document.getElementById('schemaDetectedColsPreview');
+const btnResetSchemaMapper = document.getElementById('btnResetSchemaMapper');
+const btnCancelSchemaMapper = document.getElementById('btnCancelSchemaMapper');
+const btnSaveSchemaMapper = document.getElementById('btnSaveSchemaMapper');
+
+// Supervisor Multi-Workbook Master Rollup Modal DOM Elements (v1.17.0)
+const masterRollupModal = document.getElementById('masterRollupModal');
+const masterRollupTitle = document.getElementById('masterRollupTitle');
+const masterRollupSubtitle = document.getElementById('masterRollupSubtitle');
+const masterRollupWorkerBadge = document.getElementById('masterRollupWorkerBadge');
+const btnPickMasterRollupFolder = document.getElementById('btnPickMasterRollupFolder');
+const btnExportMasterRollupXlsx = document.getElementById('btnExportMasterRollupXlsx');
+const masterRollupSummaryGrid = document.getElementById('masterRollupSummaryGrid');
+const masterRollupCategoryBar = document.getElementById('masterRollupCategoryBar');
+const masterRollupSourceMode = document.getElementById('masterRollupSourceMode');
+const masterRollupWorkbookFilter = document.getElementById('masterRollupWorkbookFilter');
+const masterRollupCategoryFilter = document.getElementById('masterRollupCategoryFilter');
+const masterRollupStatusFilter = document.getElementById('masterRollupStatusFilter');
+const masterRollupDedupCheck = document.getElementById('masterRollupDedupCheck');
+const masterRollupSearchInput = document.getElementById('masterRollupSearchInput');
+const masterRollupStatsText = document.getElementById('masterRollupStatsText');
+const masterRollupHead = document.getElementById('masterRollupHead');
+const masterRollupBody = document.getElementById('masterRollupBody');
+const btnRefreshMasterRollup = document.getElementById('btnRefreshMasterRollup');
+const btnCloseMasterRollup = document.getElementById('btnCloseMasterRollup');
 
 // --- IN-APP POPUP DIALOG ENGINE (Replaces native alert / confirm / prompt) ---
 let activeDialogResolver = null;
@@ -826,9 +955,122 @@ document.addEventListener('keydown', (e) => {
       viewOnlyModal.classList.remove('open');
       return;
     }
+    if (schemaMapperModal && schemaMapperModal.classList.contains('open')) {
+      schemaMapperModal.classList.remove('open');
+      return;
+    }
+    if (masterRollupModal && masterRollupModal.classList.contains('open')) {
+      masterRollupModal.classList.remove('open');
+      return;
+    }
     closeToolsMenu();
   }
 });
+
+function colNumberToExcelLetters(colNum) {
+  let n = Math.max(1, Math.floor(colNum || 1));
+  let letters = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+// --- TICKET EXTRACTION ([XXXX-XX-XXXX]), DEDUPLICATION & CATEGORY PIPELINE ---
+const BRACKETED_TICKET_REGEX = /\[([A-Za-z0-9]{2,12}(?:-[A-Za-z0-9]{1,12})+)\]/g;
+const TICKET_PLACEHOLDER_IGNORE_SET = new Set([
+  'n/a', 'na', 'none', 'null', 'tbd', 'pending', '-', '—', '--', '0', 'unknown'
+]);
+
+function extractBracketedTicketsFromSubject(subjectText) {
+  const raw = String(subjectText || '');
+  if (!raw) return [];
+  const seen = new Set();
+  const extracted = [];
+  let match;
+  BRACKETED_TICKET_REGEX.lastIndex = 0;
+  while ((match = BRACKETED_TICKET_REGEX.exec(raw)) !== null) {
+    const token = String(match[1] || '').trim().toUpperCase();
+    if (token && !seen.has(token)) {
+      seen.add(token);
+      extracted.push(token);
+    }
+  }
+  return extracted;
+}
+
+function splitNormalizedTicketTokens(rawTicketStr) {
+  if (!rawTicketStr) return [];
+  const seen = new Set();
+  const out = [];
+  String(rawTicketStr)
+    .split(/[,;]+/)
+    .forEach(part => {
+      const cleaned = part.trim().replace(/^#+\s*/, '').replace(/^\[|\]$/g, '').trim();
+      if (!cleaned) return;
+      if (TICKET_PLACEHOLDER_IGNORE_SET.has(cleaned.toLowerCase())) return;
+      const upper = cleaned.toUpperCase();
+      if (!seen.has(upper)) {
+        seen.add(upper);
+        out.push(upper);
+      }
+    });
+  return out;
+}
+
+function mergeCommaDelimitedTickets(existingStr, incomingListOrStr) {
+  const existingTokens = splitNormalizedTicketTokens(existingStr);
+  const incomingTokens = Array.isArray(incomingListOrStr)
+    ? incomingListOrStr.flatMap(t => splitNormalizedTicketTokens(t))
+    : splitNormalizedTicketTokens(incomingListOrStr);
+
+  const seen = new Set(existingTokens);
+  const added = [];
+  incomingTokens.forEach(tok => {
+    if (!seen.has(tok)) {
+      seen.add(tok);
+      existingTokens.push(tok);
+      added.push(tok);
+    }
+  });
+
+  return {
+    merged: existingTokens.join(', '),
+    added,
+    allTokens: existingTokens
+  };
+}
+
+// Supervisor Pipeline: Subtype -> Parent Category Lookup
+const BUILTIN_ACTION_CATEGORY_RULES = [
+  { keywords: ['title', 'poa', 'lien', 'ownership', 'mv-907', 'salvage', 'bos', 'bill of sale'], category: 'Titles & Ownership' },
+  { keywords: ['account', 'unlock', 'password', 'login', 'bidder', 'linking', 'registration', 'kyc', 'license'], category: 'Account & Access' },
+  { keywords: ['bid limit', 'deposit', 'qualification', 'buying power', 'eligibility'], category: 'Bidding & Eligibility' },
+  { keywords: ['wire', 'payment', 'invoice', 'fee', 'storage', 'waiver', 'refund', 'credit', 'relist', 'billing'], category: 'Billing, Fees & Payments' },
+  { keywords: ['gate pass', 'pickup', 'release', 'transport', 'yard', 'sublot', 'keys', 'forklift'], category: 'Yard & Release Ops' },
+  { keywords: ['cancel', 'dispute', 'condition', 'arbitration', 'damage', 'lot'], category: 'Lot & Dispute Review' }
+];
+
+function resolveActionParentCategory(actionStr) {
+  const clean = String(actionStr || '').trim();
+  if (!clean || clean === '—') return 'Uncategorized';
+  const lower = clean.toLowerCase();
+
+  if (actionCategoryOverridesStore && actionCategoryOverridesStore[lower]) {
+    return actionCategoryOverridesStore[lower];
+  }
+  if (actionCategoryMap && actionCategoryMap.has(lower)) {
+    return actionCategoryMap.get(lower);
+  }
+  for (const rule of BUILTIN_ACTION_CATEGORY_RULES) {
+    if (rule.keywords.some(kw => lower.includes(kw))) {
+      return rule.category;
+    }
+  }
+  return 'General Support';
+}
 
 function parseDateTab(tabName) {
   const parts = String(tabName || '').trim().split('-').map(Number);
@@ -870,12 +1112,20 @@ function setStatus(text, stateClass) {
 }
 
 function updateStatusBarTelemetry() {
+  const activeProfile = trackerProfiles.find(p => p.id === activeProfileId) || trackerProfiles[0];
+  const profilePrefix = trackerProfiles.length > 1 && activeProfile
+    ? `[${activeProfile.name}] `
+    : '';
+  const mirrorEnabled = activeProfile ? activeProfile.mirrorEnabled !== false : true;
+
   if (statusFolderInfo) {
     if (!parentDirHandle) {
-      statusFolderInfo.textContent = 'Folder: Not connected';
+      statusFolderInfo.textContent = `${profilePrefix}Folder: Not connected`;
     } else {
-      const supName = supervisorDirHandle ? supervisorDirHandle.name : 'Same as Agent';
-      statusFolderInfo.textContent = `Agent: ${parentDirHandle.name} • Mirror: ${supName}`;
+      const supName = !mirrorEnabled
+        ? 'Off'
+        : (supervisorDirHandle ? supervisorDirHandle.name : 'Same as Agent');
+      statusFolderInfo.textContent = `${profilePrefix}Agent: ${parentDirHandle.name} • Mirror: ${supName}`;
     }
   }
 
@@ -886,10 +1136,13 @@ function updateStatusBarTelemetry() {
       const openTotal = allRows.filter(r => !isCompletedStatus(r.status)).length;
       const meta = scratchSheets.find(s => s.name === activeWorkspaceTab);
       const sRows = meta ? meta.nonEmptyRows : 0;
-      statusRowStats.textContent = `Scratch Tab: ${activeWorkspaceTab} (${sRows} row${sRows === 1 ? '' : 's'}) • Daily Tracker: ${openTotal} open`;
+      statusRowStats.textContent = `Scratch Tab: ${activeWorkspaceTab} (${sRows} row${sRows === 1 ? '' : 's'}) • ${activeProfile ? activeProfile.name : 'Daily Tracker'}: ${openTotal} open`;
     } else {
       const openTotal = allRows.filter(r => !isCompletedStatus(r.status)).length;
-      statusRowStats.textContent = `Showing ${currentlyVisibleRows.length} of ${allRows.length} requests (${openTotal} open across ${dateSheets.length} tab${dateSheets.length === 1 ? '' : 's'})`;
+      const schemaNote = !activeSchemaConfig.isStandardSchema
+        ? ` • ${activeSchemaConfig.columns.length} custom cols`
+        : '';
+      statusRowStats.textContent = `Showing ${currentlyVisibleRows.length} of ${allRows.length} requests (${openTotal} open across ${dateSheets.length} tab${dateSheets.length === 1 ? '' : 's'}${schemaNote})`;
     }
   }
 }
@@ -917,7 +1170,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
-const APP_VERSION = 'v1.16.1';
+const APP_VERSION = 'v1.17.0';
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;
