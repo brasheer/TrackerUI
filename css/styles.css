@@ -1047,17 +1047,26 @@ button:disabled {
   box-shadow: none;
 }
 
-.sheet-tab-pill:hover {
+.sheet-tab-pill:hover:not(.active),
+button.sheet-tab-pill:hover:not(.active) {
   border-color: var(--accent);
   color: var(--text);
   background: var(--surface-hover);
 }
 
-.sheet-tab-pill.active {
+.sheet-tab-pill.active,
+button.sheet-tab-pill.active {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+}
+
+.sheet-tab-pill.active:hover,
+button.sheet-tab-pill.active:hover {
+  background: var(--accent-soft-hover);
+  border-color: var(--accent);
+  color: var(--accent-hover);
 }
 
 .sheet-tab-count {
@@ -2221,13 +2230,21 @@ tr.shadow-new-row:hover .shadow-action-pill {
   color: var(--text-secondary);
 }
 
-.rollover-source-btn:hover:not(:disabled) {
+.rollover-source-btn:hover:not(:disabled):not(.active),
+button.rollover-source-btn:hover:not(:disabled):not(.active) {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.rollover-source-btn.active {
+.rollover-source-btn.active,
+button.rollover-source-btn.active {
   background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.rollover-source-btn.active:hover,
+button.rollover-source-btn.active:hover {
+  background: var(--accent-hover);
   color: var(--accent-contrast);
 }
 
@@ -2647,13 +2664,15 @@ tr.shadow-new-row:hover .shadow-action-pill {
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-.wb-profile-tab:hover {
+.wb-profile-tab:hover:not(.active),
+button.wb-profile-tab:hover:not(.active) {
   background: var(--surface-hover);
   border-color: var(--accent);
   color: var(--text);
 }
 
-.wb-profile-tab.active {
+.wb-profile-tab.active,
+button.wb-profile-tab.active {
   background: var(--accent);
   color: var(--accent-contrast);
   border-color: var(--accent);
@@ -2661,23 +2680,34 @@ tr.shadow-new-row:hover .shadow-action-pill {
   box-shadow: var(--shadow-xs);
 }
 
-.wb-profile-tab.active .ws-tab-pill-count {
+.wb-profile-tab.active:hover,
+button.wb-profile-tab.active:hover {
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+  border-color: var(--accent-hover);
+}
+
+.wb-profile-tab.active .ws-tab-pill-count,
+button.wb-profile-tab.active:hover .ws-tab-pill-count {
   background: rgba(15, 23, 42, 0.22);
   color: var(--accent-contrast);
 }
 
-.wb-profile-tab.active .ws-tab-schema-tag {
+.wb-profile-tab.active .ws-tab-schema-tag,
+button.wb-profile-tab.active:hover .ws-tab-schema-tag {
   background: rgba(15, 23, 42, 0.2);
   color: var(--accent-contrast);
   border-color: rgba(255, 255, 255, 0.28);
 }
 
-.wb-profile-tab.active .ws-tab-close-btn {
+.wb-profile-tab.active .ws-tab-close-btn,
+button.wb-profile-tab.active:hover .ws-tab-close-btn {
   color: var(--accent-contrast);
   opacity: 0.85;
 }
 
-.wb-profile-tab.active .ws-tab-close-btn:hover {
+.wb-profile-tab.active .ws-tab-close-btn:hover,
+button.wb-profile-tab.active:hover .ws-tab-close-btn:hover {
   background: rgba(15, 23, 42, 0.25);
   color: var(--accent-contrast);
   opacity: 1;
@@ -2724,18 +2754,27 @@ tr.shadow-new-row:hover .shadow-action-pill {
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-.ws-app-tab:hover {
+.ws-app-tab:hover:not(.active),
+button.ws-app-tab:hover:not(.active) {
   background: var(--surface-hover);
   border-color: var(--accent-border);
   color: var(--text);
 }
 
-.ws-app-tab.active {
+.ws-app-tab.active,
+button.ws-app-tab.active {
   background: var(--row-active);
   color: var(--accent);
   border-color: var(--accent);
   font-weight: 700;
   box-shadow: var(--shadow-xs);
+}
+
+.ws-app-tab.active:hover,
+button.ws-app-tab.active:hover {
+  background: var(--row-hover);
+  color: var(--accent-hover);
+  border-color: var(--accent);
 }
 
 .ws-tab-pill-count {

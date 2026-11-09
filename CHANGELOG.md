@@ -8,7 +8,16 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.17.2` (Current — `meerkat`)
+### `v1.17.3` (Current — `meerkat`)
+- **🎨 High-Contrast Active Workbook Profile Tab Hover Fix (`css/styles.css`)**:
+  - Fixed an issue where hovering over the active workbook tab (`.wb-profile-tab.active`) caused button text, icons, and badges to blend into the button background and become illegible in both Light and Dark modes.
+  - Root cause: generic `button:hover:not(:disabled)` specificity `(0, 2, 1)` overridden the tab's background with `--surface-hover` while retaining `--accent-contrast` text color (`#082f49` on `#2d3d56` in Dark mode; `#ffffff` on `#f1f5f9` in Light mode).
+  - Explicitly scoped inactive tab hover (`.wb-profile-tab:hover:not(.active)`), elevated active tab hover specificity (`.wb-profile-tab.active:hover` / `button.wb-profile-tab.active:hover`), and paired `var(--accent-hover)` with `var(--accent-contrast)` for crisp, high-contrast, accessible readability.
+  - Applied the same specificity and contrast guard across `.ws-app-tab`, `.sheet-tab-pill`, and `.rollover-source-btn`.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v26'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.17.3` in [`index.html`](index.html).
+
+### `v1.17.2`
 - **🗂️ Separated Workbook Tabs Bar vs. In-Workbook Sheet Tabs Bar & Filled Active Tab Colors (`#trackerProfilesBar`, `#workspaceTabsBar`, `css/styles.css`, `js/scratch-sheets.js`)**:
   - Separated Department / Workbook Tracker Tabs into their own top-level **`#trackerProfilesBar`** (`Workbooks` bar above `#filePathsBar`) while keeping **`#workspaceTabsBar`** (`Sheets` bar below `#filePathsBar`) strictly for views inside the active workbook (`Daily Requests` + open `Scratch Sheets`), preserving clear parent-to-child hierarchy.
   - Replaced subtle bottom-underline active tab indicators with unmistakable **filled active tab backgrounds** across both bars (`.wb-profile-tab.active` uses solid `--accent` fill; `.ws-app-tab.active` uses distinct `--row-active` color fill).
