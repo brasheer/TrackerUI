@@ -8,7 +8,16 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.16.0` (Current — `meerkat`)
+### `v1.16.1` (Current — `meerkat`)
+- **Fixed Scratch Sheet `Enter` / Continuous Typing Focus & Auto-Save Interruption (`js/scratch-sheets.js`)**:
+  - Fixed a race condition where pressing `Enter` to commit a cell started a 1.2s background auto-save timer (`scheduleScratchAutoSave`) that fired `commitActiveScratchInlineEdit()` *while* typing in the next cell below—destroying the active inline `<input>`, dropping DOM focus to `document.body` during `.xlsx` buffer serialization, and causing subsequent keystrokes to overwrite partial cell text.
+  - Background auto-save (`isUserActivelyInteractingWithScratch`) now defers whenever an inline cell editor, formula input, or pointer drag is active, resets its debounce timer on every inline keystroke, tracks `scratchMutationVersion` across async disk writes so in-flight saves never drop newer edits, restores `#scratchGridWrap` focus cleanly, and moves the selection down 1 row (`Shift+Enter` up 1 row) when pressing `Enter` on the grid (`F2` or double-click edits existing text in place).
+- **Roadmap Update (`FUTURE_FEATURES.md`)**:
+  - Documented architecture and viability plan for **Multi-Department Tracker Tabs & Dynamic Column Schema Engine** (side-by-side department tracker profiles with dynamic Row-1 header discovery and semantic role mapping).
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v22'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.16.1` in [`index.html`](index.html).
+
+### `v1.16.0`
 - **Scratch Sheet Right-Click Context Menu (`#scratchContextMenu`, `js/scratch-sheets.js`, `css/styles.css`)**:
   - Added an Excel-style right-click context menu on `#scratchGridWrap` supporting **Cut (`Ctrl+X`)**, **Copy (`Ctrl+C`)**, **Paste (`Ctrl+V`)** (with system Clipboard API + internal clipboard fallback), quick Excel default **Fill Color** swatches, **Data to Columns...**, **Clear Contents (`Del`)**, and **Clear Fill Color**.
   - Preserves active multi-cell highlights when right-clicking inside a selection and moves selection when right-clicking outside it (while preserving native browser right-click inside open inline cell text inputs).

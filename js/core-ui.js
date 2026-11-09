@@ -917,7 +917,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
-const APP_VERSION = 'v1.16.0';
+const APP_VERSION = 'v1.16.1';
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;

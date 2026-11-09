@@ -20,6 +20,7 @@ let scratchDragState = null; // { mode: 'cells'|'rows'|'cols', sheetName, client
 let scratchColResizeState = null; // { sheetName, col, thEl, resizerEl, startX, startWidthPx, currentWidthPx } | null
 let lastScratchNativeCopyAt = 0;
 let lastFormulaCoalesceMeta = null; // { key, at }
+let scratchMutationVersion = 0;
 let scratchStripedRowsEnabled = localStorage.getItem(SCRATCH_STRIPED_STORAGE_KEY) !== 'false';
 let activeScratchFillPresetId = localStorage.getItem(SCRATCH_LAST_FILL_STORAGE_KEY) || 'gold_80';
 let activeTextToColumnsState = null; // { sheetName, col, minRow, maxRow, sourceRows: [{ r, raw }] } | null
@@ -1026,9 +1027,10 @@ function selectScratchCell(rNum, cNum, { scrollIntoView = false, extendSelection
   }
 }
 
-function commitActiveScratchInlineEdit() {
+function commitActiveScratchInlineEdit({ restoreGridFocus = false } = {}) {
   if (!scratchInlineEditState) return;
   const state = scratchInlineEditState;
+  const inputHadFocus = Boolean(state.inputEl && document.activeElement === state.inputEl);
   scratchInlineEditState = null;
 
   const newRaw = state.inputEl ? state.inputEl.value : state.originalRaw;
@@ -1040,6 +1042,15 @@ function commitActiveScratchInlineEdit() {
     recordScratchCellEdit(state.sheetName, state.row, state.col, newRaw);
   } else {
     refreshSingleScratchCellDOM(state.sheetName, state.row, state.col);
+  }
+
+  if (
+    (restoreGridFocus || inputHadFocus) &&
+    activeWorkspaceTab !== DAILY_TRACKER_WS_TAB &&
+    scratchGridWrap &&
+    (!document.activeElement || document.activeElement === document.body)
+  ) {
+    scratchGridWrap.focus({ preventScroll: true });
   }
 }
 
@@ -1053,39 +1064,88 @@ function cancelActiveScratchInlineEdit() {
   }
   refreshSingleScratchCellDOM(state.sheetName, state.row, state.col);
   syncScratchFormulaBarFromActiveCell();
+  if (
+    activeWorkspaceTab !== DAILY_TRACKER_WS_TAB &&
+    scratchGridWrap &&
+    (!document.activeElement || document.activeElement === document.body)
+  ) {
+    scratchGridWrap.focus({ preventScroll: true });
+  }
 }
 
-function scheduleScratchAutoSave() {
+function isUserActivelyInteractingWithScratch() {
+  if (scratchInlineEditState) return true;
+  if (scratchDragState || scratchColResizeState) return true;
+  if (scratchFormulaInput && document.activeElement === scratchFormulaInput) return true;
+  return false;
+}
+
+function scheduleScratchAutoSave(delayMs = 1800) {
   if (scratchAutoSaveTimer) {
     clearTimeout(scratchAutoSaveTimer);
   }
   scratchAutoSaveTimer = setTimeout(() => {
     scratchAutoSaveTimer = null;
-    flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true });
-  }, 1200);
+    if (isUserActivelyInteractingWithScratch()) {
+      // Never steal focus or commit mid-typing; wait until the user finishes editing the cell
+      scheduleScratchAutoSave(1500);
+      return;
+    }
+    flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true, commitInline: false });
+  }, delayMs);
 }
 
-async function flushPendingScratchEditsToDisk({ reloadAfter = false, silentToast = false } = {}) {
-  if (scratchAutoSaveTimer) {
-    clearTimeout(scratchAutoSaveTimer);
-    scratchAutoSaveTimer = null;
+async function flushPendingScratchEditsToDisk({
+  reloadAfter = false,
+  silentToast = false,
+  commitInline = true
+} = {}) {
+  if (commitInline) {
+    if (scratchAutoSaveTimer) {
+      clearTimeout(scratchAutoSaveTimer);
+      scratchAutoSaveTimer = null;
+    }
+    commitActiveScratchInlineEdit({ restoreGridFocus: true });
+  } else if (isUserActivelyInteractingWithScratch()) {
+    scheduleScratchAutoSave(1500);
+    return false;
   }
-  commitActiveScratchInlineEdit();
 
   if (!workbook || !workingFileHandle) return false;
   if (!hasAnyPendingScratchMutations() && silentToast) return true;
-  if (scratchIsSaving) return false;
+  if (scratchIsSaving) {
+    if (hasAnyPendingScratchMutations()) {
+      scheduleScratchAutoSave(1500);
+    }
+    return false;
+  }
 
+  const versionAtSaveStart = scratchMutationVersion;
   scratchIsSaving = true;
   updateScratchSaveBadgeUI();
 
   const saved = await saveWorkbookToDisk();
   scratchIsSaving = false;
 
+  // Restore grid keyboard focus if browser dropped activeElement to body during async file write
+  if (
+    activeWorkspaceTab !== DAILY_TRACKER_WS_TAB &&
+    !scratchInlineEditState &&
+    scratchGridWrap &&
+    (!document.activeElement || document.activeElement === document.body)
+  ) {
+    scratchGridWrap.focus({ preventScroll: true });
+  }
+
   if (saved) {
-    scratchPendingEdits.clear();
-    scratchPendingFills.clear();
-    scratchPendingColWidths.clear();
+    if (scratchMutationVersion === versionAtSaveStart) {
+      scratchPendingEdits.clear();
+      scratchPendingFills.clear();
+      scratchPendingColWidths.clear();
+    } else {
+      // User made additional edits while disk I/O was in flight; queue follow-up auto-save
+      scheduleScratchAutoSave(1800);
+    }
     updateScratchSaveBadgeUI();
     renderWorkspaceTabsBar();
     if (reloadAfter) {
@@ -1310,6 +1370,7 @@ function applyScratchCellChanges(
   updateScratchUndoRedoButtonsUI();
   updateScratchSaveBadgeUI();
   renderWorkspaceTabsBar();
+  scratchMutationVersion++;
   scheduleScratchAutoSave();
   return recordedChanges.length;
 }
@@ -1473,6 +1534,11 @@ function startScratchInlineEdit(rNum, cNum, initialChar = null) {
     tdEl: td
   };
 
+  // Defer any pending background auto-save as soon as the user starts editing another cell
+  if (scratchAutoSaveTimer) {
+    scheduleScratchAutoSave(1800);
+  }
+
   if (scratchFormulaInput) {
     scratchFormulaInput.value = input.value;
   }
@@ -1481,19 +1547,22 @@ function startScratchInlineEdit(rNum, cNum, initialChar = null) {
     if (scratchFormulaInput) {
       scratchFormulaInput.value = input.value;
     }
+    if (scratchAutoSaveTimer) {
+      scheduleScratchAutoSave(1800);
+    }
   });
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
-      commitActiveScratchInlineEdit();
+      commitActiveScratchInlineEdit({ restoreGridFocus: true });
       selectScratchCell(e.shiftKey ? Math.max(1, rNum - 1) : rNum + 1, cNum, { scrollIntoView: true });
       if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
     } else if (e.key === 'Tab') {
       e.preventDefault();
       e.stopPropagation();
-      commitActiveScratchInlineEdit();
+      commitActiveScratchInlineEdit({ restoreGridFocus: true });
       selectScratchCell(rNum, e.shiftKey ? Math.max(1, cNum - 1) : cNum + 1, { scrollIntoView: true });
       if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
     } else if (e.key === 'Escape') {
@@ -1820,6 +1889,7 @@ function recordScratchColumnWidthChange(sheetName, colNum, widthPx) {
     scratchPendingColWidths.set(sheetName, new Map());
   }
   scratchPendingColWidths.get(sheetName).set(colNum, excelWidth);
+  scratchMutationVersion++;
   updateScratchSaveBadgeUI();
   renderWorkspaceTabsBar();
   scheduleScratchAutoSave();
@@ -3281,6 +3351,13 @@ if (scratchGridWrap) {
         );
         return;
       case 'Enter':
+        e.preventDefault();
+        selectScratchCell(
+          e.shiftKey ? Math.max(1, range.anchorRow - 1) : range.anchorRow + 1,
+          range.anchorCol,
+          { scrollIntoView: true }
+        );
+        return;
       case 'F2':
         e.preventDefault();
         startScratchInlineEdit(range.anchorRow, range.anchorCol);
