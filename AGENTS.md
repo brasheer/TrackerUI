@@ -56,7 +56,7 @@ Daily tabs must use `MM-DD-YYYY` naming and follow this exact 11-column schema:
   - `template` sheet (11 styled headers, column widths, hidden Column K)
   - `validation lists` sheet (default `Requested Actions` in Col A and `Status Options` in Col B)
   - Today's `MM-DD-YYYY` daily tab cloned from `template`.
-  - *(Note: `Master Accounts` is excluded when bootstrapping new monthly workbooks per `newfeatures.txt` L15, though optional `Master Accounts` sheets are still parsed if present).*
+  - *(Note: `Master Accounts` is excluded when bootstrapping new monthly workbooks, though optional `Master Accounts` sheets are still parsed if present).*
 
 ### Primary Key Rules (Column K)
 - **Pure UUIDv4 Only**: New rows must always generate a lowercase 36-character UUIDv4 via `crypto.randomUUID()` (`generateTrackingGuid()`). Never use Ticket Number (Col B) or composite broker hashes as a primary key for new rows.
@@ -91,9 +91,9 @@ Daily tabs must use `MM-DD-YYYY` naming and follow this exact 11-column schema:
 
 ---
 
-## 6. Automatic Changelog & Feature Tracking (`CHANGELOG.md` & `newfeatures.txt`)
-- **Always Sync [`CHANGELOG.md`](CHANGELOG.md)**: Whenever a feature, bug fix, or suggestion (whether from [`newfeatures.txt`](newfeatures.txt) or a direct user request) is implemented, partially implemented, or decided against:
-  1. Update the **Feature & Suggestion Status Matrix** in [`CHANGELOG.md`](CHANGELOG.md) (`✅ Implemented`, `⏳ Partially Implemented`, `📋 Planned / Backlog`, or `🚫 Decided Against / Superseded` with the rationale).
+## 6. Automatic Changelog & Feature Tracking (`CHANGELOG.md` & `FUTURE_FEATURES.md`)
+- **Always Keep Docs Synced**:
+  1. Record upcoming proposals, backlog items, or architecture plans in [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md) (`📋 Planned`, `⏳ Partially Implemented`, `⏸️ Parked`, or `🚫 Decided Against`).
   2. When bumping the app version (e.g., in `index.html`, `js/core-ui.js`, and `sw.js`), add a new release entry under **Version Release History** in [`CHANGELOG.md`](CHANGELOG.md).
-- **Status Reporting**: When the user asks for feature status or after completing a feature from [`newfeatures.txt`](newfeatures.txt), automatically list which items are newly implemented, remaining in progress/backlog, or decided against.
+- **Status Reporting**: When the user asks for feature status or after completing a feature from [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md), automatically report which items are newly implemented, remaining in progress/backlog, or decided against.
 

@@ -113,5 +113,7 @@ errorlogs
 # Local Templates & Working Data
 # ==========================================
 tracker templates/
+newfeatures.txt
+
 
 
