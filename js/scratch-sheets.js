@@ -565,32 +565,17 @@ function updateScratchUndoRedoButtonsUI() {
   }
 }
 
-function renderWorkspaceTabsBar() {
-  if (!workspaceTabsBar || !workspaceTabsList) return;
-  const hasMultiProfiles = Array.isArray(trackerProfiles) && trackerProfiles.length > 1;
-  if (!workbook && !hasMultiProfiles) {
-    workspaceTabsBar.style.display = 'none';
-    return;
-  }
-
-  workspaceTabsBar.style.display = 'flex';
-  if (scratchSheetMenuWrap) {
-    scratchSheetMenuWrap.style.display = workbook ? 'inline-flex' : 'none';
-  }
-  if (workbook) {
-    renderScratchMenuDropdown();
-  }
-
-  workspaceTabsList.innerHTML = '';
-
-  // 1. Pinned Department / Tracker Workspace Profile Tabs
+function renderTrackerProfilesBar() {
+  if (!trackerProfilesBar || !trackerProfilesList) return;
   const profilesToRender = Array.isArray(trackerProfiles) && trackerProfiles.length > 0
     ? trackerProfiles
     : [{ id: DEFAULT_TRACKER_PROFILE_ID, name: 'Daily Tracker', mirrorEnabled: true }];
 
+  trackerProfilesBar.style.display = 'flex';
+  trackerProfilesList.innerHTML = '';
+
   profilesToRender.forEach(prof => {
     const isCurrentProf = prof.id === activeProfileId;
-    const isActiveTab = isCurrentProf && activeWorkspaceTab === DAILY_TRACKER_WS_TAB;
 
     let openCount = null;
     let isCustomDept = false;
@@ -613,21 +598,18 @@ function renderWorkspaceTabsBar() {
       ? `<span class="ws-tab-schema-tag" title="Dynamic custom column schema active">Custom</span>`
       : '';
     const closeBtnHtml = canCloseProfile
-      ? `<span class="ws-tab-close-btn" data-close-profile-tab="${escapeHtml(prof.id)}" title="Remove ${escapeHtml(prof.name)} workspace tab (Excel files stay untouched)" aria-label="Remove ${escapeHtml(prof.name)} tab">×</span>`
+      ? `<span class="ws-tab-close-btn" data-close-profile-tab="${escapeHtml(prof.id)}" title="Remove ${escapeHtml(prof.name)} workbook tab (Excel files stay untouched)" aria-label="Remove ${escapeHtml(prof.name)} tab">×</span>`
       : '';
 
     const profBtn = document.createElement('button');
     profBtn.type = 'button';
-    profBtn.className = `ws-app-tab${isActiveTab ? ' active' : ''}`;
+    profBtn.className = `wb-profile-tab${isCurrentProf ? ' active' : ''}`;
     profBtn.setAttribute('role', 'tab');
-    profBtn.setAttribute('aria-selected', String(isActiveTab));
+    profBtn.setAttribute('aria-selected', String(isCurrentProf));
     profBtn.title = `${prof.name}${prof.mirrorEnabled === false ? ' (Mirror Off)' : ''} — Double-click to rename`;
     profBtn.innerHTML = `
       <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <rect x="2.5" y="3" width="15" height="14" rx="2"></rect>
-        <line x1="2.5" y1="7.5" x2="17.5" y2="7.5"></line>
-        <line x1="7" y1="11.5" x2="13.5" y2="11.5"></line>
-        <line x1="7" y1="14.2" x2="11.5" y2="14.2"></line>
+        <path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.9a1.5 1.5 0 0 1 1.1.47l1.1 1.06a1.5 1.5 0 0 0 1.05.47H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5v-9Z"></path>
       </svg>
       <span>${escapeHtml(prof.name)}</span>
       ${customTagHtml}
@@ -645,7 +627,9 @@ function renderWorkspaceTabsBar() {
         return;
       }
       if (isCurrentProf) {
-        switchToWorkspaceTab(DAILY_TRACKER_WS_TAB);
+        if (activeWorkspaceTab !== DAILY_TRACKER_WS_TAB) {
+          switchToWorkspaceTab(DAILY_TRACKER_WS_TAB);
+        }
       } else if (typeof switchTrackerProfile === 'function') {
         switchTrackerProfile(prof.id);
       }
@@ -658,53 +642,86 @@ function renderWorkspaceTabsBar() {
       }
     });
 
-    workspaceTabsList.appendChild(profBtn);
+    trackerProfilesList.appendChild(profBtn);
   });
+}
 
-  // 2. Open Custom / Scratch Sheet App Tabs (for the active workbook)
-  if (workbook && openScratchTabs.length > 0) {
-    const sep = document.createElement('span');
-    sep.className = 'ws-tabs-divider';
-    sep.setAttribute('aria-hidden', 'true');
-    workspaceTabsList.appendChild(sep);
+function renderWorkspaceTabsBar() {
+  renderTrackerProfilesBar();
+
+  if (!workspaceTabsBar || !workspaceTabsList) return;
+  if (!workbook) {
+    workspaceTabsBar.style.display = 'none';
+    return;
   }
 
-  if (workbook) {
-    openScratchTabs.forEach(sheetName => {
-      const isActive = activeWorkspaceTab === sheetName;
-      const isDirty = hasAnyPendingScratchMutations(sheetName);
-      const meta = scratchSheets.find(s => s.name === sheetName);
-      const rowCount = meta ? meta.nonEmptyRows : 0;
+  workspaceTabsBar.style.display = 'flex';
+  if (scratchSheetMenuWrap) {
+    scratchSheetMenuWrap.style.display = 'inline-flex';
+  }
+  renderScratchMenuDropdown();
 
-      const tabBtn = document.createElement('button');
-      tabBtn.type = 'button';
-      tabBtn.className = `ws-app-tab${isActive ? ' active' : ''}`;
-      tabBtn.setAttribute('role', 'tab');
-      tabBtn.setAttribute('aria-selected', String(isActive));
-      tabBtn.title = `Scratch Sheet: ${sheetName} (${rowCount} non-empty rows)`;
-      tabBtn.innerHTML = `
-        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="14" height="14" rx="2"></rect>
-          <line x1="3" y1="8" x2="17" y2="8"></line>
-          <line x1="8" y1="8" x2="8" y2="17"></line>
-        </svg>
-        <span>${escapeHtml(sheetName)}</span>
-        ${isDirty ? '<span class="ws-tab-dirty-dot" title="Unsaved edits pending"></span>' : `<span class="ws-tab-pill-count">${rowCount}</span>`}
-        <span class="ws-tab-close-btn" data-close-scratch-tab="${escapeHtml(sheetName)}" title="Close ${escapeHtml(sheetName)} tab (sheet stays saved in workbook)" aria-label="Close ${escapeHtml(sheetName)} tab">×</span>
-      `;
+  workspaceTabsList.innerHTML = '';
 
-      tabBtn.addEventListener('click', (e) => {
-        const closeTarget = e.target.closest('[data-close-scratch-tab]');
-        if (closeTarget) {
-          e.stopPropagation();
-          closeScratchSheetAppTab(sheetName);
-          return;
-        }
-        switchToWorkspaceTab(sheetName);
-      });
-      workspaceTabsList.appendChild(tabBtn);
+  // 1. Active Workbook's Primary Daily Requests Sheet View Tab
+  const isTrackerViewActive = activeWorkspaceTab === DAILY_TRACKER_WS_TAB;
+  const openCount = allRows.filter(r => !isCompletedStatus(r.status)).length;
+  const trackerViewBtn = document.createElement('button');
+  trackerViewBtn.type = 'button';
+  trackerViewBtn.className = `ws-app-tab${isTrackerViewActive ? ' active' : ''}`;
+  trackerViewBtn.setAttribute('role', 'tab');
+  trackerViewBtn.setAttribute('aria-selected', String(isTrackerViewActive));
+  trackerViewBtn.title = `View daily MM-DD-YYYY request tabs (${openCount} open request(s))`;
+  trackerViewBtn.innerHTML = `
+    <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="2.5" y="3" width="15" height="14" rx="2"></rect>
+      <line x1="2.5" y1="7.5" x2="17.5" y2="7.5"></line>
+      <line x1="7" y1="11.5" x2="13.5" y2="11.5"></line>
+      <line x1="7" y1="14.2" x2="11.5" y2="14.2"></line>
+    </svg>
+    <span>Daily Requests</span>
+    <span class="ws-tab-pill-count" title="${openCount} open request(s)">${openCount}</span>
+  `;
+  trackerViewBtn.addEventListener('click', () => {
+    switchToWorkspaceTab(DAILY_TRACKER_WS_TAB);
+  });
+  workspaceTabsList.appendChild(trackerViewBtn);
+
+  // 2. Open Custom / Scratch Sheet App Tabs (belonging to this active workbook)
+  openScratchTabs.forEach(sheetName => {
+    const isActive = activeWorkspaceTab === sheetName;
+    const isDirty = hasAnyPendingScratchMutations(sheetName);
+    const meta = scratchSheets.find(s => s.name === sheetName);
+    const rowCount = meta ? meta.nonEmptyRows : 0;
+
+    const tabBtn = document.createElement('button');
+    tabBtn.type = 'button';
+    tabBtn.className = `ws-app-tab${isActive ? ' active' : ''}`;
+    tabBtn.setAttribute('role', 'tab');
+    tabBtn.setAttribute('aria-selected', String(isActive));
+    tabBtn.title = `Scratch Sheet: ${sheetName} (${rowCount} non-empty rows)`;
+    tabBtn.innerHTML = `
+      <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="14" height="14" rx="2"></rect>
+        <line x1="3" y1="8" x2="17" y2="8"></line>
+        <line x1="8" y1="8" x2="8" y2="17"></line>
+      </svg>
+      <span>${escapeHtml(sheetName)}</span>
+      ${isDirty ? '<span class="ws-tab-dirty-dot" title="Unsaved edits pending"></span>' : `<span class="ws-tab-pill-count">${rowCount}</span>`}
+      <span class="ws-tab-close-btn" data-close-scratch-tab="${escapeHtml(sheetName)}" title="Close ${escapeHtml(sheetName)} tab (sheet stays saved in workbook)" aria-label="Close ${escapeHtml(sheetName)} tab">×</span>
+    `;
+
+    tabBtn.addEventListener('click', (e) => {
+      const closeTarget = e.target.closest('[data-close-scratch-tab]');
+      if (closeTarget) {
+        e.stopPropagation();
+        closeScratchSheetAppTab(sheetName);
+        return;
+      }
+      switchToWorkspaceTab(sheetName);
     });
-  }
+    workspaceTabsList.appendChild(tabBtn);
+  });
 }
 
 function closeScratchFillDropdown() {
@@ -3659,3 +3676,23 @@ document.addEventListener('keydown', (e) => {
     flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: false });
   }
 });
+
+// Closeable / Acknowledgeable Scratch Sheet Formula Warning Persistence
+const SCRATCH_FORMULA_NOTICE_ACK_KEY = 'trackerui_scratch_formula_notice_ack_v1';
+
+function syncScratchFormulaNoticeVisibility() {
+  if (!scratchFormulaNotice) return;
+  const isAcked = localStorage.getItem(SCRATCH_FORMULA_NOTICE_ACK_KEY) === 'true';
+  scratchFormulaNotice.style.display = isAcked ? 'none' : 'flex';
+}
+
+if (btnAckScratchFormulaNotice) {
+  btnAckScratchFormulaNotice.addEventListener('click', () => {
+    localStorage.setItem(SCRATCH_FORMULA_NOTICE_ACK_KEY, 'true');
+    syncScratchFormulaNoticeVisibility();
+    showToast('Scratch sheet formula warning acknowledged and hidden.', 'info');
+  });
+}
+
+syncScratchFormulaNoticeVisibility();
+renderTrackerProfilesBar();

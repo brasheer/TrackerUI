@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.17.1</title>
+  <title>TrackerUI v1.17.2</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.17.1">
+  <link rel="stylesheet" href="css/styles.css?v=1.17.2">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.17.1 — Click to check for updates &amp; refresh app cache">v1.17.1</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.17.2 — Click to check for updates &amp; refresh app cache">v1.17.2</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,24 @@
     </div>
   </div>
 
-  <!-- Persistent File Paths & Auto-Reconnect Status Strip -->
+  <!-- Level 1 Bar: Department / Workbook Tracker Tabs (Separate from In-Workbook Sheet Tabs) -->
+  <div id="trackerProfilesBar" class="tracker-profiles-bar" style="display:none;" role="tablist" aria-label="Department tracker workbooks">
+    <div class="tracker-profiles-left">
+      <span class="bar-level-label">Workbooks</span>
+      <div id="trackerProfilesList" class="tracker-profiles-list"></div>
+    </div>
+    <div class="tracker-profiles-actions">
+      <button type="button" id="btnAddTrackerProfile" class="btn-add-tracker-profile btn-with-icon" title="Open an additional Department Tracker workbook tab (with its own folder and dynamic column headers)">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="10" y1="4.5" x2="10" y2="15.5"></line>
+          <line x1="4.5" y1="10" x2="15.5" y2="10"></line>
+        </svg>
+        <span>Tracker Tab</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Persistent File Paths & Auto-Reconnect Status Strip (Scoped to Active Workbook Tab) -->
   <div id="filePathsBar" class="file-paths-bar">
     <div class="file-paths-list">
       <span class="file-path-item" id="pathTrackerItem" title="Active working tracker workbook path">
@@ -443,17 +460,13 @@
     </div>
   </div>
 
-  <!-- In-App Workspace Tab Bar (Department Tracker Profiles + Open Workbook Scratch Sheet Tabs) -->
-  <div id="workspaceTabsBar" class="workspace-tabs-bar" style="display:none;" role="tablist" aria-label="Open workbook workspace tabs">
-    <div id="workspaceTabsList" class="workspace-tabs-list"></div>
+  <!-- Level 2 Bar: Active Workbook Sheet Views (Daily Tracker View + Open Scratch Sheets) -->
+  <div id="workspaceTabsBar" class="workspace-tabs-bar" style="display:none;" role="tablist" aria-label="Sheets in active workbook">
+    <div class="workspace-tabs-left">
+      <span class="bar-level-label">Sheets</span>
+      <div id="workspaceTabsList" class="workspace-tabs-list"></div>
+    </div>
     <div class="workspace-tabs-actions">
-      <button type="button" id="btnAddTrackerProfile" class="btn-add-tracker-profile btn-with-icon" title="Open an additional Department Tracker tab (with its own folder and dynamic column headers)">
-        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <line x1="10" y1="4.5" x2="10" y2="15.5"></line>
-          <line x1="4.5" y1="10" x2="15.5" y2="10"></line>
-        </svg>
-        <span>Tracker Tab</span>
-      </button>
       <div id="scratchSheetMenuWrap" class="scratch-menu-wrap">
         <button type="button" id="btnOpenScratchMenu" class="btn-open-scratch-menu btn-with-icon" aria-haspopup="true" aria-expanded="false" title="Open an existing scratch sheet or create a new scratch sheet in this workbook">
           <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -815,11 +828,16 @@
     </div>
 
     <div id="scratchFormulaNotice" class="scratch-formula-notice" role="note">
-      <span class="scratch-formula-notice-icon" aria-hidden="true">⚠️</span>
-      <span class="scratch-formula-notice-body">
-        <strong>Formulas Do Not Run in Scratch Sheets:</strong>
-        Scratch sheets are a plain-value grid — Excel formulas (<code>=SUM</code>, <code>=XLOOKUP</code>, <code>=LET</code>, cross-sheet references, etc.) are <strong>not evaluated or recalculated</strong> here and shouldn't be expected to work in-app. Existing Excel 365 formulas are stored as raw OpenXML text (which is why internal tokens like <code>_xlpm.data</code> or <code>_xlfn.</code> appear) and only calculate when opened in Desktop Excel.
-      </span>
+      <div class="scratch-formula-notice-main">
+        <span class="scratch-formula-notice-icon" aria-hidden="true">⚠️</span>
+        <span class="scratch-formula-notice-body">
+          <strong>Formulas Do Not Run in Scratch Sheets:</strong>
+          Scratch sheets are a plain-value grid — Excel formulas (<code>=SUM</code>, <code>=XLOOKUP</code>, <code>=LET</code>, cross-sheet references, etc.) are <strong>not evaluated or recalculated</strong> here and shouldn't be expected to work in-app. Existing Excel 365 formulas are stored as raw OpenXML text (which is why internal tokens like <code>_xlpm.data</code> or <code>_xlfn.</code> appear) and only calculate when opened in Desktop Excel.
+        </span>
+      </div>
+      <button type="button" id="btnAckScratchFormulaNotice" class="btn-ack-formula-notice" title="Acknowledge and dismiss this formula warning">
+        Acknowledge ✕
+      </button>
     </div>
 
     <div id="scratchGridWrap" class="scratch-grid-wrap" tabindex="0">
@@ -1365,16 +1383,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.17.1</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.17.2</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.17.1"></script>
-  <script src="js/core-ui.js?v=1.17.1"></script>
-  <script src="js/workbook-io.js?v=1.17.1"></script>
-  <script src="js/tracker-table.js?v=1.17.1"></script>
-  <script src="js/request-editors.js?v=1.17.1"></script>
-  <script src="js/scratch-sheets.js?v=1.17.1"></script>
-  <script src="js/rollover.js?v=1.17.1"></script>
+  <script src="js/mockMasterAccounts.js?v=1.17.2"></script>
+  <script src="js/core-ui.js?v=1.17.2"></script>
+  <script src="js/workbook-io.js?v=1.17.2"></script>
+  <script src="js/tracker-table.js?v=1.17.2"></script>
+  <script src="js/request-editors.js?v=1.17.2"></script>
+  <script src="js/scratch-sheets.js?v=1.17.2"></script>
+  <script src="js/rollover.js?v=1.17.2"></script>
 </body>
 </html>

@@ -2581,13 +2581,115 @@ tr.shadow-new-row:hover .shadow-action-pill {
   overflow: hidden;
 }
 
+.tracker-profiles-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.34rem 1.25rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 25;
+}
+
+.tracker-profiles-left,
+.workspace-tabs-left {
+  display: flex;
+  align-items: center;
+  gap: 0.52rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bar-level-label {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.tracker-profiles-list {
+  display: flex;
+  align-items: center;
+  gap: 0.36rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tracker-profiles-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.wb-profile-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.32rem 0.72rem;
+  border-radius: 0.44rem;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.775rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: none;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.wb-profile-tab:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.wb-profile-tab.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+  font-weight: 700;
+  box-shadow: var(--shadow-xs);
+}
+
+.wb-profile-tab.active .ws-tab-pill-count {
+  background: rgba(15, 23, 42, 0.22);
+  color: var(--accent-contrast);
+}
+
+.wb-profile-tab.active .ws-tab-schema-tag {
+  background: rgba(15, 23, 42, 0.2);
+  color: var(--accent-contrast);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.wb-profile-tab.active .ws-tab-close-btn {
+  color: var(--accent-contrast);
+  opacity: 0.85;
+}
+
+.wb-profile-tab.active .ws-tab-close-btn:hover {
+  background: rgba(15, 23, 42, 0.25);
+  color: var(--accent-contrast);
+  opacity: 1;
+}
+
 .workspace-tabs-bar {
   flex-shrink: 0;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
   gap: 0.65rem;
-  padding: 0.32rem 1.25rem 0;
+  padding: 0.32rem 1.25rem;
   background: var(--surface-muted);
   border-bottom: 1px solid var(--border);
   position: relative;
@@ -2596,8 +2698,8 @@ tr.shadow-new-row:hover .shadow-action-pill {
 
 .workspace-tabs-list {
   display: flex;
-  align-items: flex-end;
-  gap: 0.28rem;
+  align-items: center;
+  gap: 0.34rem;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -2609,33 +2711,31 @@ tr.shadow-new-row:hover .shadow-action-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.42rem;
-  padding: 0.38rem 0.72rem;
+  padding: 0.32rem 0.72rem;
   border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 0.48rem 0.48rem 0 0;
-  background: var(--surface-muted);
+  border-radius: 0.42rem;
+  background: var(--surface);
   color: var(--text-muted);
   font-size: 0.78125rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   box-shadow: none;
-  position: relative;
-  top: 1px;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .ws-app-tab:hover {
   background: var(--surface-hover);
+  border-color: var(--accent-border);
   color: var(--text);
 }
 
 .ws-app-tab.active {
-  background: var(--surface);
+  background: var(--row-active);
   color: var(--accent);
-  border-color: var(--border-strong);
-  border-bottom: 1px solid var(--surface);
-  box-shadow: 0 -2px 0 0 var(--accent) inset;
+  border-color: var(--accent);
+  font-weight: 700;
+  box-shadow: var(--shadow-xs);
 }
 
 .ws-tab-pill-count {
@@ -2649,8 +2749,8 @@ tr.shadow-new-row:hover .shadow-action-pill {
 }
 
 .ws-app-tab.active .ws-tab-pill-count {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .ws-tab-dirty-dot {
@@ -2685,7 +2785,6 @@ tr.shadow-new-row:hover .shadow-action-pill {
 .workspace-tabs-actions {
   display: flex;
   align-items: center;
-  padding-bottom: 0.3rem;
   flex-shrink: 0;
 }
 
@@ -2978,14 +3077,42 @@ tr.shadow-new-row:hover .shadow-action-pill {
 .scratch-formula-notice {
   flex-shrink: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.36rem 1.25rem;
   background: var(--warning-soft);
   border-bottom: 1px solid var(--warning-border);
   color: var(--warning-text);
   font-size: 0.735rem;
   line-height: 1.4;
+}
+
+.scratch-formula-notice-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.btn-ack-formula-notice {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.58rem;
+  border-radius: 0.34rem;
+  background: var(--surface);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.btn-ack-formula-notice:hover {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: #ffffff;
 }
 
 .scratch-formula-notice-icon {

@@ -8,7 +8,18 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.17.1` (Current — `meerkat`)
+### `v1.17.2` (Current — `meerkat`)
+- **🗂️ Separated Workbook Tabs Bar vs. In-Workbook Sheet Tabs Bar & Filled Active Tab Colors (`#trackerProfilesBar`, `#workspaceTabsBar`, `css/styles.css`, `js/scratch-sheets.js`)**:
+  - Separated Department / Workbook Tracker Tabs into their own top-level **`#trackerProfilesBar`** (`Workbooks` bar above `#filePathsBar`) while keeping **`#workspaceTabsBar`** (`Sheets` bar below `#filePathsBar`) strictly for views inside the active workbook (`Daily Requests` + open `Scratch Sheets`), preserving clear parent-to-child hierarchy.
+  - Replaced subtle bottom-underline active tab indicators with unmistakable **filled active tab backgrounds** across both bars (`.wb-profile-tab.active` uses solid `--accent` fill; `.ws-app-tab.active` uses distinct `--row-active` color fill).
+- **✕ Acknowledgeable / Closeable Scratch Sheet Formula Warning (`#btnAckScratchFormulaNotice`, `js/scratch-sheets.js`)**:
+  - Added an **`Acknowledge ✕`** button on `#scratchFormulaNotice` that dismisses the warning and persists acknowledgment in `localStorage` (`trackerui_scratch_formula_notice_ack_v1`).
+- **🌐 Desktop Google Chrome Environment Check (`evaluateDesktopChromeCompatibility`, `checkDesktopChromeEnvironmentAndAlert`, `js/core-ui.js`)**:
+  - Added startup browser and viewport mode detection using `navigator.userAgentData` (`brands` & `mobile` Client Hints) with `navigator.userAgent` fallback, firing a native `window.alert(...)` prompt whenever opened outside Desktop Google Chrome (e.g., Firefox, Edge, Safari, Brave, Opera, or Mobile Mode) so users explicitly acknowledge that TrackerUI was built for Chrome in Desktop Mode.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v25'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.17.2` in [`index.html`](index.html).
+
+### `v1.17.1`
 - **📐 Polished 12-Column Editor Grid & Lockable Form Layout Customizer (`#btnDockToggleLayout`, `js/request-editors.js`, `css/styles.css`)**:
   - Upgraded the Bottom Editor Dock (`#dockStandardFieldsGrid`, `#dockDynamicFieldsGrid`) and Popup Modal dynamic grid (`#modalDynamicFieldsGrid`) to a baseline-aligned **12-column CSS grid** with single-line label badges (`<span class="field-col-tag">Col X</span>`), eliminating multi-line label wrapping (`Ticket Number` + `🎯 Grab Ticket`), misaligned inputs, and trailing row whitespace, while pinning `.dock-form-actions` (`Save to Workbook`) so it is never clipped behind scrollbars.
   - Smart custom-schema defaults automatically place mid-sheet `Notes` columns (e.g., `Col E` of `A..H`) at the bottom of the form while preserving exact Excel column saves, and auto-balance row column spans (`Subject` / `LKQ Email Subject`, `Ticket Number`, and short ID fields) to fill all 12 columns cleanly.

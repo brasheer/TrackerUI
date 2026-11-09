@@ -656,7 +656,9 @@ const dialogInputError = document.getElementById('dialogInputError');
 const btnDialogCancel = document.getElementById('btnDialogCancel');
 const btnDialogConfirm = document.getElementById('btnDialogConfirm');
 
-// Workspace Tabs Bar & Editable Scratch Sheet DOM Elements
+// Workbook Profile Bar, Workspace Sheet Tabs Bar & Editable Scratch Sheet DOM Elements
+const trackerProfilesBar = document.getElementById('trackerProfilesBar');
+const trackerProfilesList = document.getElementById('trackerProfilesList');
 const workspaceTabsBar = document.getElementById('workspaceTabsBar');
 const workspaceTabsList = document.getElementById('workspaceTabsList');
 const btnAddTrackerProfile = document.getElementById('btnAddTrackerProfile');
@@ -694,6 +696,8 @@ const btnScratchSaveNow = document.getElementById('btnScratchSaveNow');
 const scratchCellCoord = document.getElementById('scratchCellCoord');
 const scratchFormulaInput = document.getElementById('scratchFormulaInput');
 const scratchSelectionStats = document.getElementById('scratchSelectionStats');
+const scratchFormulaNotice = document.getElementById('scratchFormulaNotice');
+const btnAckScratchFormulaNotice = document.getElementById('btnAckScratchFormulaNotice');
 const scratchGridWrap = document.getElementById('scratchGridWrap');
 const scratchGridTable = document.getElementById('scratchGridTable');
 const scratchGridHead = document.getElementById('scratchGridHead');
@@ -1179,8 +1183,89 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
-const APP_VERSION = 'v1.17.1';
+// --- 9. APP VERSION, DESKTOP CHROME ENVIRONMENT CHECK & PWA SERVICE WORKER ---
+const APP_VERSION = 'v1.17.2';
+
+function evaluateDesktopChromeCompatibility(navObj = (typeof navigator !== 'undefined' ? navigator : null)) {
+  if (!navObj) {
+    return { isSupported: true, isGoogleChrome: true, isMobileMode: false, detectedLabel: 'Unknown' };
+  }
+  const ua = String(navObj.userAgent || '');
+  const uaData = navObj.userAgentData || null;
+
+  // 1. Mobile / Tablet Mode Check (via User-Agent Client Hints + UA string; avoids false-positives on Windows touch laptops)
+  let isMobileMode = false;
+  if (uaData && typeof uaData.mobile === 'boolean') {
+    isMobileMode = uaData.mobile;
+  }
+  if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|\bMobile\b/i.test(ua)) {
+    isMobileMode = true;
+  } else if (navObj.platform === 'MacIntel' && Number(navObj.maxTouchPoints) > 1 && !/\bChrome\//i.test(ua)) {
+    isMobileMode = true;
+  }
+
+  // 2. Browser Type Check (Google Chrome only; excludes Edge, Opera, Brave, Vivaldi, Firefox, Safari, etc.)
+  const isBrave = Boolean(navObj.brave);
+  let isGoogleChrome = false;
+  let browserName = 'Non-Chrome Browser';
+
+  if (isBrave) {
+    browserName = 'Brave';
+  } else if (/\bEdg(?:e|A|iOS)?\//i.test(ua)) {
+    browserName = 'Microsoft Edge';
+  } else if (/\b(?:OPR|Opera)\b/i.test(ua)) {
+    browserName = 'Opera';
+  } else if (/\bVivaldi\b/i.test(ua)) {
+    browserName = 'Vivaldi';
+  } else if (/\bSamsungBrowser\b/i.test(ua)) {
+    browserName = 'Samsung Internet';
+  } else if (/\b(?:Firefox|FxiOS)\//i.test(ua)) {
+    browserName = 'Mozilla Firefox';
+  } else if (/\bCriOS\//i.test(ua)) {
+    browserName = 'Chrome on iOS';
+  } else if (uaData && Array.isArray(uaData.brands) && uaData.brands.length > 0) {
+    const brands = uaData.brands.map(b => String((b && b.brand) || ''));
+    const hasGoogleChromeBrand = brands.some(b => /Google Chrome/i.test(b));
+    const hasOtherBrand = brands.some(b => /Microsoft Edge|Opera|Brave|Vivaldi|Yandex/i.test(b));
+    if (hasGoogleChromeBrand && !hasOtherBrand) {
+      isGoogleChrome = true;
+      browserName = 'Google Chrome';
+    } else {
+      browserName = brands.find(b => !/Not.?A.?Brand|Chromium/i.test(b)) || brands[0] || 'Chromium Browser';
+    }
+  } else if (/\bChrome\/\d+/i.test(ua)) {
+    isGoogleChrome = true;
+    browserName = 'Google Chrome';
+  } else if (/\bSafari\/\d+/i.test(ua)) {
+    browserName = 'Apple Safari';
+  }
+
+  const modeLabel = isMobileMode ? 'Mobile Mode' : 'Desktop Mode';
+  const detectedLabel = `${browserName} (${modeLabel})`;
+  return {
+    isSupported: isGoogleChrome && !isMobileMode,
+    isGoogleChrome,
+    isMobileMode,
+    detectedLabel
+  };
+}
+
+function checkDesktopChromeEnvironmentAndAlert(navObj = (typeof navigator !== 'undefined' ? navigator : null)) {
+  const result = evaluateDesktopChromeCompatibility(navObj);
+  if (!result.isSupported && typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(
+      `⚠️ Browser Compatibility Notice\n\n` +
+      `This application was developed specifically for Google Chrome in Desktop Mode.\n` +
+      `Detected browser: ${result.detectedLabel}\n\n` +
+      `Direct local folder read/write (File System Access API) and desktop workspace features may not work properly in other browsers or mobile mode. Click OK to acknowledge.`
+    );
+  }
+  return result;
+}
+
+if (typeof navigator !== 'undefined' && (navigator.userAgent || navigator.userAgentData)) {
+  checkDesktopChromeEnvironmentAndAlert(navigator);
+}
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;

@@ -478,6 +478,7 @@ async function initCachedDirectoryHandles() {
           evt.target.closest('#headerThemeGroup') ||
           evt.target.closest('#menuThemeGroup') ||
           evt.target.closest('.menu-fontsize-control') ||
+          evt.target.closest('#trackerProfilesBar') ||
           evt.target.closest('#workspaceTabsBar')
         ) {
           return;
