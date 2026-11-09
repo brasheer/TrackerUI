@@ -14,7 +14,7 @@ These rules apply to all AI models and coding assistants working in the `Tracker
     - `js/workbook-io.js`: IndexedDB directory handles, folder pickers, OpenXML archive preservation/repair, ExcelJS load/save, dual-write mirroring & auto-retry, schema bootstrapping, daily tab CRUD, and reference sheet auto-fill.
     - `js/tracker-table.js`: Daily worksheet row indexing & UUIDv4 backfill, sheet stepper/tab strip, request table rendering, global search, sorting, Like-Item filtering, batch status updates, and batch delete.
     - `js/request-editors.js`: Collapsible bottom editor dock, modal request editor, cross-tab status propagation, ticket details timeline modal, and Supervisor View-Only Mirror inspector.
-    - `js/scratch-sheets.js`: In-app custom scratch sheet workspace tabs, editable spreadsheet grid, formula/value bar, keyboard navigation, and multi-cell TSV clipboard paste.
+    - `js/scratch-sheets.js`: In-app custom scratch sheet workspace tabs, editable spreadsheet grid, right-click context menu, Excel default cell fill colors, app-only striped rows, Data to Columns wizard, formula/value bar, keyboard navigation, and multi-cell TSV clipboard paste.
     - `js/rollover.js`: Unique request identity matching, chronological notes merging, smart multi-sheet / previous-sheet rollover engine, and startup initialization.
   - `manifest.json` & `sw.js`: PWA manifest and offline Service Worker.
   - `assets/icons/`: App icons (`icon.svg`, `icon-192.png`, `icon-512.png`).

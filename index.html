@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.15.0</title>
+  <title>TrackerUI v1.16.0</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.15.0">
+  <link rel="stylesheet" href="css/styles.css?v=1.16.0">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.15.0 — Click to check for updates &amp; refresh app cache">v1.15.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.16.0 — Click to check for updates &amp; refresh app cache">v1.16.0</span>
     </div>
 
     <div class="header-actions">
@@ -335,7 +335,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta">v1.15.0</span>
+              <span class="menu-item-meta">v1.16.0</span>
             </button>
           </div>
         </div>
@@ -649,6 +649,10 @@
         <span id="scratchActiveSheetBadge" class="scratch-sheet-badge">Scratch Sheet</span>
         <span id="scratchStatsMeta" class="scratch-stats-meta">0 rows • 0 cols</span>
         <span id="scratchSaveStateBadge" class="scratch-save-badge saved">Saved</span>
+        <label class="scratch-filter-toggle scratch-striped-toggle" title="Alternate shaded row backgrounds in the app (visual only; not copied to Excel)">
+          <input type="checkbox" id="chkScratchStripedRows" checked>
+          <span>Striped rows</span>
+        </label>
       </div>
       <div class="scratch-toolbar-right">
         <div class="scratch-search-group">
@@ -659,6 +663,48 @@
             <span>Filter rows</span>
           </label>
         </div>
+
+        <!-- Excel Default Cell Fill Color Split Picker -->
+        <div id="scratchFillMenuWrap" class="scratch-fill-wrap">
+          <div class="scratch-fill-split" role="group" aria-label="Cell fill color">
+            <button type="button" id="btnScratchApplyFill" class="btn-sm scratch-fill-apply-btn" title="Apply active Excel fill color to selected cell(s)">
+              <span class="scratch-fill-icon-stack" aria-hidden="true">
+                <svg class="ui-icon scratch-bucket-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m3.5 11.2 6.2-6.2 5.3 5.3-6.2 6.2a1.5 1.5 0 0 1-2.1 0l-3.2-3.2a1.5 1.5 0 0 1 0-2.1Z"></path>
+                  <path d="m7.5 3 2.2 2"></path>
+                  <path d="M16.2 13.2s1.8 2 1.8 3.1a1.8 1.8 0 0 1-3.6 0c0-1.1 1.8-3.1 1.8-3.1Z"></path>
+                </svg>
+                <span id="scratchFillActiveBar" class="scratch-fill-active-bar"></span>
+              </span>
+              <span>Fill</span>
+            </button>
+            <button type="button" id="btnScratchFillDropdownToggle" class="btn-sm scratch-fill-caret-btn" aria-haspopup="true" aria-expanded="false" title="Choose Excel default fill color">
+              ▾
+            </button>
+          </div>
+          <div id="scratchFillDropdown" class="scratch-fill-dropdown" role="menu" aria-label="Excel default fill colors">
+            <div class="scratch-fill-dropdown-hdr">Excel Default Fill Colors</div>
+            <button type="button" id="btnScratchNoFill" class="scratch-no-fill-btn" data-fill-id="none">
+              <span class="scratch-swatch-none" aria-hidden="true"></span>
+              <span>No Fill (Clear Color)</span>
+            </button>
+            <div class="scratch-fill-section-lbl">Excel Cell Styles &amp; Light Headers</div>
+            <div id="scratchFillPastelGrid" class="scratch-fill-grid"></div>
+            <div class="scratch-fill-section-lbl">Standard &amp; Bold Header Colors</div>
+            <div id="scratchFillStandardGrid" class="scratch-fill-grid"></div>
+          </div>
+        </div>
+
+        <button type="button" id="btnScratchTextToColumns" class="btn-sm btn-with-icon" title="Split delimited text in the selected column across adjacent columns (Text to Columns)">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2.5" y="3.5" width="4.5" height="13" rx="1"></rect>
+            <path d="M9.5 10h4"></path>
+            <path d="m11.8 7.8 2.2 2.2-2.2 2.2"></path>
+            <rect x="15" y="3.5" width="2.5" height="13" rx="0.8"></rect>
+          </svg>
+          <span>Data to Columns</span>
+        </button>
+
         <button type="button" id="btnScratchUndo" class="btn-sm" title="Undo last edit (Ctrl+Z)" disabled>↶ Undo</button>
         <button type="button" id="btnScratchRedo" class="btn-sm" title="Redo edit (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷ Redo</button>
         <button type="button" id="btnScratchAddRows" class="btn-sm" title="Add 10 blank rows to the grid">＋ 10 Rows</button>
@@ -672,17 +718,90 @@
     <div class="scratch-formula-bar">
       <span id="scratchCellCoord" class="scratch-cell-coord" title="Selected cell or range coordinate">A1</span>
       <span class="scratch-fx-label" aria-hidden="true">fx</span>
-      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="Click or drag cells to highlight • Copy/Cut/Paste ranges (Ctrl+C / Ctrl+X / Ctrl+V) • Undo (Ctrl+Z)..." autocomplete="off">
+      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="Click, drag, or right-click cells • Cut/Copy/Paste • Fill Color • Data to Columns • Undo (Ctrl+Z)..." autocomplete="off">
       <span id="scratchSelectionStats" class="scratch-selection-stats" style="display:none;" title="Quick summary of highlighted cell range"></span>
     </div>
 
     <div id="scratchGridWrap" class="scratch-grid-wrap" tabindex="0">
-      <table id="scratchGridTable" class="scratch-grid-table">
+      <table id="scratchGridTable" class="scratch-grid-table striped-rows">
         <thead id="scratchGridHead"></thead>
         <tbody id="scratchGridBody"></tbody>
       </table>
     </div>
   </section>
+
+  <!-- Right-Click Context Menu for Scratch Sheets -->
+  <div id="scratchContextMenu" class="scratch-context-menu" role="menu" aria-label="Scratch sheet cell actions" style="display:none;">
+    <div class="scratch-ctx-header">
+      <span id="scratchCtxRangeLabel">Selection • A1</span>
+    </div>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="cut" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="6" cy="14.5" r="2.2"></circle>
+          <circle cx="14" cy="14.5" r="2.2"></circle>
+          <line x1="7.6" y1="12.9" x2="14.8" y2="4"></line>
+          <line x1="12.4" y1="12.9" x2="5.2" y2="4"></line>
+        </svg>
+        <span>Cut</span>
+      </span>
+      <kbd class="scratch-ctx-Shortcut">Ctrl+X</kbd>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="copy" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="7" y="7" width="9.5" height="10" rx="1.5"></rect>
+          <path d="M4.5 13H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 2h7.5A1.5 1.5 0 0 1 13 3.5V4"></path>
+        </svg>
+        <span>Copy</span>
+      </span>
+      <kbd class="scratch-ctx-Shortcut">Ctrl+C</kbd>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="paste" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7.5 3.5H5A1.5 1.5 0 0 0 3.5 5v11A1.5 1.5 0 0 0 5 17.5h10a1.5 1.5 0 0 0 1.5-1.5V5A1.5 1.5 0 0 0 15 3.5h-2.5"></path>
+          <rect x="7.5" y="2" width="5" height="3" rx="1"></rect>
+        </svg>
+        <span>Paste</span>
+      </span>
+      <kbd class="scratch-ctx-Shortcut">Ctrl+V</kbd>
+    </button>
+    <div class="scratch-ctx-divider" role="separator"></div>
+    <div class="scratch-ctx-swatches-section">
+      <div class="scratch-ctx-swatches-lbl">Fill Color (Excel Defaults)</div>
+      <div id="scratchCtxQuickSwatches" class="scratch-ctx-swatches-row"></div>
+    </div>
+    <div class="scratch-ctx-divider" role="separator"></div>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="text-to-columns" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.5" y="3.5" width="4.5" height="13" rx="1"></rect>
+          <path d="M9.5 10h4"></path>
+          <path d="m11.8 7.8 2.2 2.2-2.2 2.2"></path>
+          <rect x="15" y="3.5" width="2.5" height="13" rx="0.8"></rect>
+        </svg>
+        <span>Data to Columns...</span>
+      </span>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="clear-contents" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 6h12"></path>
+          <path d="M8 6V4h4v2"></path>
+          <path d="M6 6l.8 10.2a1.4 1.4 0 0 0 1.4 1.3h3.6a1.4 1.4 0 0 0 1.4-1.3L14 6"></path>
+        </svg>
+        <span>Clear Contents</span>
+      </span>
+      <kbd class="scratch-ctx-Shortcut">Del</kbd>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="clear-fill" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <span class="scratch-swatch-none scratch-ctx-none-icon" aria-hidden="true"></span>
+        <span>Clear Fill Color</span>
+      </span>
+    </button>
+  </div>
 
   <!-- Edit / Create Modal (Secondary Popup Editor) -->
   <div id="editModal" class="modal-backdrop">
@@ -890,6 +1009,59 @@
     </div>
   </div>
 
+  <!-- Data to Columns (Text to Columns) Modal for Scratch Sheets -->
+  <div id="textToColumnsModal" class="modal-backdrop">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <div>
+          <h3>Data to Columns (Split Delimited Text)</h3>
+          <div id="ttcSubtitle" class="modal-subtitle">Split text in the selected scratch column across adjacent columns to the right</div>
+        </div>
+        <span id="ttcSourceBadge" class="key-chip" style="cursor:default;">Column A</span>
+      </div>
+      <form id="textToColumnsForm">
+        <div class="ttc-options-panel">
+          <div class="ttc-section-label">Delimiters (Choose one or more)</div>
+          <div class="ttc-delims-grid">
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcComma" checked><span>Comma (<code>,</code>)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcTab"><span>Tab</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcSemicolon"><span>Semicolon (<code>;</code>)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcPipe"><span>Pipe (<code>|</code>)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcHyphen"><span>Hyphen (<code>-</code>)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcSpace"><span>Space</span></label>
+            <div class="ttc-other-wrap">
+              <label class="checkbox-label"><input type="checkbox" id="chkTtcOther"><span>Other:</span></label>
+              <input type="text" id="ttcOtherInput" class="ttc-other-input" maxlength="6" placeholder="e.g. / or :" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="ttc-extra-options">
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkTtcTrim" checked>
+              <span>Trim leading &amp; trailing spaces from split values</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkTtcConsecutive">
+              <span>Treat consecutive delimiters as one</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="ttcOverwriteBanner" class="ttc-overwrite-banner" style="display:none;"></div>
+
+        <div class="ttc-preview-section">
+          <div class="ttc-section-label" id="ttcPreviewTitle">Data Preview</div>
+          <div id="ttcPreviewBox" class="ttc-preview-box"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btnCancelTextToColumns">Cancel</button>
+          <button type="submit" id="btnConfirmTextToColumns" class="btn-primary">Split into Columns</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- In-App Dialog Modal (Replaces native browser alert / confirm / prompt) -->
   <div id="dialogModal" class="modal-backdrop dialog-backdrop">
     <div class="modal dialog-modal">
@@ -935,16 +1107,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.15.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.16.0</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.15.0"></script>
-  <script src="js/core-ui.js?v=1.15.0"></script>
-  <script src="js/workbook-io.js?v=1.15.0"></script>
-  <script src="js/tracker-table.js?v=1.15.0"></script>
-  <script src="js/request-editors.js?v=1.15.0"></script>
-  <script src="js/scratch-sheets.js?v=1.15.0"></script>
-  <script src="js/rollover.js?v=1.15.0"></script>
+  <script src="js/mockMasterAccounts.js?v=1.16.0"></script>
+  <script src="js/core-ui.js?v=1.16.0"></script>
+  <script src="js/workbook-io.js?v=1.16.0"></script>
+  <script src="js/tracker-table.js?v=1.16.0"></script>
+  <script src="js/request-editors.js?v=1.16.0"></script>
+  <script src="js/scratch-sheets.js?v=1.16.0"></script>
+  <script src="js/rollover.js?v=1.16.0"></script>
 </body>
 </html>

@@ -8,7 +8,21 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.15.0` (Current — `main`)
+### `v1.16.0` (Current — `meerkat`)
+- **Scratch Sheet Right-Click Context Menu (`#scratchContextMenu`, `js/scratch-sheets.js`, `css/styles.css`)**:
+  - Added an Excel-style right-click context menu on `#scratchGridWrap` supporting **Cut (`Ctrl+X`)**, **Copy (`Ctrl+C`)**, **Paste (`Ctrl+V`)** (with system Clipboard API + internal clipboard fallback), quick Excel default **Fill Color** swatches, **Data to Columns...**, **Clear Contents (`Del`)**, and **Clear Fill Color**.
+  - Preserves active multi-cell highlights when right-clicking inside a selection and moves selection when right-clicking outside it (while preserving native browser right-click inside open inline cell text inputs).
+- **Excel Default Cell Fill Colors (`#scratchFillMenuWrap`)**:
+  - Added a split **Fill** toolbar button (1-click apply of active color + `▾` palette) and right-click swatch picker featuring 24 Microsoft Excel default colors (**Excel Cell Styles & Light Headers** + **Standard & Bold Header Colors**) plus **No Fill**.
+  - Reads existing OpenXML solid ARGB and Office Theme/tint fills (`extractScratchCellVisualStyle`), computes contrasting text colors, persists cell fills directly to the `.xlsx` workbook & `(VIEW ONLY)` mirror, and integrates with the 50-step Undo/Redo stack (`Ctrl+Z` / `Ctrl+Y`).
+- **App-Only Striped Scratch Rows (`#chkScratchStripedRows`)**:
+  - Added an app-only **Striped rows** toggle (persisted in `localStorage`) that renders alternating shaded rows in Light and Dark themes without writing background fills to the Excel file.
+- **Data to Columns ("Text to Columns") Wizard (`#textToColumnsModal`)**:
+  - Added **Data to Columns** in the scratch toolbar and right-click menu to split delimited text (`Comma`, `Tab`, `Semicolon`, `Pipe`, `Hyphen`, `Space`, or `Other` custom delimiter, with CSV quote handling, consecutive delimiter merging, and whitespace trimming) across adjacent columns with auto-detection, overwrite warnings, live multi-column preview, automatic grid expansion, and 1-step Undo (`Ctrl+Z`).
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v21'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.16.0` in [`index.html`](index.html).
+
+### `v1.15.0`
 - **Excel-Like Scratch Spreadsheets (`js/scratch-sheets.js`, `css/styles.css`, `index.html`)**:
   - **Multi-Cell Range Highlighting**: Added rectangular cell range selection (`anchor` + `focus`) via click-and-drag, `Shift + Click`, `Shift + Arrow` keys, `Ctrl/Cmd + Arrow` data-boundary jumps (`Ctrl + Shift + Arrow` to highlight blocks), `Ctrl/Cmd + A` (data bounds on first press, whole grid on second), and clicking/dragging row numbers, column letters, or the top-left `#` corner header.
   - **Smooth Edge Auto-Scroll & Grid Auto-Expansion**: Dragging near or past the edges of `#scratchGridWrap` smoothly scrolls the viewport at 60fps (`requestAnimationFrame`) and automatically expands blank rows/columns when dragging past the bottom or right sheet boundary.

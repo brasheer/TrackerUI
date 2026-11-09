@@ -570,9 +570,19 @@ const scratchSheetWorkspace = document.getElementById('scratchSheetWorkspace');
 const scratchActiveSheetBadge = document.getElementById('scratchActiveSheetBadge');
 const scratchStatsMeta = document.getElementById('scratchStatsMeta');
 const scratchSaveStateBadge = document.getElementById('scratchSaveStateBadge');
+const chkScratchStripedRows = document.getElementById('chkScratchStripedRows');
 const scratchSearchInput = document.getElementById('scratchSearchInput');
 const scratchSearchMatchCount = document.getElementById('scratchSearchMatchCount');
 const chkScratchFilterRows = document.getElementById('chkScratchFilterRows');
+const scratchFillMenuWrap = document.getElementById('scratchFillMenuWrap');
+const btnScratchApplyFill = document.getElementById('btnScratchApplyFill');
+const scratchFillActiveBar = document.getElementById('scratchFillActiveBar');
+const btnScratchFillDropdownToggle = document.getElementById('btnScratchFillDropdownToggle');
+const scratchFillDropdown = document.getElementById('scratchFillDropdown');
+const btnScratchNoFill = document.getElementById('btnScratchNoFill');
+const scratchFillPastelGrid = document.getElementById('scratchFillPastelGrid');
+const scratchFillStandardGrid = document.getElementById('scratchFillStandardGrid');
+const btnScratchTextToColumns = document.getElementById('btnScratchTextToColumns');
 const btnScratchUndo = document.getElementById('btnScratchUndo');
 const btnScratchRedo = document.getElementById('btnScratchRedo');
 const btnScratchAddRows = document.getElementById('btnScratchAddRows');
@@ -587,6 +597,28 @@ const scratchGridWrap = document.getElementById('scratchGridWrap');
 const scratchGridTable = document.getElementById('scratchGridTable');
 const scratchGridHead = document.getElementById('scratchGridHead');
 const scratchGridBody = document.getElementById('scratchGridBody');
+const scratchContextMenu = document.getElementById('scratchContextMenu');
+const scratchCtxRangeLabel = document.getElementById('scratchCtxRangeLabel');
+const scratchCtxQuickSwatches = document.getElementById('scratchCtxQuickSwatches');
+const textToColumnsModal = document.getElementById('textToColumnsModal');
+const textToColumnsForm = document.getElementById('textToColumnsForm');
+const ttcSourceBadge = document.getElementById('ttcSourceBadge');
+const ttcSubtitle = document.getElementById('ttcSubtitle');
+const chkTtcComma = document.getElementById('chkTtcComma');
+const chkTtcTab = document.getElementById('chkTtcTab');
+const chkTtcSemicolon = document.getElementById('chkTtcSemicolon');
+const chkTtcPipe = document.getElementById('chkTtcPipe');
+const chkTtcHyphen = document.getElementById('chkTtcHyphen');
+const chkTtcSpace = document.getElementById('chkTtcSpace');
+const chkTtcOther = document.getElementById('chkTtcOther');
+const ttcOtherInput = document.getElementById('ttcOtherInput');
+const chkTtcTrim = document.getElementById('chkTtcTrim');
+const chkTtcConsecutive = document.getElementById('chkTtcConsecutive');
+const ttcOverwriteBanner = document.getElementById('ttcOverwriteBanner');
+const ttcPreviewTitle = document.getElementById('ttcPreviewTitle');
+const ttcPreviewBox = document.getElementById('ttcPreviewBox');
+const btnCancelTextToColumns = document.getElementById('btnCancelTextToColumns');
+const btnConfirmTextToColumns = document.getElementById('btnConfirmTextToColumns');
 
 // --- IN-APP POPUP DIALOG ENGINE (Replaces native alert / confirm / prompt) ---
 let activeDialogResolver = null;
@@ -885,7 +917,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION & PWA SERVICE WORKER REGISTRATION & CACHE SAFEGUARDS ---
-const APP_VERSION = 'v1.15.0';
+const APP_VERSION = 'v1.16.0';
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;
