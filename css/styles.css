@@ -4203,3 +4203,318 @@ button.ws-app-tab.active:hover {
     grid-column: 1 / -1 !important;
   }
 }
+
+/* ==========================================================================
+   In-App Interactive User Manual & Reference Guide Modal
+   ========================================================================== */
+
+.user-manual-modal {
+  max-width: 1180px;
+  width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.1rem 1.35rem;
+}
+
+.user-manual-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+
+.user-manual-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.manual-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.manual-search-input {
+  width: 280px;
+  min-width: 200px;
+  padding-right: 2rem;
+}
+
+.manual-clear-search-btn {
+  position: absolute;
+  right: 0.28rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.user-manual-body {
+  display: grid;
+  grid-template-columns: 245px minmax(0, 1fr);
+  gap: 1.1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.user-manual-toc {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.65rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.manual-toc-header {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 0.15rem 0.45rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.4rem;
+}
+
+.manual-toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.manual-toc-item {
+  text-align: left;
+  justify-content: flex-start;
+  padding: 0.38rem 0.55rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.manual-toc-item:hover:not(.active),
+button.manual-toc-item:hover:not(.active) {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.manual-toc-item.active,
+button.manual-toc-item.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+.manual-toc-item.active:hover,
+button.manual-toc-item.active:hover {
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+  border-color: var(--accent-hover);
+}
+
+.user-manual-content {
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  min-height: 0;
+  scroll-behavior: smooth;
+}
+
+.manual-empty-search {
+  padding: 2rem 1.25rem;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: 0.55rem;
+  font-size: 0.85rem;
+}
+
+.manual-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 1rem 1.15rem;
+  margin-bottom: 1rem;
+}
+
+.manual-section h4 {
+  margin: 0 0 0.6rem 0;
+  font-size: 0.98rem;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.42rem;
+}
+
+.manual-section p {
+  margin: 0 0 0.65rem 0;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.manual-list {
+  margin: 0.35rem 0 0.5rem 1.2rem;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.58;
+  color: var(--text-secondary);
+}
+
+.manual-list li {
+  margin-bottom: 0.38rem;
+}
+
+.manual-list strong {
+  color: var(--text);
+}
+
+.manual-callout {
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.48rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+
+.manual-callout.callout-important {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--text);
+}
+
+.manual-figure {
+  margin: 0.7rem 0 0.85rem 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.55rem;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.manual-screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+  transition: opacity 0.15s ease;
+}
+
+.manual-screenshot:hover {
+  opacity: 0.94;
+}
+
+.manual-figure figcaption {
+  padding: 0.42rem 0.75rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.manual-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.48rem;
+}
+
+.manual-ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.79rem;
+}
+
+.manual-ref-table th,
+.manual-ref-table td {
+  padding: 0.48rem 0.68rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.manual-ref-table th {
+  background: var(--table-header-bg);
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.manual-ref-table tr:last-child td {
+  border-bottom: none;
+}
+
+.manual-lightbox-backdrop {
+  z-index: 1200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.manual-lightbox-backdrop.open {
+  display: flex !important;
+}
+
+.manual-lightbox-inner {
+  max-width: 96vw;
+  max-height: 94vh;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.manual-lightbox-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.manual-lightbox-caption {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.manual-lightbox-img {
+  max-width: 93vw;
+  max-height: 84vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.42rem;
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 860px) {
+  .user-manual-body {
+    grid-template-columns: 1fr;
+  }
+  .user-manual-toc {
+    max-height: 150px;
+  }
+}

@@ -8,7 +8,15 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.17.3` (Current — `meerkat`)
+### `v1.18.0` (Current — `main` / `meerkat`)
+- **📖 Interactive In-App User Manual & Reference Guide (`#userManualModal`, `USER_MANUAL.md`, `index.html`, `css/styles.css`, `js/core-ui.js`)**:
+  - Added a dedicated **`📖 Manual`** button (`#btnOpenUserManual`) in the top header bar alongside **`User Manual & Reference Guide...`** (`#menuOpenUserManual`) inside **`⚙️ Tools & Setup ▾`**.
+  - Built an interactive two-column in-app documentation modal (`#userManualModal`) featuring a sticky 14-section Table of Contents sidebar (`#userManualTocList`) with smooth-scroll navigation and scroll-spy active section highlighting, live instant keyword search (`#userManualSearchInput`), "Where to Click" reference tables, keyboard shortcuts, and 10 embedded high-resolution workspace screenshots (`assets/images/manual/*.png`).
+  - Added a full-screen click-to-zoom screenshot lightbox (`#manualImageLightbox`) and a standalone Markdown reference guide ([`USER_MANUAL.md`](USER_MANUAL.md)).
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v27'` in [`sw.js`](sw.js) (precaching `USER_MANUAL.md` and all 10 manual screenshots for offline access) and updated asset version query strings to `?v=1.18.0` in [`index.html`](index.html).
+
+### `v1.17.3`
 - **🎨 High-Contrast Active Workbook Profile Tab Hover Fix (`css/styles.css`)**:
   - Fixed an issue where hovering over the active workbook tab (`.wb-profile-tab.active`) caused button text, icons, and badges to blend into the button background and become illegible in both Light and Dark modes.
   - Root cause: generic `button:hover:not(:disabled)` specificity `(0, 2, 1)` overridden the tab's background with `--surface-hover` while retaining `--accent-contrast` text color (`#082f49` on `#2d3d56` in Dark mode; `#ffffff` on `#f1f5f9` in Light mode).
@@ -31,7 +39,7 @@ This document records the version release history, major feature rollouts, bug f
 ### `v1.17.1`
 - **📐 Polished 12-Column Editor Grid & Lockable Form Layout Customizer (`#btnDockToggleLayout`, `js/request-editors.js`, `css/styles.css`)**:
   - Upgraded the Bottom Editor Dock (`#dockStandardFieldsGrid`, `#dockDynamicFieldsGrid`) and Popup Modal dynamic grid (`#modalDynamicFieldsGrid`) to a baseline-aligned **12-column CSS grid** with single-line label badges (`<span class="field-col-tag">Col X</span>`), eliminating multi-line label wrapping (`Ticket Number` + `🎯 Grab Ticket`), misaligned inputs, and trailing row whitespace, while pinning `.dock-form-actions` (`Save to Workbook`) so it is never clipped behind scrollbars.
-  - Smart custom-schema defaults automatically place mid-sheet `Notes` columns (e.g., `Col E` of `A..H`) at the bottom of the form while preserving exact Excel column saves, and auto-balance row column spans (`Subject` / `LKQ Email Subject`, `Ticket Number`, and short ID fields) to fill all 12 columns cleanly.
+  - Smart custom-schema defaults automatically place mid-sheet `Notes` columns (e.g., `Col E` of `A..H`) at the bottom of the form while preserving exact Excel column saves, and auto-balance row column spans (`Subject` / `Inbound Email Subject`, `Ticket Number`, and short ID fields) to fill all 12 columns cleanly.
   - Added a **Locked-by-Default Form Layout Mode** (`🔒 Layout` → `🔓 Lock Layout` + `↺ Reset Layout`): when unlocked, each field displays compact controls to reorder fields (`◀` `▶`), adjust column width (`−` / `+` from `2/12` to `12/12` or drag the right border), and resize textarea height (`↕−` / `↕+` rows `1..6`), persisted per schema in `localStorage` (`trackerui_form_layouts_v1`) and portable `.json` workspace backups.
 - **⚠️ Scratch Sheet Values-Only Formula Notice & OpenXML Formula Preservation (`#scratchFormulaNotice`, `js/scratch-sheets.js`, `js/workbook-io.js`)**:
   - Added an explicit notice banner (`#scratchFormulaNotice`) and updated the `Cell` input bar on scratch sheets clarifying that Excel formulas (`=SUM`, `=XLOOKUP`, `=LET`, cross-sheet references, etc.) **do not evaluate or update in-app**, and explaining why Excel 365 formulas display internal OpenXML tokens such as `_xlpm.data` or `_xlfn.` until opened in Desktop Excel.

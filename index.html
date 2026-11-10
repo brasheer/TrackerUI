@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.17.3</title>
+  <title>TrackerUI v1.18.0</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.17.3">
+  <link rel="stylesheet" href="css/styles.css?v=1.18.0">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.17.3 — Click to check for updates &amp; refresh app cache">v1.17.3</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.18.0 — Click to check for updates &amp; refresh app cache">v1.18.0</span>
     </div>
 
     <div class="header-actions">
@@ -98,6 +98,15 @@
           <span class="theme-seg-label">Dark</span>
         </button>
       </div>
+
+      <!-- In-App User Manual & Reference Guide Button -->
+      <button type="button" id="btnOpenUserManual" class="btn-tools-menu btn-with-icon" title="Open the interactive TrackerUI User Manual &amp; Reference Guide">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.5 4.5A1.5 1.5 0 0 1 4 3h4.2a2.3 2.3 0 0 1 1.8.85A2.3 2.3 0 0 1 11.8 3H16a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 16 16h-4.2a2.3 2.3 0 0 0-1.8.85A2.3 2.3 0 0 0 8.2 16H4a1.5 1.5 0 0 1-1.5-1.5v-10Z"></path>
+          <line x1="10" y1="3.85" x2="10" y2="16.85"></line>
+        </svg>
+        <span>Manual</span>
+      </button>
 
       <!-- Popover Workspace, Appearance & Tools Menu -->
       <div class="tools-menu-wrap" id="toolsMenuWrap">
@@ -393,6 +402,16 @@
               </span>
             </button>
             <input type="file" id="configJsonFileInput" accept=".json,application/json" style="display:none;">
+            <button type="button" id="menuOpenUserManual" class="menu-item" title="Open the interactive TrackerUI User Manual, Screenshots &amp; Where-to-Click Guide">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2.5 4.5A1.5 1.5 0 0 1 4 3h4.2a2.3 2.3 0 0 1 1.8.85A2.3 2.3 0 0 1 11.8 3H16a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 16 16h-4.2a2.3 2.3 0 0 0-1.8.85A2.3 2.3 0 0 0 8.2 16H4a1.5 1.5 0 0 1-1.5-1.5v-10Z"></path>
+                  <line x1="10" y1="3.85" x2="10" y2="16.85"></line>
+                </svg>
+                <span>User Manual &amp; Reference Guide...</span>
+              </span>
+              <span class="menu-item-tag">Help</span>
+            </button>
             <button type="button" id="btnCheckForUpdates" class="menu-item" title="Clear cached PWA scripts/styles and reload fresh from the server">
               <span class="menu-item-left">
                 <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -401,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta">v1.17.0</span>
+              <span class="menu-item-meta">v1.18.0</span>
             </button>
           </div>
         </div>
@@ -1335,6 +1354,314 @@
     </div>
   </div>
 
+  <!-- Interactive In-App User Manual & Reference Guide Modal -->
+  <div id="userManualModal" class="modal-backdrop">
+    <div class="modal modal-xl user-manual-modal" role="dialog" aria-labelledby="userManualTitle">
+      <div class="modal-header user-manual-header">
+        <div>
+          <h3 id="userManualTitle">TrackerUI User Manual &amp; Reference Guide</h3>
+          <div class="modal-subtitle">Complete feature guide, where-to-click instructions, live screenshots &amp; keyboard shortcuts</div>
+        </div>
+        <div class="user-manual-header-controls">
+          <div class="manual-search-wrap">
+            <input type="text" id="userManualSearchInput" class="search-box manual-search-input" placeholder="Search manual sections, buttons, or shortcuts..." autocomplete="off">
+            <button type="button" id="btnClearManualSearch" class="btn-sm manual-clear-search-btn" style="display:none;" title="Clear manual search">✕</button>
+          </div>
+          <button type="button" id="btnCloseUserManualHeader" class="btn-dock-secondary" title="Close User Manual (Esc)">✕ Close</button>
+        </div>
+      </div>
+
+      <div class="user-manual-body">
+        <!-- Sticky Left Table of Contents Sidebar -->
+        <nav class="user-manual-toc" aria-label="User Manual Table of Contents">
+          <div class="manual-toc-header">Table of Contents</div>
+          <div id="userManualTocList" class="manual-toc-list">
+            <button type="button" class="manual-toc-item active" data-manual-target="manual-sec-1">1. Getting Started &amp; Chrome Check</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-2">2. Workspace Layout &amp; Bars</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-3">3. Dual-Write &amp; Fail-Safe Saves</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-4">4. Tools &amp; Setup Menu</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-5">5. Creating &amp; Editing Requests</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-6">6. Grab Ticket, Pull Prior &amp; Sync</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-7">7. Custom Schemas &amp; Form Layout</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-8">8. Ticket Details &amp; Timeline</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-9">9. Search, Filters &amp; Batch Actions</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-10">10. Smart Daily Rollover Engine</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-11">11. Scratch Sheets &amp; Fill Colors</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-12">12. Supervisor Master Rollup</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-13">13. Config Backups &amp; PWA Cache</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-14">14. Quick Reference &amp; Shortcuts</button>
+          </div>
+        </nav>
+
+        <!-- Scrollable Right Content Pane -->
+        <div id="userManualContentPane" class="user-manual-content">
+          <div id="userManualEmptySearch" class="manual-empty-search" style="display:none;">
+            No manual sections match your search query. Click <strong>✕</strong> in the search box to show all sections.
+          </div>
+
+          <!-- Section 1 -->
+          <article id="manual-sec-1" class="manual-section">
+            <h4>1. Browser Requirements &amp; Getting Started</h4>
+            <div class="manual-callout callout-important">
+              <strong>Important — Use Google Chrome in Desktop Mode:</strong> TrackerUI uses the Chromium <strong>File System Access API</strong> (<code>window.showDirectoryPicker</code>) to read and write <code>.xlsx</code> workbooks directly in your local or OneDrive folders. Opening the app in a non-Chrome browser or mobile viewport triggers a reminder alert that TrackerUI is built specifically for <strong>Google Chrome in Desktop Mode</strong>.
+            </div>
+            <ol class="manual-list">
+              <li>Open TrackerUI in <strong>Desktop Google Chrome</strong>.</li>
+              <li>Click the blue <strong><code>Select Agent Folder</code></strong> button in the top header bar.</li>
+              <li>Choose the folder containing your monthly <code>.xlsx</code> tracker workbooks (for example, <code>Agent_Trackers\</code>) and grant Chrome read/write permission when prompted.</li>
+              <li>TrackerUI remembers your folder handles in <code>IndexedDB</code> so future sessions reconnect automatically (when <strong><code>Auto-Reconnect</code></strong> is checked) or in 1 click.</li>
+            </ol>
+          </article>
+
+          <!-- Section 2 -->
+          <article id="manual-sec-2" class="manual-section">
+            <h4>2. Workspace Layout &amp; Navigation Hierarchy</h4>
+            <p>TrackerUI separates top-level <strong>Workbooks</strong> from in-workbook <strong>Sheets</strong> so the hierarchy is always clear:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/01-main-workspace-overview.png" alt="Main Workspace Overview" class="manual-screenshot" loading="lazy">
+              <figcaption>Main Workspace Overview — Click image to enlarge</figcaption>
+            </figure>
+            <div class="manual-table-wrap">
+              <table class="manual-ref-table">
+                <thead>
+                  <tr><th>Workspace Zone</th><th>Location</th><th>Where to Click &amp; Purpose</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><strong>1. Top Header Bar</strong></td><td>Top of window</td><td>Switch monthly <code>.xlsx</code> files in <strong><code>Workbook</code></strong>, click <strong><code>Switch Folder</code></strong>, launch <strong><code>Rollover / Sync</code></strong>, switch <strong><code>Light / Auto / Dark</code></strong> theme, open <strong><code>Manual</code></strong>, or open <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>.</td></tr>
+                  <tr><td><strong>2. <code>Workbooks</code> Bar</strong></td><td>Level 1 Bar (above File Paths)</td><td>Switch between separate department tracker profiles (e.g., <strong><code>Bidder Support</code></strong> vs. <strong><code>Vendor Operations</code></strong>). The active tab uses a solid accent fill. Click <strong><code>+ Tracker Tab</code></strong> on the right to add another department tracker.</td></tr>
+                  <tr><td><strong>3. File Paths Strip</strong></td><td>Below <code>Workbooks</code> Bar</td><td>Shows live paths for <strong><code>Tracker:</code></strong> (working file), <strong><code>View-Only:</code></strong> (supervisor mirror), and <strong><code>Templates:</code></strong>, plus the <strong><code>Auto-Reconnect</code></strong> checkbox.</td></tr>
+                  <tr><td><strong>4. <code>Sheets</code> Bar</strong></td><td>Level 2 Bar (below File Paths)</td><td>Switches between views <em>inside</em> the active workbook: <strong><code>Daily Requests</code></strong> and open <strong><code>Scratch Sheets</code></strong>. Click <strong><code>Scratch Sheets ▾</code></strong> on the right to open or create scratch sheets.</td></tr>
+                  <tr><td><strong>5. Controls &amp; Search</strong></td><td>Above main table</td><td>Click <strong><code>+ New Request</code></strong>, step through dates with <strong><code>◀</code> / <code>▶</code></strong> around <strong><code>Day Tab</code></strong>, toggle <strong><code>Scope</code></strong>, or type in the <strong>Global Search Box</strong>.</td></tr>
+                  <tr><td><strong>6. Date Pill Strip</strong></td><td>Below Controls bar</td><td>Click any <code>MM-DD-YYYY</code> pill (ordered oldest left → newest right) to jump straight to that day's sheet.</td></tr>
+                  <tr><td><strong>7. Bottom Editor Dock</strong></td><td>Pinned above Status Bar</td><td>Click any table row to load it here for instant editing. Click <strong><code>▾ Collapse</code></strong> (or the dock header bar) to fold or expand the dock.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <!-- Section 3 -->
+          <article id="manual-sec-3" class="manual-section">
+            <h4>3. Connecting Folders, Dual-Write Mirroring &amp; Fail-Safe Saving</h4>
+            <ul class="manual-list">
+              <li><strong>Automatic File Filtering:</strong> When scanning your Agent Folder, TrackerUI ignores Excel lock files (<code>~$*</code>) and mirror copies (<code>*(VIEW ONLY).xlsx</code>) so you only edit working files.</li>
+              <li><strong>Dual-Write Supervisor Mirroring:</strong> Every save writes your primary <code>.xlsx</code> file first, then writes an identical <code>&lt;Workbook Name&gt; (VIEW ONLY).xlsx</code> copy to your configured <strong>Supervisor Folder</strong>.</li>
+              <li><strong>Non-Blocking Mirror Auto-Retry:</strong> If a supervisor has the <code>(VIEW ONLY)</code> file locked in Desktop Excel, your save still succeeds immediately! TrackerUI starts a <strong>15-second background auto-retry countdown</strong> and surfaces a <strong><code>Retry Mirror Sync</code></strong> button on the bottom status bar.</li>
+              <li><strong>Fail-Safe Primary Save Cache:</strong> If Desktop Excel has your <em>working</em> <code>.xlsx</code> file locked when you save, TrackerUI stages the updated workbook buffer in browser storage so zero edits are lost. Close Excel and click <strong><code>💾 Retry Primary Save</code></strong> on the bottom-left status bar.</li>
+            </ul>
+          </article>
+
+          <!-- Section 4 -->
+          <article id="manual-sec-4" class="manual-section">
+            <h4>4. The Tools &amp; Setup Menu (<code>⚙️ Tools &amp; Setup ▾</code>)</h4>
+            <p>Click <strong><code>⚙️ Tools &amp; Setup ▾</code></strong> in the top-right header to configure appearance, folders, schemas, and daily tabs:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/02-tools-and-setup-menu.png" alt="Tools and Setup Popover Menu" class="manual-screenshot" loading="lazy">
+              <figcaption>Tools &amp; Setup Menu — Appearance, Directories, Workbook Schema &amp; Day Tab Actions</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Appearance &amp; Display:</strong> Toggle <code>Light</code> / <code>Auto</code> / <code>Dark</code> mode and scale application text size between <strong>85% and 125%</strong> using <code>A−</code>, the slider, or <code>A+</code>.</li>
+              <li><strong>Directories &amp; Mirroring:</strong> Configure your <strong>Tracker Folder</strong>, <strong>Supervisor Folder</strong>, and <strong>Templates Folder</strong>, open the <strong>View-Only Mirror Inspector</strong>, or launch the <strong>Supervisor Multi-Workbook Rollup</strong>.</li>
+              <li><strong>Workbook &amp; Schema:</strong> Create a new monthly <code>.xlsx</code> workbook (cloned from your Templates Folder or bootstrapped in memory), non-destructively repair missing sheets, open <strong>Configure Column Mapping</strong>, add/rename Department Tracker Tabs, or create a new Scratch Sheet.</li>
+              <li><strong>Active Day Tab Management:</strong> Create a new <code>MM-DD-YYYY</code> tab (blank or rolled over), roll over strictly from the previous sheet, or rename/delete the current daily tab (reference sheets remain protected).</li>
+              <li><strong>Row Management, Config &amp; Cache:</strong> Toggle Batch Delete Mode, export/import portable <code>.json</code> workspace configurations, open this User Manual, or clear &amp; refresh the PWA cache.</li>
+            </ul>
+          </article>
+
+          <!-- Section 5 -->
+          <article id="manual-sec-5" class="manual-section">
+            <h4>5. Daily Request Management (Creating &amp; Editing Requests)</h4>
+            <ul class="manual-list">
+              <li><strong>Create a New Request:</strong> Click <strong><code>+ New Request</code></strong> in the Controls bar (or <strong><code>+ Clear / New</code></strong> in the Bottom Editor Dock header).</li>
+              <li><strong>Edit an Existing Request:</strong> <strong>Single-click any request row</strong> in the table to load it into the Bottom Editor Dock, or click the row's <strong><code>Edit</code></strong> button (or <strong><code>Popup Editor</code></strong> in the dock) to edit in a centered popup modal.</li>
+              <li><strong>Bidirectional Master Account Auto-Fill:</strong> Typing a known <strong>Broker Name</strong> (<code>Col C</code>) auto-fills <strong>Master #</strong> (<code>Col D</code>) and <strong>Bidder #</strong> (<code>Col E</code>); typing a known <strong>Master #</strong> reverse-fills Broker Name and Bidder #.</li>
+              <li><strong>Immutable UUIDv4 Primary Keys (<code>Col K</code>):</strong> Every request gets a permanent 36-character UUIDv4 in hidden Column K. Editing Subject, Ticket #, or Broker never breaks its identity across daily tabs.</li>
+              <li><strong>Quick Timestamps:</strong> Click <strong><code>+ Insert Timestamp</code></strong> above Action Notes to insert a formatted <code>[MM/DD/YYYY HH:MM AM/PM]</code> prefix.</li>
+            </ul>
+          </article>
+
+          <!-- Section 6 -->
+          <article id="manual-sec-6" class="manual-section">
+            <h4>6. Time-Saving Editor Power Tools (<code>🎯 Grab Ticket</code>, <code>📥 Pull Prior</code>, <code>🔄 Sync Forward</code>)</h4>
+            <ul class="manual-list">
+              <li><strong><code>🎯 Grab Ticket</code> (Above Ticket Number input):</strong> Extracts bracketed hyphenated ticket IDs such as <code>[REQ-24-8812]</code> from the Subject field, normalizes them to uppercase, and merges them comma-delimited into Ticket Number without duplicates.</li>
+              <li><strong><code>📥 Pull Prior</code> (In Bottom Dock &amp; Popup Editor headers):</strong> Scans earlier <code>MM-DD-YYYY</code> tabs for the most recent matching request (by UUID, Ticket #, account/lot identity, or Subject) and non-destructively fills only currently blank fields while comma-merging Ticket Numbers.</li>
+              <li><strong><code>🔄 Sync Forward</code> (In Bottom Dock &amp; Ticket Details):</strong> Propagates newly added information (such as a Ticket #, Master #, Bidder #, or Lot #) forward onto rolled-over instances of the same request on newer daily tabs without overwriting existing data.</li>
+            </ul>
+          </article>
+
+          <!-- Section 7 -->
+          <article id="manual-sec-7" class="manual-section">
+            <h4>7. Multi-Department Trackers, Custom Schemas &amp; Lockable Form Layout</h4>
+            <p>Work across multiple departments with different Excel column structures using dedicated workbook tabs and the adjustable 12-column form grid:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/03-custom-department-and-layout-editor.png" alt="Custom Department Tracker and Unlocked Form Layout Editor" class="manual-screenshot" loading="lazy">
+              <figcaption>Custom Department Tracker with Unlocked 12-Column Form Layout Controls</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Add or Switch Department Workbooks:</strong> Click <strong><code>+ Tracker Tab</code></strong> on the right side of the top <strong><code>Workbooks</code></strong> bar. Each workbook tab maintains its own folder handles, active workbook, and custom schema. Double-click any workbook tab to rename it.</li>
+              <li><strong>Adjusting Form Field Widths, Order &amp; Rows (<code>🔒 Layout</code> → <code>🔓 Lock Layout</code>):</strong>
+                <ol>
+                  <li>Click <strong><code>🔒 Layout</code></strong> in the Bottom Editor Dock header to unlock the 12-column form customizer.</li>
+                  <li>Use <strong><code>◀</code> / <code>▶</code></strong> on any field card to change its visual position in the form (your Excel column save order <code>Col A</code>, <code>Col B</code>, etc. remains untouched).</li>
+                  <li>Use <strong><code>−</code> / <code>+</code></strong> (from <code>2/12</code> to <code>12/12</code>) or drag the right edge of any field card to resize its width.</li>
+                  <li>Use <strong><code>↕−</code> / <code>↕+</code></strong> on Notes fields to adjust textarea height (`1r` to `6r`), then click <strong><code>🔓 Lock Layout</code></strong> to lock your layout in place (or <strong><code>↺ Reset Layout</code></strong> to restore defaults).</li>
+                </ol>
+              </li>
+            </ul>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/04-column-mapping-modal.png" alt="Configure Column Mapping Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>Configure Column Mapping Modal — Inspect or override semantic roles for custom Row-1 headers</figcaption>
+            </figure>
+          </article>
+
+          <!-- Section 8 -->
+          <article id="manual-sec-8" class="manual-section">
+            <h4>8. Ticket Details &amp; Multi-Day Aggregated Timeline</h4>
+            <p>Click <strong><code>Details</code></strong> in any row's Actions column (or click <strong><code>[+] Expand</code></strong> in Action Notes) to view the complete multi-day history of a request:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/05-ticket-details-and-timeline.png" alt="Ticket Details and Aggregated Timeline Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>Ticket Details &amp; Aggregated Notes Timeline across Daily Tabs</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Chronological Daily Timeline:</strong> Displays every <code>MM-DD-YYYY</code> tab where the request appeared, with individual <code>[MM/DD/YYYY HH:MM AM/PM]</code> notes parsed into timeline entries. Click <strong><code>Edit Row</code></strong> on any day card to load that specific day's row.</li>
+              <li><strong>Quick Timestamped Note Form:</strong> Type an update in <strong><code>Append New Timestamped Note to Latest Entry</code></strong> and click <strong><code>+ Add Timestamped Note</code></strong> to timestamp and save directly to the latest tab.</li>
+            </ul>
+          </article>
+
+          <!-- Section 9 -->
+          <article id="manual-sec-9" class="manual-section">
+            <h4>9. Searching, Sorting, Like-Item Filtering &amp; Batch Actions</h4>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/10-light-mode-and-batch-actions.png" alt="Light Mode, Like-Item Filter and Batch Action Bar" class="manual-screenshot" loading="lazy">
+              <figcaption>Light Mode Theme, 1-Click Like-Item Filtering &amp; Floating Batch Action Bar</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Automatic Global Search:</strong> Typing in the search bar automatically searches across <strong>all</strong> <code>MM-DD-YYYY</code> tabs in the workbook and returns to your selected Scope when cleared.</li>
+              <li><strong>1-Click Like-Item Filtering:</strong> Click directly on any <strong>Tracking ID chip</strong> (<code>🔍 8f4a92c1...</code>), <strong>Ticket #</strong>, <strong>Broker</strong>, <strong>Master #</strong>, <strong>Bidder #</strong>, <strong>Action</strong>, <strong>Yard #</strong>, <strong>Lot #</strong>, or <strong>Status badge</strong> in the table to filter the entire workbook to matching rows.</li>
+              <li><strong>Floating Batch Action Bar:</strong> Check the box on the left of one or more rows to reveal the floating Batch Bar at the bottom—update statuses in bulk or delete selected rows in a single operation.</li>
+            </ul>
+          </article>
+
+          <!-- Section 10 -->
+          <article id="manual-sec-10" class="manual-section">
+            <h4>10. Smart Daily Rollover &amp; Carryover Engine</h4>
+            <p>Click <strong><code>Rollover / Sync</code></strong> in the top header bar to carry unfinished requests forward into today's or tomorrow's <code>MM-DD-YYYY</code> tab:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/06-smart-rollover-modal.png" alt="Smart Rollover Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>Smart Rollover / Sync Modal with Target Date Presets &amp; Live Consolidation Preview</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Target Date Presets:</strong> Click <strong><code>Today</code></strong>, <strong><code>Tomorrow</code></strong>, or <strong><code>Latest Tab</code></strong> (if the tab doesn't exist yet, TrackerUI clones it from <code>template</code>).</li>
+              <li><strong>Source Sheet Scope:</strong> Choose between <strong><code>Previous Sheet Only</code></strong> or <strong><code>All Prior Sheets</code></strong> (chronological resolution from oldest to newest).</li>
+              <li><strong>Idempotent Notes Merging &amp; Superseded Overrides:</strong> Consolidates chronological notes without duplicates, skips already-synced items, and lets you optionally reopen older requests that were marked <code>Complete</code> on a later tab.</li>
+            </ul>
+          </article>
+
+          <!-- Section 11 -->
+          <article id="manual-sec-11" class="manual-section">
+            <h4>11. Workbook Scratch Sheets (Colors, Context Menu &amp; <code>Data to Columns</code>)</h4>
+            <p>Open or create custom worksheets (such as <code>Title Tracking</code> or <code>Lot Audit</code>) from the <strong><code>Scratch Sheets ▾</code></strong> menu on the right side of the <code>Sheets</code> bar:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/07-scratch-sheet-and-context-menu.png" alt="Scratch Sheet and Right-Click Context Menu" class="manual-screenshot" loading="lazy">
+              <figcaption>Scratch Sheet Editor — Excel Default Fill Colors, Striped Rows &amp; Right-Click Context Menu</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Right-Click Context Menu &amp; Multi-Cell Paste:</strong> Right-click any cell or highlighted range for <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, quick Excel Fill Color swatches, <code>Data to Columns...</code>, <code>Clear Contents</code>, and <code>Clear Fill Color</code>. Multi-cell ranges copied from Desktop Excel paste cleanly across rows and columns.</li>
+              <li><strong>Excel Default Fill Colors &amp; App-Only Striped Rows:</strong> Use <strong><code>Fill ▾</code></strong> in the toolbar (or right-click swatches) to apply Excel-compatible cell/header fill colors. Toggle <strong><code>Striped rows</code></strong> for visual-only alternating row shading in the app.</li>
+              <li><strong>Acknowledgeable Formula Notice:</strong> Scratch sheets edit plain values—Excel formulas (<code>=SUM</code>, <code>=XLOOKUP</code>, etc.) do not calculate in-app. Click <strong><code>Acknowledge ✕</code></strong> on the yellow banner to dismiss the reminder.</li>
+            </ul>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/08-data-to-columns-modal.png" alt="Data to Columns Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>Data to Columns Wizard — Split delimited text across adjacent columns with live preview</figcaption>
+            </figure>
+          </article>
+
+          <!-- Section 12 -->
+          <article id="manual-sec-12" class="manual-section">
+            <h4>12. Supervisor Tools (<code>View-Only Inspector</code> &amp; <code>Multi-Workbook Master Rollup</code>)</h4>
+            <p>Open <strong><code>⚙️ Tools &amp; Setup ▾</code> → <code>Supervisor Multi-Workbook Rollup...</code></strong> to aggregate and classify requests across all agent workbooks in a folder:</p>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/09-supervisor-master-rollup.png" alt="Supervisor Multi-Workbook Master Rollup Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>Supervisor Multi-Workbook Master Rollup — KPI Cards, Parent Category Pills &amp; .xlsx Export</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Web Worker Background Parsing:</strong> Scans all mirror or working <code>.xlsx</code> files in a team directory without freezing the UI, deduplicating rolled-over rows by Tracking ID.</li>
+              <li><strong>Subtype → Parent Category Pipeline:</strong> Automatically maps granular actions into executive Parent Categories (e.g., <em>Bidding &amp; Eligibility</em>, <em>Accounting &amp; Refunds</em>, <em>Title &amp; Ownership</em>, <em>Lot &amp; Yard Ops</em>). Click <strong><code>Export Rollup (.xlsx)</code></strong> to download a standalone two-sheet Excel summary report.</li>
+            </ul>
+          </article>
+
+          <!-- Section 13 -->
+          <article id="manual-sec-13" class="manual-section">
+            <h4>13. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
+            <ul class="manual-list">
+              <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, export or import your department tracker profiles, custom column mappings, and 12-column form layouts as a portable <code>.json</code> file.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code>v1.18.0</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+            </ul>
+          </article>
+
+          <!-- Section 14 -->
+          <article id="manual-sec-14" class="manual-section">
+            <h4>14. Quick Reference: Where to Click &amp; Keyboard Shortcuts</h4>
+            <div class="manual-table-wrap">
+              <table class="manual-ref-table">
+                <thead>
+                  <tr><th>Goal / Action</th><th>Where to Click</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Connect or switch your Excel folder</td><td>Top Header → <strong><code>Select Agent Folder</code></strong> / <strong><code>Switch Folder</code></strong></td></tr>
+                  <tr><td>Add another department's tracker tab</td><td><code>Workbooks</code> bar (right) → <strong><code>+ Tracker Tab</code></strong></td></tr>
+                  <tr><td>Rename a workbook tab</td><td><strong>Double-click</strong> the tab in the <code>Workbooks</code> bar</td></tr>
+                  <tr><td>Open or create a Scratch Sheet</td><td><code>Sheets</code> bar (right) → <strong><code>Scratch Sheets ▾</code></strong></td></tr>
+                  <tr><td>Extract <code>[XXXX-XX-XXXX]</code> ticket from Subject</td><td>Bottom Dock / Modal → <strong><code>🎯 Grab Ticket</code></strong> above Ticket Number</td></tr>
+                  <tr><td>Fill blank fields from an earlier day's tab</td><td>Bottom Dock Header → <strong><code>📥 Pull Prior</code></strong></td></tr>
+                  <tr><td>Push newly added Ticket/Account/Lot to newer tabs</td><td>Bottom Dock Header or Ticket Details → <strong><code>🔄 Sync Forward</code></strong></td></tr>
+                  <tr><td>Adjust form field widths, order, or Notes height</td><td>Bottom Dock Header → <strong><code>🔒 Layout</code></strong> (unlocks <code>◀ ▶</code>, <code>− +</code>, <code>↕− ↕+</code>)</td></tr>
+                  <tr><td>Filter table to rows sharing a Broker/Master/Ticket/ID</td><td><strong>Click directly on any chip/badge</strong> inside the table</td></tr>
+                  <tr><td>Bulk-update status or delete multiple rows</td><td>Check left-hand row checkboxes → Use floating <strong>Batch Action Bar</strong></td></tr>
+                  <tr><td>Color cells or split columns on a Scratch Sheet</td><td>Scratch Toolbar → <strong><code>Fill ▾</code></strong> or <strong><code>Data to Columns</code></strong> (or <strong>Right-Click</strong> cell)</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="manual-table-wrap" style="margin-top:0.85rem;">
+              <table class="manual-ref-table">
+                <thead>
+                  <tr><th>Keyboard Shortcut</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><code>Arrow Keys</code> / <code>Tab</code> / <code>Enter</code></td><td>Navigate cells or commit edit and move down/up on Scratch Sheets</td></tr>
+                  <tr><td><code>F2</code> or <code>Double-Click</code></td><td>Edit inside active Scratch Sheet cell without overwriting existing text</td></tr>
+                  <tr><td><code>Shift + Arrow Keys</code></td><td>Expand multi-cell range selection on Scratch Sheets</td></tr>
+                  <tr><td><code>Ctrl+C</code> / <code>Ctrl+X</code> / <code>Ctrl+V</code></td><td>Copy / Cut / Paste single cells or multi-cell Excel TSV ranges</td></tr>
+                  <tr><td><code>Delete</code> / <code>Backspace</code></td><td>Clear contents of selected Scratch Sheet cells</td></tr>
+                  <tr><td><code>Ctrl+Z</code> / <code>Ctrl+Y</code></td><td>Undo / Redo cell value and fill color changes on Scratch Sheets</td></tr>
+                  <tr><td><code>Ctrl+S</code></td><td>Immediately save pending Scratch Sheet edits to workbook &amp; mirror</td></tr>
+                  <tr><td><code>Escape</code></td><td>Cancel inline cell edit or close open modal / menu</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <span class="dock-hint-text">Tip: Click any screenshot above to view full-size • Press Esc to close</span>
+        <button type="button" id="btnCloseUserManual" class="btn-primary">Close Manual</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full-Screen Lightbox Overlay for Manual Screenshots -->
+  <div id="manualImageLightbox" class="modal-backdrop manual-lightbox-backdrop" style="display:none;">
+    <div class="manual-lightbox-inner">
+      <div class="manual-lightbox-bar">
+        <span id="manualLightboxCaption" class="manual-lightbox-caption">Screenshot Preview</span>
+        <button type="button" id="btnCloseManualLightbox" class="btn-primary btn-sm">✕ Close Preview</button>
+      </div>
+      <img id="manualLightboxImg" src="" alt="Enlarged Manual Screenshot" class="manual-lightbox-img">
+    </div>
+  </div>
+
   <!-- In-App Dialog Modal (Replaces native browser alert / confirm / prompt) -->
   <div id="dialogModal" class="modal-backdrop dialog-backdrop">
     <div class="modal dialog-modal">
@@ -1383,16 +1710,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.17.3</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.18.0</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.17.3"></script>
-  <script src="js/core-ui.js?v=1.17.3"></script>
-  <script src="js/workbook-io.js?v=1.17.3"></script>
-  <script src="js/tracker-table.js?v=1.17.3"></script>
-  <script src="js/request-editors.js?v=1.17.3"></script>
-  <script src="js/scratch-sheets.js?v=1.17.3"></script>
-  <script src="js/rollover.js?v=1.17.3"></script>
+  <script src="js/mockMasterAccounts.js?v=1.18.0"></script>
+  <script src="js/core-ui.js?v=1.18.0"></script>
+  <script src="js/workbook-io.js?v=1.18.0"></script>
+  <script src="js/tracker-table.js?v=1.18.0"></script>
+  <script src="js/request-editors.js?v=1.18.0"></script>
+  <script src="js/scratch-sheets.js?v=1.18.0"></script>
+  <script src="js/rollover.js?v=1.18.0"></script>
 </body>
 </html>

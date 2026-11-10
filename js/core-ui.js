@@ -977,9 +977,203 @@ document.addEventListener('keydown', (e) => {
       masterRollupModal.classList.remove('open');
       return;
     }
+    if (manualImageLightbox && manualImageLightbox.style.display !== 'none') {
+      closeManualImageLightbox();
+      return;
+    }
+    if (userManualModal && userManualModal.classList.contains('open')) {
+      closeUserManualModal();
+      return;
+    }
     closeToolsMenu();
   }
 });
+
+// --- INTERACTIVE IN-APP USER MANUAL & REFERENCE GUIDE MODAL ---
+const btnOpenUserManual = document.getElementById('btnOpenUserManual');
+const menuOpenUserManual = document.getElementById('menuOpenUserManual');
+const userManualModal = document.getElementById('userManualModal');
+const btnCloseUserManual = document.getElementById('btnCloseUserManual');
+const btnCloseUserManualHeader = document.getElementById('btnCloseUserManualHeader');
+const userManualSearchInput = document.getElementById('userManualSearchInput');
+const btnClearManualSearch = document.getElementById('btnClearManualSearch');
+const userManualTocList = document.getElementById('userManualTocList');
+const userManualContentPane = document.getElementById('userManualContentPane');
+const userManualEmptySearch = document.getElementById('userManualEmptySearch');
+const manualImageLightbox = document.getElementById('manualImageLightbox');
+const manualLightboxImg = document.getElementById('manualLightboxImg');
+const manualLightboxCaption = document.getElementById('manualLightboxCaption');
+const btnCloseManualLightbox = document.getElementById('btnCloseManualLightbox');
+
+function openUserManualModal(targetSectionId = '') {
+  closeToolsMenu();
+  if (!userManualModal) return;
+  userManualModal.classList.add('open');
+  if (targetSectionId) {
+    scrollToManualSection(targetSectionId);
+  }
+  if (userManualSearchInput) {
+    setTimeout(() => userManualSearchInput.focus(), 40);
+  }
+}
+
+function closeUserManualModal() {
+  closeManualImageLightbox();
+  if (userManualModal) {
+    userManualModal.classList.remove('open');
+  }
+}
+
+function openManualImageLightbox(src, captionText) {
+  if (!manualImageLightbox || !manualLightboxImg) return;
+  manualLightboxImg.src = src || '';
+  if (manualLightboxCaption) {
+    manualLightboxCaption.textContent = captionText || 'Screenshot Preview';
+  }
+  manualImageLightbox.style.display = 'flex';
+}
+
+function closeManualImageLightbox() {
+  if (!manualImageLightbox) return;
+  manualImageLightbox.style.display = 'none';
+}
+
+function setActiveManualTocItem(sectionId) {
+  if (!userManualTocList) return;
+  const buttons = userManualTocList.querySelectorAll('.manual-toc-item');
+  buttons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.manualTarget === sectionId);
+  });
+}
+
+function scrollToManualSection(sectionId) {
+  if (!userManualContentPane || !sectionId) return;
+  const targetEl = document.getElementById(sectionId);
+  if (!targetEl) return;
+  if (targetEl.style.display === 'none') {
+    filterUserManualSections('');
+  }
+  setActiveManualTocItem(sectionId);
+  if (typeof targetEl.scrollIntoView === 'function') {
+    targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    userManualContentPane.scrollTop = targetEl.offsetTop;
+  }
+}
+
+function filterUserManualSections(rawQuery) {
+  if (!userManualContentPane) return;
+  const q = String(rawQuery || '').trim().toLowerCase();
+  if (userManualSearchInput && userManualSearchInput.value !== rawQuery && rawQuery === '') {
+    userManualSearchInput.value = '';
+  }
+  if (btnClearManualSearch) {
+    btnClearManualSearch.style.display = q ? 'inline-flex' : 'none';
+  }
+
+  const sections = userManualContentPane.querySelectorAll('.manual-section');
+  let visibleCount = 0;
+  let firstVisibleId = '';
+
+  sections.forEach(sec => {
+    const text = String(sec.textContent || '').toLowerCase();
+    const matches = !q || text.includes(q);
+    sec.style.display = matches ? '' : 'none';
+    if (matches) {
+      visibleCount++;
+      if (!firstVisibleId) firstVisibleId = sec.id;
+    }
+    if (userManualTocList && sec.id) {
+      const tocBtn = userManualTocList.querySelector(`.manual-toc-item[data-manual-target="${sec.id}"]`);
+      if (tocBtn) {
+        tocBtn.style.display = matches ? '' : 'none';
+      }
+    }
+  });
+
+  if (userManualEmptySearch) {
+    userManualEmptySearch.style.display = visibleCount === 0 ? 'block' : 'none';
+  }
+  if (firstVisibleId) {
+    setActiveManualTocItem(firstVisibleId);
+  }
+}
+
+if (btnOpenUserManual) {
+  btnOpenUserManual.addEventListener('click', () => openUserManualModal());
+}
+if (menuOpenUserManual) {
+  menuOpenUserManual.addEventListener('click', () => openUserManualModal());
+}
+if (btnCloseUserManual) {
+  btnCloseUserManual.addEventListener('click', () => closeUserManualModal());
+}
+if (btnCloseUserManualHeader) {
+  btnCloseUserManualHeader.addEventListener('click', () => closeUserManualModal());
+}
+if (userManualModal) {
+  userManualModal.addEventListener('click', (e) => {
+    if (e.target === userManualModal) closeUserManualModal();
+  });
+}
+if (userManualTocList) {
+  userManualTocList.addEventListener('click', (e) => {
+    const btn = e.target.closest ? e.target.closest('.manual-toc-item') : null;
+    if (btn && btn.dataset && btn.dataset.manualTarget) {
+      scrollToManualSection(btn.dataset.manualTarget);
+    }
+  });
+}
+if (userManualSearchInput) {
+  userManualSearchInput.addEventListener('input', () => {
+    filterUserManualSections(userManualSearchInput.value);
+  });
+}
+if (btnClearManualSearch) {
+  btnClearManualSearch.addEventListener('click', () => {
+    filterUserManualSections('');
+    if (userManualSearchInput) userManualSearchInput.focus();
+  });
+}
+if (userManualContentPane) {
+  userManualContentPane.addEventListener('click', (e) => {
+    const img = e.target.closest ? e.target.closest('.manual-screenshot') : null;
+    if (img) {
+      const fig = img.closest ? img.closest('.manual-figure') : null;
+      const capEl = fig ? fig.querySelector('figcaption') : null;
+      const caption = capEl ? capEl.textContent.replace(/\s*—\s*Click image to enlarge/i, '').trim() : (img.alt || 'Screenshot Preview');
+      openManualImageLightbox(img.getAttribute('src') || img.src, caption);
+    }
+  });
+  userManualContentPane.addEventListener('scroll', () => {
+    if (!userManualTocList) return;
+    const paneTop = userManualContentPane.getBoundingClientRect().top;
+    const sections = userManualContentPane.querySelectorAll('.manual-section');
+    let activeId = '';
+    sections.forEach(sec => {
+      if (sec.style.display === 'none') return;
+      const rect = sec.getBoundingClientRect();
+      if (rect.top - paneTop <= 90) {
+        activeId = sec.id;
+      }
+    });
+    if (!activeId && sections.length > 0) {
+      const firstVis = Array.from(sections).find(s => s.style.display !== 'none');
+      if (firstVis) activeId = firstVis.id;
+    }
+    if (activeId) setActiveManualTocItem(activeId);
+  }, { passive: true });
+}
+if (btnCloseManualLightbox) {
+  btnCloseManualLightbox.addEventListener('click', () => closeManualImageLightbox());
+}
+if (manualImageLightbox) {
+  manualImageLightbox.addEventListener('click', (e) => {
+    if (e.target === manualImageLightbox || e.target === manualLightboxImg) {
+      closeManualImageLightbox();
+    }
+  });
+}
 
 function colNumberToExcelLetters(colNum) {
   let n = Math.max(1, Math.floor(colNum || 1));
@@ -1184,7 +1378,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION, DESKTOP CHROME ENVIRONMENT CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.17.3';
+const APP_VERSION = 'v1.18.0';
 
 function evaluateDesktopChromeCompatibility(navObj = (typeof navigator !== 'undefined' ? navigator : null)) {
   if (!navObj) {

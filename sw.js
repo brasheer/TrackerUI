@@ -1,7 +1,8 @@
-const CACHE_NAME = 'tracker-ui-v26';
+const CACHE_NAME = 'tracker-ui-v27';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './USER_MANUAL.md',
   './css/styles.css',
   './js/mockMasterAccounts.js',
   './js/core-ui.js',
@@ -14,6 +15,16 @@ const ASSETS_TO_CACHE = [
   './assets/icons/icon.svg',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
+  './assets/images/manual/01-main-workspace-overview.png',
+  './assets/images/manual/02-tools-and-setup-menu.png',
+  './assets/images/manual/03-custom-department-and-layout-editor.png',
+  './assets/images/manual/04-column-mapping-modal.png',
+  './assets/images/manual/05-ticket-details-and-timeline.png',
+  './assets/images/manual/06-smart-rollover-modal.png',
+  './assets/images/manual/07-scratch-sheet-and-context-menu.png',
+  './assets/images/manual/08-data-to-columns-modal.png',
+  './assets/images/manual/09-supervisor-master-rollup.png',
+  './assets/images/manual/10-light-mode-and-batch-actions.png',
   'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'
 ];
 
