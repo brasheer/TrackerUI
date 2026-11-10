@@ -130,7 +130,8 @@ let activeSchemaConfig = {
 // Row Selection & Batch / Delete Mode State
 let isDeleteMode = false;
 let currentlyVisibleRows = [];
-const selectedForDelete = new Set(); // Stores "${sheetName}::${rowNumber}" for permanent row selection (Batch Status & Batch Delete)
+const selectedForDelete = new Set(); // Stores "${sheetName}::${rowNumber}" for permanent row selection (Batch Status, Copy/Paste & Batch Delete)
+let copiedTrackerRowsClipboard = []; // Cloned row items copied via checkbox selection for manual cross-tab paste
 let rolloverSourceMode = 'previous'; // 'previous' (Immediately preceding sheet only) | 'all' (All prior daily tabs)
 
 // Dynamic Reference Data & Dev Mock Mode
@@ -539,10 +540,18 @@ const btnCancelDeleteMode = document.getElementById('btnCancelDeleteMode');
 
 const batchActionDock = document.getElementById('batchActionDock');
 const batchSelectedCountEl = document.getElementById('batchSelectedCount');
+const btnBatchCopyRows = document.getElementById('btnBatchCopyRows');
+const btnBatchCopyToTab = document.getElementById('btnBatchCopyToTab');
+const batchStatusSep = document.getElementById('batchStatusSep');
+const batchStatusControlGroup = document.getElementById('batchStatusControlGroup');
 const batchStatusSelect = document.getElementById('batchStatusSelect');
 const btnApplyBatchStatus = document.getElementById('btnApplyBatchStatus');
 const btnBatchDeleteSelected = document.getElementById('btnBatchDeleteSelected');
 const btnClearBatchSelection = document.getElementById('btnClearBatchSelection');
+const pasteRowsToolbarGroup = document.getElementById('pasteRowsToolbarGroup');
+const btnPasteTrackerRows = document.getElementById('btnPasteTrackerRows');
+const pasteCopiedCountEl = document.getElementById('pasteCopiedCount');
+const btnClearCopiedRows = document.getElementById('btnClearCopiedRows');
 
 // Modal Form Fields
 const fSubject = document.getElementById('fSubject');
@@ -1378,7 +1387,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION, DESKTOP CHROME ENVIRONMENT CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.18.0';
+const APP_VERSION = 'v1.18.1';
 
 function evaluateDesktopChromeCompatibility(navObj = (typeof navigator !== 'undefined' ? navigator : null)) {
   if (!navObj) {

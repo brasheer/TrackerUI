@@ -4518,3 +4518,26 @@ button.manual-toc-item.active:hover {
     max-height: 150px;
   }
 }
+
+/* Manual Row Copy & Paste Toolbar & Batch Controls (v1.18.1) */
+.paste-rows-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-paste-rows-bar {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.btn-clear-copied-rows {
+  padding: 0.35rem 0.5rem;
+  font-weight: 700;
+}
+
+.batch-status-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}

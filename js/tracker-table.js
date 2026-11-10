@@ -1107,6 +1107,12 @@ function updateDeleteSelectionUI() {
     batchSelectedCountEl.textContent = String(count);
   }
   const hasStatusCol = activeSchemaConfig.isStandardSchema || Boolean(activeSchemaConfig.statusCol);
+  if (batchStatusControlGroup) {
+    batchStatusControlGroup.style.display = hasStatusCol ? 'inline-flex' : 'none';
+  }
+  if (batchStatusSep) {
+    batchStatusSep.style.display = hasStatusCol ? 'inline-block' : 'none';
+  }
   if (batchStatusSelect) {
     batchStatusSelect.disabled = !hasStatusCol;
   }
@@ -1120,8 +1126,20 @@ function updateDeleteSelectionUI() {
     const showBatchDock = !isDeleteMode && count > 0 && Boolean(workbook);
     batchActionDock.style.display = showBatchDock ? 'block' : 'none';
   }
+  updateCopiedRowsToolbarUI();
   syncSelectAllCheckboxes();
   updateStatusBarTelemetry();
+}
+
+function updateCopiedRowsToolbarUI() {
+  const clipCount = Array.isArray(copiedTrackerRowsClipboard) ? copiedTrackerRowsClipboard.length : 0;
+  if (pasteCopiedCountEl) {
+    pasteCopiedCountEl.textContent = String(clipCount);
+  }
+  if (pasteRowsToolbarGroup) {
+    const showPaste = clipCount > 0 && Boolean(workbook);
+    pasteRowsToolbarGroup.style.display = showPaste ? 'inline-flex' : 'none';
+  }
 }
 
 function syncSelectAllCheckboxes() {
@@ -1363,6 +1381,276 @@ async function handleApplyBatchStatusUpdate() {
 if (btnApplyBatchStatus) {
   btnApplyBatchStatus.addEventListener('click', handleApplyBatchStatusUpdate);
 }
+
+// --- MANUAL ROW COPY & PASTE ACROSS DAILY TABS (Works with or without Status/Validation Lists) ---
+function cloneTrackerRowForClipboard(item) {
+  return {
+    sourceSheetName: item.sheetName || '',
+    sourceRowNumber: item.rowNumber || 0,
+    subject: item.subject || '',
+    ticket: item.ticket || '',
+    broker: item.broker || '',
+    master: item.master || '',
+    bidder: item.bidder || '',
+    action: item.action || '',
+    yard: item.yard || '',
+    lots: item.lots || '',
+    notes: item.notes || '',
+    status: item.status || '',
+    key: item.key || generateTrackingGuid(),
+    isCustomSchema: Boolean(item.isCustomSchema || (activeSchemaConfig && !activeSchemaConfig.isStandardSchema)),
+    customValues: item.customValues ? { ...item.customValues } : null
+  };
+}
+
+function getSelectedItemsFromCheckboxSet() {
+  if (selectedForDelete.size === 0) return [];
+  const selectedCompSet = new Set(selectedForDelete);
+  return allRows.filter(item =>
+    selectedCompSet.has(getRowCompositeId(item.sheetName, item.rowNumber))
+  );
+}
+
+function handleCopySelectedTrackerRows() {
+  const selectedItems = getSelectedItemsFromCheckboxSet();
+  if (selectedItems.length === 0) return;
+
+  copiedTrackerRowsClipboard = selectedItems.map(cloneTrackerRowForClipboard);
+  selectedForDelete.clear();
+  updateDeleteSelectionUI();
+  renderList();
+  showToast(
+    `📋 Copied ${copiedTrackerRowsClipboard.length} row(s). Switch to the next day tab and click "📥 Paste Row(s)" (or press Ctrl+V).`,
+    'info'
+  );
+}
+
+function clearCopiedTrackerRowsClipboard() {
+  copiedTrackerRowsClipboard = [];
+  updateCopiedRowsToolbarUI();
+}
+
+function ensureTargetDailySheetInWorkbook(targetTabName) {
+  let targetSheet = workbook.getWorksheet(targetTabName);
+  let createdNewSheet = false;
+
+  if (!targetSheet) {
+    createdNewSheet = true;
+    let placeholderWs = null;
+    workbook.eachSheet(ws => {
+      if (isTemplatePlaceholderTab(ws.name)) placeholderWs = ws;
+    });
+
+    if (placeholderWs && dateSheets.length === 0) {
+      placeholderWs.name = targetTabName;
+      targetSheet = placeholderWs;
+    } else {
+      const templateSheet = findTemplateSheet();
+      targetSheet = workbook.addWorksheet(targetTabName);
+      placeWorksheetFirst(targetSheet);
+
+      if (templateSheet) {
+        cloneTemplateStructure(templateSheet, targetSheet);
+      } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
+        applyCustomHeadersSheetFormatting(targetSheet, activeSchemaConfig.columns.map(c => c.header));
+      } else {
+        applyStandardSheetFormatting(targetSheet);
+      }
+    }
+  }
+
+  return { targetSheet, createdNewSheet };
+}
+
+async function pasteTrackerRowsToTargetTab(targetTabName, rowsToPaste, { clearClipboardAfter = true } = {}) {
+  if (!workbook || !Array.isArray(rowsToPaste) || rowsToPaste.length === 0) return false;
+  const cleanTargetTab = String(targetTabName || '').trim();
+  if (!DATE_TAB_REGEX.test(cleanTargetTab)) {
+    await showModalAlert({
+      title: 'Invalid Target Daily Tab',
+      message: 'Please select or enter a valid daily tab in MM-DD-YYYY format (e.g., 11-10-2026).'
+    });
+    return false;
+  }
+
+  if (!pendingPrimarySaveState) {
+    await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : cleanTargetTab, { skipStagedRecoveryCheck: true });
+  }
+
+  const { targetSheet, createdNewSheet } = ensureTargetDailySheetInWorkbook(cleanTargetTab);
+  const targetColMap = getWorksheetColumnMap(targetSheet);
+  targetSheet.getColumn(targetColMap.trackingCol).hidden = true;
+  if (targetColMap.emailSubjCol) {
+    targetSheet.getColumn(targetColMap.emailSubjCol).hidden = false;
+  }
+
+  // Track existing Tracking IDs on the target sheet so same-sheet duplicates get a new UUIDv4
+  // while cross-tab pastes preserve the original UUIDv4 to keep multi-day history linked
+  const usedKeysOnTarget = new Set();
+  targetSheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const existingKey = cellText(row, targetColMap.trackingCol).trim().toLowerCase();
+    if (existingKey) usedKeysOnTarget.add(existingKey);
+  });
+
+  let writeRowIdx = getNextEmptyRow(targetSheet);
+  let pastedCount = 0;
+
+  rowsToPaste.forEach(srcItem => {
+    const cloned = cloneTrackerRowForClipboard(srcItem);
+    const normKey = String(cloned.key || '').trim().toLowerCase();
+    const isSameSheetDuplicate = cloned.sourceSheetName === cleanTargetTab || usedKeysOnTarget.has(normKey);
+    const finalKey = (!normKey || isSameSheetDuplicate) ? generateTrackingGuid() : cloned.key;
+    usedKeysOnTarget.add(finalKey.toLowerCase());
+
+    const rNum = writeRowIdx++;
+    const excelRow = targetSheet.getRow(rNum);
+    writeItemToWorksheetRow(excelRow, rNum, {
+      ...cloned,
+      key: finalKey
+    }, targetColMap);
+    pastedCount++;
+  });
+
+  const saveResult = await saveWorkbookToDisk();
+  if (saveResult) {
+    selectedForDelete.clear();
+    if (clearClipboardAfter) {
+      copiedTrackerRowsClipboard = [];
+    }
+    activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
+    clearTransientFiltersOnNavigation({ resetScopeToCurrent: true });
+    await loadWorkbookFromDisk(cleanTargetTab, {
+      skipStagedRecoveryCheck: true,
+      preserveStatus: saveResult === 'mirror-locked'
+    });
+    updateCopiedRowsToolbarUI();
+    showToast(
+      `📥 Pasted ${pastedCount} row(s) onto "${cleanTargetTab}"${createdNewSheet ? ' (created new tab)' : ''}.`,
+      'success'
+    );
+    return true;
+  }
+  return false;
+}
+
+async function handlePasteCopiedTrackerRows() {
+  if (!workbook || !Array.isArray(copiedTrackerRowsClipboard) || copiedTrackerRowsClipboard.length === 0) return;
+  const activeTab = sheetSelect ? sheetSelect.value : '';
+  if (!activeTab || !DATE_TAB_REGEX.test(activeTab)) {
+    return handleCopySelectedRowsToTabPrompt(copiedTrackerRowsClipboard);
+  }
+  await pasteTrackerRowsToTargetTab(activeTab, copiedTrackerRowsClipboard, { clearClipboardAfter: true });
+}
+
+async function handleCopySelectedRowsToTabPrompt(overrideRows = null) {
+  if (!workbook) return;
+  const rowsToCopy = Array.isArray(overrideRows) && overrideRows.length > 0
+    ? overrideRows.map(cloneTrackerRowForClipboard)
+    : getSelectedItemsFromCheckboxSet().map(cloneTrackerRowForClipboard);
+  if (rowsToCopy.length === 0) return;
+
+  const currentTab = (sheetSelect && DATE_TAB_REGEX.test(sheetSelect.value))
+    ? sheetSelect.value
+    : (rowsToCopy[0].sourceSheetName && DATE_TAB_REGEX.test(rowsToCopy[0].sourceSheetName)
+        ? rowsToCopy[0].sourceSheetName
+        : (dateSheets[0] || getTodayFormatted()));
+
+  const nextDayFromCurrent = addDaysToDateTab(currentTab, 1);
+  const todayStr = getTodayFormatted();
+  const suggestedDate = currentTab !== todayStr && !dateSheets.includes(todayStr)
+    ? todayStr
+    : nextDayFromCurrent;
+
+  const selectOptions = [
+    {
+      value: '__CUSTOM_DATE__',
+      label: `📅 Use date entered below (creates tab if needed)`
+    },
+    ...dateSheets.map(tab => ({
+      value: tab,
+      label: `📄 Existing Tab: ${tab}${tab === currentTab ? ' (Current)' : ''}`
+    }))
+  ];
+
+  const rawChoice = await showModalPrompt({
+    title: `📅 Copy ${rowsToCopy.length} Selected Row(s) to Day Tab`,
+    badge: `${rowsToCopy.length} row(s)`,
+    message:
+      `Choose an existing daily tab or enter the next day's MM-DD-YYYY date below.\n` +
+      `If the target tab doesn't exist yet, TrackerUI will create it automatically with your workbook's headers and paste the selected row(s).`,
+    selectLabel: 'Destination Tab Option',
+    selectOptions,
+    defaultSelectValue: '__CUSTOM_DATE__',
+    inputLabel: 'Target Daily Tab Date (MM-DD-YYYY)',
+    defaultValue: suggestedDate,
+    placeholder: 'MM-DD-YYYY',
+    confirmText: `📥 Copy & Paste ${rowsToCopy.length} Row(s)`,
+    validate: (val) => {
+      const selVal = dialogSelect ? dialogSelect.value : '__CUSTOM_DATE__';
+      const effective = (selVal && selVal !== '__CUSTOM_DATE__') ? selVal : String(val || '').trim();
+      if (!DATE_TAB_REGEX.test(effective)) {
+        return 'Please enter a valid date in exact MM-DD-YYYY format (e.g., 11-10-2026).';
+      }
+      return null;
+    }
+  });
+  if (!rawChoice) return;
+
+  const typedDate = (typeof rawChoice === 'object' ? rawChoice.value : rawChoice).trim();
+  const selectedOpt = (typeof rawChoice === 'object' && rawChoice.selectValue) ? rawChoice.selectValue : '__CUSTOM_DATE__';
+  const targetTabName = (selectedOpt && selectedOpt !== '__CUSTOM_DATE__') ? selectedOpt : typedDate;
+
+  await pasteTrackerRowsToTargetTab(targetTabName, rowsToCopy, { clearClipboardAfter: true });
+}
+
+if (btnBatchCopyRows) {
+  btnBatchCopyRows.addEventListener('click', handleCopySelectedTrackerRows);
+}
+if (btnBatchCopyToTab) {
+  btnBatchCopyToTab.addEventListener('click', () => handleCopySelectedRowsToTabPrompt());
+}
+if (btnPasteTrackerRows) {
+  btnPasteTrackerRows.addEventListener('click', handlePasteCopiedTrackerRows);
+}
+if (btnClearCopiedRows) {
+  btnClearCopiedRows.addEventListener('click', () => {
+    clearCopiedTrackerRowsClipboard();
+    showToast('Cleared copied row(s) from clipboard.', 'info');
+  });
+}
+
+// Keyboard shortcuts (Ctrl+C to copy checked rows, Ctrl+V to paste copied rows onto active daily tab)
+document.addEventListener('keydown', (e) => {
+  if (activeWorkspaceTab !== DAILY_TRACKER_WS_TAB || !workbook) return;
+  const activeEl = document.activeElement;
+  if (
+    activeEl &&
+    (activeEl.tagName === 'INPUT' ||
+      activeEl.tagName === 'TEXTAREA' ||
+      activeEl.tagName === 'SELECT' ||
+      activeEl.isContentEditable)
+  ) {
+    return;
+  }
+  const anyModalOpen = document.querySelector('.modal-backdrop.open');
+  if (anyModalOpen) return;
+
+  const isMod = e.ctrlKey || e.metaKey;
+  if (!isMod || e.altKey) return;
+
+  const keyLower = String(e.key || '').toLowerCase();
+  if (keyLower === 'c' && selectedForDelete.size > 0) {
+    const selText = typeof window.getSelection === 'function' ? String(window.getSelection() || '').trim() : '';
+    if (!selText) {
+      e.preventDefault();
+      handleCopySelectedTrackerRows();
+    }
+  } else if (keyLower === 'v' && Array.isArray(copiedTrackerRowsClipboard) && copiedTrackerRowsClipboard.length > 0) {
+    e.preventDefault();
+    handlePasteCopiedTrackerRows();
+  }
+});
 
 async function executeBatchDeleteSelected() {
   if (selectedForDelete.size === 0 || !workbook) return;

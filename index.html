@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.18.0</title>
+  <title>TrackerUI v1.18.1</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.18.0">
+  <link rel="stylesheet" href="css/styles.css?v=1.18.1">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.18.0 — Click to check for updates &amp; refresh app cache">v1.18.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.18.1 — Click to check for updates &amp; refresh app cache">v1.18.1</span>
     </div>
 
     <div class="header-actions">
@@ -522,6 +522,15 @@
       <span class="plus-icon">＋</span> New Request
     </button>
 
+    <div id="pasteRowsToolbarGroup" class="paste-rows-toolbar-group" style="display:none;">
+      <button type="button" id="btnPasteTrackerRows" class="btn-primary btn-paste-rows-bar" title="Paste copied request row(s) onto the active daily tab while preserving Tracking IDs (Ctrl+V)">
+        📥 Paste Row(s) (<span id="pasteCopiedCount">0</span>)
+      </button>
+      <button type="button" id="btnClearCopiedRows" class="btn-sm btn-clear-copied-rows" title="Clear copied row(s) from clipboard">
+        ✕
+      </button>
+    </div>
+
     <div class="sheet-nav-group">
       <label for="sheetSelect" class="control-label">Day Tab</label>
       <button type="button" id="btnPrevSheet" class="btn-sheet-step" title="Previous (Older) Day Tab" disabled>◀</button>
@@ -633,23 +642,32 @@
     </table>
   </div>
 
-  <!-- Floating Batch Status Action Bar (Renders only when 1+ row checkboxes are ticked) -->
+  <!-- Floating Batch Status & Row Copy/Paste Action Bar (Renders only when 1+ row checkboxes are ticked) -->
   <div id="batchActionDock" class="batch-action-dock" style="display:none;" role="region" aria-label="Batch row actions">
     <div class="batch-dock-inner">
       <div class="batch-dock-left">
         <span class="batch-count-pill"><span id="batchSelectedCount">0</span> selected</span>
-        <span class="batch-dock-hint">UUIDv4 keys preserved on batch update</span>
+        <span class="batch-dock-hint">UUIDv4 keys preserved across tabs</span>
       </div>
       <div class="batch-dock-controls">
-        <label for="batchStatusSelect" class="batch-dock-label">Set Status:</label>
-        <select id="batchStatusSelect" aria-label="Batch target request status">
-          <option value="Pending">Pending</option>
-          <option value="In Progress">In Progress</option>
-          <option value="Waiting on Buyer">Waiting on Buyer</option>
-          <option value="Escalated">Escalated</option>
-          <option value="Complete">Complete</option>
-        </select>
-        <button type="button" id="btnApplyBatchStatus" class="btn-primary btn-sm">Apply</button>
+        <button type="button" id="btnBatchCopyRows" class="btn-dock-secondary btn-sm" title="Copy selected row(s) to clipboard, then switch to another day tab and click Paste Row(s) (Ctrl+C)">
+          📋 Copy Row(s)
+        </button>
+        <button type="button" id="btnBatchCopyToTab" class="btn-primary btn-sm" title="Copy &amp; paste selected row(s) directly to the next day or any target MM-DD-YYYY tab (creates the tab if needed)">
+          📅 Copy to Next Day / Tab...
+        </button>
+        <span id="batchStatusSep" class="batch-dock-sep" aria-hidden="true"></span>
+        <div id="batchStatusControlGroup" class="batch-status-control-group">
+          <label for="batchStatusSelect" class="batch-dock-label">Set Status:</label>
+          <select id="batchStatusSelect" aria-label="Batch target request status">
+            <option value="Pending">Pending</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Waiting on Buyer">Waiting on Buyer</option>
+            <option value="Escalated">Escalated</option>
+            <option value="Complete">Complete</option>
+          </select>
+          <button type="button" id="btnApplyBatchStatus" class="btn-primary btn-sm">Apply</button>
+        </div>
         <span class="batch-dock-sep" aria-hidden="true"></span>
         <button type="button" id="btnBatchDeleteSelected" class="btn-danger-outline btn-sm" title="Permanently delete selected request row(s)">Delete</button>
         <button type="button" id="btnClearBatchSelection" class="btn-sm" title="Uncheck all selected rows">✕ Clear</button>
@@ -1710,16 +1728,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.18.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.18.1</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.18.0"></script>
-  <script src="js/core-ui.js?v=1.18.0"></script>
-  <script src="js/workbook-io.js?v=1.18.0"></script>
-  <script src="js/tracker-table.js?v=1.18.0"></script>
-  <script src="js/request-editors.js?v=1.18.0"></script>
-  <script src="js/scratch-sheets.js?v=1.18.0"></script>
-  <script src="js/rollover.js?v=1.18.0"></script>
+  <script src="js/mockMasterAccounts.js?v=1.18.1"></script>
+  <script src="js/core-ui.js?v=1.18.1"></script>
+  <script src="js/workbook-io.js?v=1.18.1"></script>
+  <script src="js/tracker-table.js?v=1.18.1"></script>
+  <script src="js/request-editors.js?v=1.18.1"></script>
+  <script src="js/scratch-sheets.js?v=1.18.1"></script>
+  <script src="js/rollover.js?v=1.18.1"></script>
 </body>
 </html>

@@ -8,7 +8,16 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.18.0` (Current — `main` / `meerkat`)
+### `v1.18.1` (Current — `main`)
+- **📋 Manual Row Copy & Paste Across Daily Tabs (`#btnBatchCopyRows`, `#btnBatchCopyToTab`, `#btnPasteTrackerRows`, `js/tracker-table.js`)**:
+  - Added manual checkbox-based **Copy & Paste** for daily request rows so entries on secondary/custom department workbooks (even those without a Status column or `validation lists` sheet) can be carried forward to the next day manually.
+  - **Two-Step Copy → Switch Tab → Paste**: Check 1+ rows and click **`📋 Copy Row(s)`** in the floating Batch Action Bar (or press `Ctrl+C`), switch to any target `MM-DD-YYYY` tab, and click **`📥 Paste Row(s) (N)`** in the top Controls bar (or press `Ctrl+V`).
+  - **One-Step Direct Copy to Next Day / Tab**: Check 1+ rows and click **`📅 Copy to Next Day / Tab...`** in the floating Batch Action Bar to copy and paste selected rows directly to tomorrow's/today's tab (automatically creating the new `MM-DD-YYYY` tab with your custom or standard headers if it doesn't exist yet).
+  - Preserves all custom department column values (`customValues`) and each row's hidden UUIDv4 `Tracking ID` across daily tabs, and automatically hides the `Set Status` control group in the Batch Bar when a custom workbook has no Status column.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v28'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.1` in [`index.html`](index.html).
+
+### `v1.18.0`
 - **📖 Interactive In-App User Manual & Reference Guide (`#userManualModal`, `USER_MANUAL.md`, `index.html`, `css/styles.css`, `js/core-ui.js`)**:
   - Added a dedicated **`📖 Manual`** button (`#btnOpenUserManual`) in the top header bar alongside **`User Manual & Reference Guide...`** (`#menuOpenUserManual`) inside **`⚙️ Tools & Setup ▾`**.
   - Built an interactive two-column in-app documentation modal (`#userManualModal`) featuring a sticky 14-section Table of Contents sidebar (`#userManualTocList`) with smooth-scroll navigation and scroll-spy active section highlighting, live instant keyword search (`#userManualSearchInput`), "Where to Click" reference tables, keyboard shortcuts, and 10 embedded high-resolution workspace screenshots (`assets/images/manual/*.png`).
