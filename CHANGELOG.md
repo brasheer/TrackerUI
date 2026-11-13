@@ -8,7 +8,18 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.18.1` (Current — `main`)
+### `v1.18.2` (Current — `main`)
+- **🔧 Secondary / Custom Tracker Bug Fixes (`js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
+  - **Optional First Field on Custom Department Schemas**: Removed the hardcoded HTML `required` constraint on the first column (`primaryCol`) in `buildDynamicFieldsHtmlForScope` and updated `saveRequestToWorkbook` and `areRowsSameUniqueRequest` so custom department trackers can save and match requests even when the first column is left blank.
+  - **Chronological Left-to-Right Daily Tab Ordering (`orderWorkbookSheetsChronologically`)**: Replaced `placeWorksheetFirstInWorkbook` (which previously pushed new sheets to the leftmost position) with `orderWorkbookSheetsChronologically`, ordering all `MM-DD-YYYY` daily tabs chronologically from left to right (oldest date on the left → newest date on the right) while keeping all non-date sheets (`Scratch`, `Master Accounts`, `validation lists`, `template`) to their right.
+  - **Mid-Month Status Column vs. Retroactive UUIDv4 Auto-Healing**: Fixed the collision when a `Status` column (e.g., Column J) is added midway through the month where earlier sheets had a retroactive UUIDv4 `Tracking ID` in that same column:
+    - `findPrimarySchemaHeaderWorksheet` and `findTemplateSheet` now select the daily sheet with the most visible non-tracking columns (`syncWorkbookSheetsWithActiveSchema` syncs `template` and earlier tabs so `Status` in Column J stays visible and `Tracking ID` in Column K stays hidden).
+    - `indexWorksheetRows`, `writeItemToWorksheetRow`, `buildConsolidatedRolloverItem`, and `unifyHistoricalGroupTrackingIds` automatically detect any UUIDv4 sitting in `statusCol` (or other visible columns), migrate it to `trackingCol` (Column K), and replace the visible cell with the row's clean status instead of displaying a UUID in the Status column.
+  - **Clean Validation List Dropdown Sync & UUID Filtering**: Stopped `loadWorkbookFromDisk` from scraping past sheet values (and retroactive UUIDs) into `validationStatuses`. Added `extractDataValidationOptionsByCol`, `buildCustomSchemaDataValidationsExtLst`, and expanded `<extLst>` / `<dataValidations>` preservation in `captureOriginalArchiveState` and `repairSavedXlsxArchive` so new daily tabs on secondary trackers inherit Excel validation list dropdowns cleanly.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v29'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.2` in [`index.html`](index.html).
+
+### `v1.18.1`
 - **📋 Manual Row Copy & Paste Across Daily Tabs (`#btnBatchCopyRows`, `#btnBatchCopyToTab`, `#btnPasteTrackerRows`, `js/tracker-table.js`)**:
   - Added manual checkbox-based **Copy & Paste** for daily request rows so entries on secondary/custom department workbooks (even those without a Status column or `validation lists` sheet) can be carried forward to the next day manually.
   - **Two-Step Copy → Switch Tab → Paste**: Check 1+ rows and click **`📋 Copy Row(s)`** in the floating Batch Action Bar (or press `Ctrl+C`), switch to any target `MM-DD-YYYY` tab, and click **`📥 Paste Row(s) (N)`** in the top Controls bar (or press `Ctrl+V`).

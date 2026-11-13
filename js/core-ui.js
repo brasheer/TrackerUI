@@ -1387,7 +1387,7 @@ function escapeHtml(str) {
 }
 
 // --- 9. APP VERSION, DESKTOP CHROME ENVIRONMENT CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.18.1';
+const APP_VERSION = 'v1.18.2';
 
 function evaluateDesktopChromeCompatibility(navObj = (typeof navigator !== 'undefined' ? navigator : null)) {
   if (!navObj) {

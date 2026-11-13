@@ -1108,6 +1108,29 @@ function parseWorksheetPathsFromZipEntries(entries) {
   return map;
 }
 
+function expandValidationSqrefRanges(xmlFragment) {
+  if (!xmlFragment) return xmlFragment;
+  const expandRangeToken = (token) => {
+    const m = token.match(/^(\$?[A-Z]+)\$?2(?::(\$?[A-Z]+)\$?(\d+))?$/i);
+    if (!m) return token;
+    const col1 = m[1].replace(/\$/g, '');
+    const col2 = (m[2] || col1).replace(/\$/g, '');
+    if (col1.toUpperCase() !== col2.toUpperCase()) return token;
+    const endRow = m[3] ? parseInt(m[3], 10) : 2;
+    if (endRow >= 100) return token;
+    return `${col1}2:${col1}200`;
+  };
+  return xmlFragment
+    .replace(/<xm:sqref>([^<]+)<\/xm:sqref>/g, (_, inner) => {
+      const updated = inner.trim().split(/\s+/).map(expandRangeToken).join(' ');
+      return `<xm:sqref>${updated}</xm:sqref>`;
+    })
+    .replace(/\bsqref="([^"]+)"/g, (_, inner) => {
+      const updated = inner.trim().split(/\s+/).map(expandRangeToken).join(' ');
+      return `sqref="${updated}"`;
+    });
+}
+
 async function captureOriginalArchiveState(arrayBuffer) {
   try {
     const entries = await unpackZipArchive(arrayBuffer);
@@ -1121,16 +1144,39 @@ async function captureOriginalArchiveState(arrayBuffer) {
     const metadataXmlBytes = entries.get('xl/metadata.xml') || null;
     const sheetPaths = parseWorksheetPathsFromZipEntries(entries);
     const arrayFormulasBySheet = new Map(); // lowerSheetName -> Map(cellRef -> { fTag, cm, t })
-    let templateExtLstXml = null;
+    let capturedExtLstXml = null;
+    let bestExtScore = -1;
+    let capturedStdDataValidationsXml = null;
+    let bestStdScore = -1;
 
     for (const [sheetName, zipPath] of sheetPaths.entries()) {
-      const lower = sheetName.trim().toLowerCase();
+      const trimmedName = sheetName.trim();
+      const lower = trimmedName.toLowerCase();
       const xml = dec.decode(entries.get(zipPath));
+      const isDateSheet = DATE_TAB_REGEX.test(trimmedName);
+      const dateWeight = isDateSheet ? parseDateTab(trimmedName) : 0;
 
-      if (lower === 'template' || isTemplatePlaceholderTab(lower) || DATE_TAB_REGEX.test(sheetName.trim())) {
+      if (lower === 'template' || isTemplatePlaceholderTab(lower) || isDateSheet) {
         const extMatch = xml.match(/<extLst>[\s\S]*?<\/extLst>/);
-        if (extMatch && extMatch[0].includes('dataValidations') && !templateExtLstXml) {
-          templateExtLstXml = extMatch[0].replace(/\s+xr:uid="[^"]*"/g, '');
+        if (extMatch && extMatch[0].includes('dataValidations')) {
+          const cleanedExt = expandValidationSqrefRanges(extMatch[0].replace(/\s+xr:uid="[^"]*"/g, ''));
+          const dvCount = (cleanedExt.match(/<x14:dataValidation\b/g) || []).length;
+          const score = dvCount * 1e15 + dateWeight;
+          if (score > bestExtScore) {
+            bestExtScore = score;
+            capturedExtLstXml = cleanedExt;
+          }
+        }
+
+        const stdMatch = xml.match(/<dataValidations\b[^>]*>[\s\S]*?<\/dataValidations>/);
+        if (stdMatch) {
+          const cleanedStd = expandValidationSqrefRanges(stdMatch[0].replace(/\s+xr:uid="[^"]*"/g, ''));
+          const stdCount = (cleanedStd.match(/<dataValidation\b/g) || []).length;
+          const stdScore = stdCount * 1e15 + dateWeight;
+          if (stdScore > bestStdScore) {
+            bestStdScore = stdScore;
+            capturedStdDataValidationsXml = cleanedStd;
+          }
         }
       }
 
@@ -1155,7 +1201,9 @@ async function captureOriginalArchiveState(arrayBuffer) {
       externalLinkFiles,
       metadataXmlBytes,
       arrayFormulasBySheet,
-      templateExtLstXml: templateExtLstXml || DAILY_SHEET_DATA_VALIDATIONS_EXTLST
+      capturedExtLstXml,
+      capturedStdDataValidationsXml,
+      templateExtLstXml: capturedExtLstXml || DAILY_SHEET_DATA_VALIDATIONS_EXTLST
     };
   } catch (err) {
     console.warn('Could not capture original archive metadata:', err);
@@ -1358,12 +1406,59 @@ async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
           }
         );
 
-        if (hasValidationSheetInWb && !xml.includes('dataValidations')) {
-          const extLstToInject = (archiveState && archiveState.templateExtLstXml)
-            ? archiveState.templateExtLstXml
-            : DAILY_SHEET_DATA_VALIDATIONS_EXTLST;
-          if (!xml.includes('<extLst>')) {
-            xml = xml.replace(/<\/worksheet>\s*$/, `${extLstToInject}</worksheet>`);
+        if ( archiveState && archiveState.capturedStdDataValidationsXml ) {
+          const targetStdXml = archiveState.capturedStdDataValidationsXml;
+          const targetStdCount = (targetStdXml.match(/<dataValidation\b/g) || []).length;
+          const existingStdMatch = xml.match(/<dataValidations\b[^>]*>[\s\S]*?<\/dataValidations>/);
+          if (!existingStdMatch) {
+            if (/(<hyperlinks|<printOptions|<pageMargins|<pageSetup|<headerFooter|<drawing|<extLst|<\/worksheet>)/.test(xml)) {
+              xml = xml.replace(
+                /(<hyperlinks|<printOptions|<pageMargins|<pageSetup|<headerFooter|<drawing|<extLst|<\/worksheet>)/,
+                `${targetStdXml}$1`
+              );
+            }
+          } else {
+            const existingStdCount = (existingStdMatch[0].match(/<dataValidation\b/g) || []).length;
+            if (existingStdCount < targetStdCount) {
+              xml = xml.replace(/<dataValidations\b[^>]*>[\s\S]*?<\/dataValidations>/, targetStdXml);
+            }
+          }
+        }
+
+        const customSynthesizedExtLst = (!activeSchemaConfig.isStandardSchema && hasValidationSheetInWb && typeof buildCustomSchemaDataValidationsExtLst === 'function')
+          ? buildCustomSchemaDataValidationsExtLst()
+          : null;
+
+        let desiredExtLst = (archiveState && archiveState.capturedExtLstXml)
+          ? archiveState.capturedExtLstXml
+          : (customSynthesizedExtLst || (activeSchemaConfig.isStandardSchema && hasValidationSheetInWb ? DAILY_SHEET_DATA_VALIDATIONS_EXTLST : null));
+
+        // If custom schema has a status column validation on the validation sheet that wasn't in an older capturedExtLstXml, merge or prefer the fuller one
+        if (
+          desiredExtLst &&
+          customSynthesizedExtLst &&
+          desiredExtLst !== customSynthesizedExtLst &&
+          activeSchemaConfig &&
+          activeSchemaConfig.statusCol
+        ) {
+          const stLetter = colNumberToExcelLetters(activeSchemaConfig.statusCol);
+          const sqrefRe = new RegExp(`\\b${stLetter}2:`, 'i');
+          if (!sqrefRe.test(desiredExtLst) && !(archiveState && archiveState.capturedStdDataValidationsXml && sqrefRe.test(archiveState.capturedStdDataValidationsXml))) {
+            desiredExtLst = customSynthesizedExtLst;
+          }
+        }
+
+        if (desiredExtLst) {
+          const desiredExtCount = (desiredExtLst.match(/<x14:dataValidation\b/g) || []).length;
+          if (!xml.includes('dataValidations')) {
+            if (!xml.includes('<extLst>')) {
+              xml = xml.replace(/<\/worksheet>\s*$/, `${desiredExtLst}</worksheet>`);
+            }
+          } else if (xml.includes('<x14:dataValidations')) {
+            const currentExtCount = (xml.match(/<x14:dataValidation\b/g) || []).length;
+            if (currentExtCount < desiredExtCount) {
+              xml = xml.replace(/<extLst>[\s\S]*?<\/extLst>/, desiredExtLst);
+            }
           }
         }
       }
@@ -1616,13 +1711,42 @@ function extractDetectedRow1HeadersFromSheet(ws) {
     return { columns: [], existingTrackingCol: null, maxCol: 0 };
   }
 
+  const maxRowScan = Math.min(ws.rowCount || 1, 18);
+  const colHasShiftedUuidNextToIt = (colIdx) => {
+    let nextHasUuid = false;
+    let curHasNonUuid = false;
+    for (let r = 2; r <= maxRowScan; r++) {
+      const row = ws.getRow(r);
+      const curVal = cellText(row, colIdx);
+      const nextVal = cellText(row, colIdx + 1);
+      if (nextVal && UUID_REGEX.test(nextVal)) nextHasUuid = true;
+      if (curVal && !UUID_REGEX.test(curVal)) curHasNonUuid = true;
+    }
+    return nextHasUuid && curHasNonUuid;
+  };
+
   let existingTrackingCol = null;
   const rawCols = [];
   for (let c = 1; c <= maxNonEmptyCol; c++) {
     const header = cellText(row1, c);
     const lower = header.toLowerCase();
     if (/^(tracking\s*id|tracking_id|uuid|guid|row\s*guid)$/i.test(lower)) {
-      existingTrackingCol = c;
+      // Handle mid-month Status column added where Tracking ID used to be (while UUIDs moved to c + 1)
+      if (c === maxNonEmptyCol && colHasShiftedUuidNextToIt(c)) {
+        existingTrackingCol = c + 1;
+        const colLetter = colNumberToExcelLetters(c);
+        const inferredLabel = 'Status';
+        const dropdownOpts = findValidationOptionsForHeader(inferredLabel);
+        rawCols.push({
+          colIndex: c,
+          fieldKey: `col_${c}`,
+          colLetter,
+          header: inferredLabel,
+          dropdownOptions: dropdownOpts
+        });
+      } else {
+        existingTrackingCol = c;
+      }
       continue;
     }
     const colLetter = colNumberToExcelLetters(c);
@@ -1649,7 +1773,7 @@ function findValidationOptionsForHeader(headerLabel) {
   const norm = String(headerLabel).trim().toLowerCase();
   if (!norm) return [];
   if (validationListsByHeader.has(norm)) {
-    return validationListsByHeader.get(norm) || [];
+    return (validationListsByHeader.get(norm) || []).filter(v => !UUID_REGEX.test(String(v).trim()));
   }
   // Singular/plural & partial match (e.g. "Requested Action" <-> "Requested Actions", "Status" <-> "Status Options")
   for (const [vHeader, opts] of validationListsByHeader.entries()) {
@@ -1659,10 +1783,144 @@ function findValidationOptionsForHeader(headerLabel) {
       (norm.length >= 4 && vHeader.startsWith(norm)) ||
       (vHeader.length >= 4 && norm.startsWith(vHeader))
     ) {
-      return opts || [];
+      return (opts || []).filter(v => !UUID_REGEX.test(String(v).trim()));
     }
   }
   return [];
+}
+
+function excelLettersToColNumber(letters) {
+  const clean = String(letters || '').trim().toUpperCase();
+  if (!clean) return 0;
+  let num = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const code = clean.charCodeAt(i);
+    if (code < 65 || code > 90) return 0;
+    num = num * 26 + (code - 64);
+  }
+  return num;
+}
+
+function resolveFormulaListValuesFromWorkbook(wb, rawFormula) {
+  if (!wb || !rawFormula) return [];
+  const formula = String(rawFormula).trim().replace(/^=/, '').trim();
+  if (!formula) return [];
+
+  // 1. Inline quoted list: "Pending,In Progress,Complete"
+  if (formula.startsWith('"') && formula.endsWith('"') && formula.length >= 2) {
+    return formula
+      .slice(1, -1)
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s && !UUID_REGEX.test(s));
+  }
+
+  // 2. Worksheet range reference: 'Validation List'!$A$2:$A$50 or validation lists!$B$2:$B$20
+  const rangeMatch = formula.match(/^(?:'([^']+)'|([^!]+))!\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?$/);
+  if (!rangeMatch) return [];
+
+  const targetSheetName = (rangeMatch[1] || rangeMatch[2] || '').replace(/''/g, "'").trim().toLowerCase();
+  const colStart = excelLettersToColNumber(rangeMatch[3]);
+  const rowStart = Math.max(1, parseInt(rangeMatch[4] || '2', 10) || 2);
+  const rowEnd = Math.min(500, Math.max(rowStart, parseInt(rangeMatch[6] || String(rowStart + 100), 10) || (rowStart + 100)));
+  if (!colStart) return [];
+
+  let refSheet = null;
+  wb.eachSheet((ws) => {
+    if (ws.name.trim().toLowerCase() === targetSheetName) {
+      refSheet = ws;
+    }
+  });
+  if (!refSheet) return [];
+
+  const values = [];
+  const seen = new Set();
+  const maxScan = Math.min(Math.max(refSheet.rowCount || 0, rowEnd), 500);
+  for (let r = rowStart; r <= maxScan; r++) {
+    const val = cellText(refSheet.getRow(r), colStart);
+    if (!val || UUID_REGEX.test(val)) continue;
+    // Skip Row 1 if the range was $A$1:$A$50 and Row 1 is a column header like "Status Options"
+    if (r === 1 && /\b(options?|list|actions?|status(?:es)?)\b/i.test(val) && !KNOWN_STATUS_VALUES.has(val.toLowerCase())) {
+      continue;
+    }
+    const key = val.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      values.push(val);
+    }
+  }
+  return values;
+}
+
+function extractDataValidationOptionsByCol(wb, archiveState) {
+  const byCol = new Map();
+  if (!wb) return byCol;
+
+  const recordOptions = (colNum, opts) => {
+    if (!colNum || !Array.isArray(opts) || opts.length === 0) return;
+    const existing = byCol.get(colNum) || [];
+    if (opts.length > existing.length) {
+      byCol.set(colNum, opts);
+    }
+  };
+
+  // 1. Inspect ExcelJS in-memory worksheet dataValidations.model across sheets
+  wb.eachSheet((ws) => {
+    const raw = ws.name.trim();
+    const isDailyOrTpl =
+      raw.toLowerCase() === 'template' ||
+      isTemplatePlaceholderTab(raw) ||
+      DATE_TAB_REGEX.test(raw);
+    if (!isDailyOrTpl) return;
+    const model = ws.dataValidations && ws.dataValidations.model;
+    if (!model || typeof model !== 'object') return;
+    Object.entries(model).forEach(([addr, rule]) => {
+      if (!rule || rule.type !== 'list' || !Array.isArray(rule.formulae) || !rule.formulae[0]) return;
+      const colMatch = String(addr).match(/^\$?([A-Za-z]{1,3})\$?\d+/);
+      if (!colMatch) return;
+      const colNum = excelLettersToColNumber(colMatch[1]);
+      const opts = resolveFormulaListValuesFromWorkbook(wb, rule.formulae[0]);
+      recordOptions(colNum, opts);
+    });
+  });
+
+  // 2. Inspect captured OpenXML <extLst> (<x14:dataValidations>) and <dataValidations>
+  const extXml = archiveState && archiveState.capturedExtLstXml ? archiveState.capturedExtLstXml : '';
+  if (extXml) {
+    const x14Blocks = extXml.match(/<x14:dataValidation\b[\s\S]*?<\/x14:dataValidation>/g) || [];
+    x14Blocks.forEach(block => {
+      if (!/\btype="list"/i.test(block)) return;
+      const fMatch = block.match(/<x14:formula1>\s*<xm:f>([\s\S]*?)<\/xm:f>\s*<\/x14:formula1>/);
+      const sqMatch = block.match(/<xm:sqref>([^<]+)<\/xm:sqref>/);
+      if (!fMatch || !sqMatch) return;
+      const opts = resolveFormulaListValuesFromWorkbook(wb, fMatch[1]);
+      if (opts.length === 0) return;
+      String(sqMatch[1]).trim().split(/\s+/).forEach(tok => {
+        const colMatch = tok.match(/^\$?([A-Za-z]{1,3})\$?\d+/);
+        if (colMatch) recordOptions(excelLettersToColNumber(colMatch[1]), opts);
+      });
+    });
+  }
+
+  const stdXml = archiveState && archiveState.capturedStdDataValidationsXml ? archiveState.capturedStdDataValidationsXml : '';
+  if (stdXml) {
+    const dvBlocks = stdXml.match(/<dataValidation\b[\s\S]*?<\/dataValidation>/g) || [];
+    dvBlocks.forEach(block => {
+      if (!/\btype="list"/i.test(block)) return;
+      const sqMatch = block.match(/\bsqref="([^"]+)"/i);
+      const fMatch = block.match(/<formula1>([\s\S]*?)<\/formula1>/i);
+      if (!sqMatch || !fMatch) return;
+      const rawFormula = fMatch[1].replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+      const opts = resolveFormulaListValuesFromWorkbook(wb, rawFormula);
+      if (opts.length === 0) return;
+      String(sqMatch[1]).trim().split(/\s+/).forEach(tok => {
+        const colMatch = tok.match(/^\$?([A-Za-z]{1,3})\$?\d+/);
+        if (colMatch) recordOptions(excelLettersToColNumber(colMatch[1]), opts);
+      });
+    });
+  }
+
+  return byCol;
 }
 
 function isBrokerStandardHeaderRow(ws) {
@@ -1722,10 +1980,19 @@ function findPrimarySchemaHeaderWorksheet(wb) {
   });
 
   if (dateTabList.length > 0) {
+    // Sort newest first, then pick the sheet with the most visible non-tracking columns
+    // so mid-month added columns (e.g. Status in Col J) are never lost to an older or template-cloned tab
     dateTabList.sort((a, b) => parseDateTab(b.name.trim()) - parseDateTab(a.name.trim()));
-    const newestDaily = dateTabList[0];
-    const hasDailyHdr = [1, 2, 3].some(c => cellText(newestDaily.getRow(1), c) !== '');
-    if (hasDailyHdr) return newestDaily;
+    let bestDaily = null;
+    let bestColCount = 0;
+    for (const ws of dateTabList) {
+      const det = extractDetectedRow1HeadersFromSheet(ws);
+      if (det.columns.length > bestColCount) {
+        bestColCount = det.columns.length;
+        bestDaily = ws;
+      }
+    }
+    if (bestDaily) return bestDaily;
   }
   if (placeholderWs) return placeholderWs;
   if (tplWs) return tplWs;
@@ -1774,6 +2041,13 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   }
 
   const cols = detected.columns;
+  const dvOptsByCol = extractDataValidationOptionsByCol(wb, originalArchiveState);
+  cols.forEach(col => {
+    if ((!col.dropdownOptions || col.dropdownOptions.length === 0) && dvOptsByCol.has(col.colIndex)) {
+      col.dropdownOptions = dvOptsByCol.get(col.colIndex);
+    }
+  });
+
   const validColSet = new Set(cols.map(c => c.colIndex));
   const pickValidOverride = (val) => {
     if (val === 0 || val === '0' || val === 'none') return null;
@@ -1824,13 +2098,18 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     : inferredSecondaryCol;
 
   const maxVisibleCol = cols.reduce((m, c) => Math.max(m, c.colIndex), 0);
-  const trackingCol = detected.existingTrackingCol || (maxVisibleCol + 1);
+  // Ensure trackingCol is always strictly past all visible columns (e.g. Col K = 11 when Status is in Col J = 10)
+  const trackingCol = Math.max(detected.existingTrackingCol || 0, maxVisibleCol + 1);
 
-  // If Status column has dropdown options from validation lists and validationStatuses was empty, sync them
+  // Sync Status column dropdown options with validationStatuses
   if (statusCol) {
     const stColObj = cols.find(c => c.colIndex === statusCol);
-    if (stColObj && stColObj.dropdownOptions && stColObj.dropdownOptions.length > 0 && validationStatuses.length === 0) {
-      validationStatuses = [...stColObj.dropdownOptions];
+    if (stColObj) {
+      if (stColObj.dropdownOptions && stColObj.dropdownOptions.length > 0 && validationStatuses.length === 0) {
+        validationStatuses = stColObj.dropdownOptions.filter(s => s && !UUID_REGEX.test(String(s).trim()));
+      } else if ((!stColObj.dropdownOptions || stColObj.dropdownOptions.length === 0) && validationStatuses.length > 0) {
+        stColObj.dropdownOptions = validationStatuses.filter(s => s && !UUID_REGEX.test(String(s).trim()));
+      }
     }
   }
 
@@ -1847,6 +2126,119 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     trackingCol
   };
   return activeSchemaConfig;
+}
+
+function expandDataValidationModelRanges(modelObj) {
+  if (!modelObj || typeof modelObj !== 'object') return {};
+  const expanded = {};
+  Object.entries(modelObj).forEach(([addr, rule]) => {
+    if (!rule) return;
+    const rangeMatch = String(addr).match(/^(\$?[A-Za-z]{1,3}\$?2):(\$?[A-Za-z]{1,3}\$?)(\d+)$/);
+    if (rangeMatch && rangeMatch[1].replace(/\$/g, '').toUpperCase().replace(/\d+/g, '') === rangeMatch[2].replace(/\$/g, '').toUpperCase()) {
+      const endRow = Math.max(parseInt(rangeMatch[3], 10) || 2, 500);
+      expanded[`${rangeMatch[1]}:${rangeMatch[2]}${endRow}`] = JSON.parse(JSON.stringify(rule));
+    } else {
+      expanded[addr] = JSON.parse(JSON.stringify(rule));
+    }
+  });
+  return expanded;
+}
+
+function syncWorkbookSheetsWithActiveSchema(wb = workbook) {
+  if (!wb || !activeSchemaConfig || activeSchemaConfig.isStandardSchema || !Array.isArray(activeSchemaConfig.columns) || activeSchemaConfig.columns.length === 0) {
+    return;
+  }
+  const donorWs = findPrimarySchemaHeaderWorksheet(wb);
+  const donorRow1 = donorWs ? donorWs.getRow(1) : null;
+  let bestDvModel = null;
+  let bestDvCount = 0;
+
+  wb.eachSheet((ws) => {
+    const raw = ws.name.trim();
+    if (raw.toLowerCase() !== 'template' && !DATE_TAB_REGEX.test(raw)) return;
+    const m = ws.dataValidations && ws.dataValidations.model;
+    const count = m && typeof m === 'object' ? Object.keys(m).length : 0;
+    if (count > bestDvCount) {
+      bestDvCount = count;
+      bestDvModel = m;
+    }
+  });
+
+  // If no ExcelJS dataValidations.model exists yet for statusCol, synthesize one from validationSheetMeta
+  const statusColIdx = activeSchemaConfig.statusCol;
+  const synthesizedDvModel = bestDvModel ? expandDataValidationModelRanges(bestDvModel) : {};
+  if (statusColIdx && validationSheetMeta && validationSheetMeta.statusRangeFormula) {
+    const colLet = colNumberToExcelLetters(statusColIdx);
+    const hasStatusRule = Object.keys(synthesizedDvModel).some(k =>
+      k.replace(/\$/g, '').toUpperCase().startsWith(`${colLet}2`)
+    );
+    if (!hasStatusRule) {
+      synthesizedDvModel[`${colLet}2:${colLet}500`] = {
+        type: 'list',
+        allowBlank: true,
+        showInputMessage: true,
+        showErrorMessage: true,
+        formulae: [validationSheetMeta.statusRangeFormula]
+      };
+    }
+  }
+  const hasAnyDvRules = Object.keys(synthesizedDvModel).length > 0;
+
+  wb.eachSheet((ws) => {
+    const raw = ws.name.trim();
+    const isDailyOrTpl =
+      raw.toLowerCase() === 'template' ||
+      isTemplatePlaceholderTab(raw) ||
+      DATE_TAB_REGEX.test(raw);
+    if (!isDailyOrTpl) return;
+
+    const row1 = ws.getRow(1);
+    let modifiedHeader = false;
+    activeSchemaConfig.columns.forEach((col) => {
+      const idx = col.colIndex;
+      ws.getColumn(idx).hidden = false;
+      const curHdr = cellText(row1, idx);
+      if (!curHdr || /^(tracking\s*id|tracking_id|uuid|guid|row\s*guid)$/i.test(curHdr)) {
+        const cell = row1.getCell(idx);
+        cell.value = col.header;
+        const styleDonorCell = (donorRow1 && donorRow1.getCell(idx).style)
+          ? donorRow1.getCell(idx)
+          : (idx > 1 ? row1.getCell(idx - 1) : null);
+        if (styleDonorCell && styleDonorCell.style) {
+          cell.style = JSON.parse(JSON.stringify(styleDonorCell.style));
+        }
+        if (donorWs && donorWs.getColumn(idx) && donorWs.getColumn(idx).width) {
+          ws.getColumn(idx).width = donorWs.getColumn(idx).width;
+        } else if (!ws.getColumn(idx).width || ws.getColumn(idx).width < 12) {
+          ws.getColumn(idx).width = 18;
+        }
+        modifiedHeader = true;
+      }
+    });
+
+    const trkCol = activeSchemaConfig.trackingCol;
+    if (trkCol) {
+      const trkHdr = cellText(row1, trkCol);
+      if (!trkHdr) {
+        row1.getCell(trkCol).value = 'Tracking ID';
+        modifiedHeader = true;
+      }
+      ws.getColumn(trkCol).hidden = true;
+    }
+    if (modifiedHeader) {
+      row1.commit();
+    }
+
+    if (hasAnyDvRules && ws.dataValidations) {
+      const curModel = (ws.dataValidations.model && typeof ws.dataValidations.model === 'object')
+        ? ws.dataValidations.model
+        : {};
+      ws.dataValidations.model = {
+        ...expandDataValidationModelRanges(curModel),
+        ...JSON.parse(JSON.stringify(synthesizedDvModel))
+      };
+    }
+  });
 }
 
 async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) {
@@ -1925,6 +2317,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   validationActions = [];
   validationStatuses = [];
   validationListsByHeader = new Map();
+  validationSheetMeta = null;
   actionCategoryMap = new Map();
 
   let hasTemplate = false;
@@ -1971,6 +2364,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
 
   // Resolve Standard vs Dynamic Custom Department Schema before indexing daily rows
   resolveWorkbookSchemaConfig(workbook, workingFileHandle.name);
+  syncWorkbookSheetsWithActiveSchema(workbook);
 
   // Pass 2: Sort Daily MM-DD-YYYY Tabs oldest -> newest before indexing so un-keyed cross-day rows inherit prior Tracking IDs
   dailySheetObjs.sort((a, b) => parseDateTab(a.rawName) - parseDateTab(b.rawName));
@@ -1978,13 +2372,17 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     indexWorksheetRows(worksheet, rawName);
   });
 
-  // For custom schemas without a validation lists sheet, enrich status options from existing sheet values
+  // Clean validationStatuses of any accidental UUIDs and fall back to DEFAULT_STATUSES without scraping arbitrary past sheet cells
+  validationStatuses = validationStatuses.filter(s => s && !UUID_REGEX.test(String(s).trim()));
   if (!activeSchemaConfig.isStandardSchema && validationStatuses.length === 0) {
-    const discoveredStatuses = new Set(DEFAULT_STATUSES);
-    allRows.forEach(r => {
-      if (r.status && r.status.trim()) discoveredStatuses.add(r.status.trim());
-    });
-    validationStatuses = Array.from(discoveredStatuses);
+    const stColObj = activeSchemaConfig.statusCol
+      ? activeSchemaConfig.columns.find(c => c.colIndex === activeSchemaConfig.statusCol)
+      : null;
+    if (stColObj && Array.isArray(stColObj.dropdownOptions) && stColObj.dropdownOptions.length > 0) {
+      validationStatuses = stColObj.dropdownOptions.filter(s => s && !UUID_REGEX.test(String(s).trim()));
+    } else {
+      validationStatuses = [...DEFAULT_STATUSES];
+    }
   }
 
   // Enrich masterAccountsMap from existing daily rows when standard schema is active and not running isolated Dev Mock Mode
@@ -2868,23 +3266,36 @@ btnDeleteTab.addEventListener('click', async () => {
 });
 
 // --- 4. DYNAMIC REFERENCE SHEET PARSING (validation lists & Master Accounts) ---
+let validationSheetMeta = null;
+
 function parseValidationSheet(worksheet) {
   const actionsSet = new Set();
   const statusesColB = new Set();
   const statusesColE = new Set();
+  let statusHeaderMatchedCol = null;
 
   const row1 = worksheet.getRow(1);
   const headerByCol = new Map();
   const setsByCol = new Map();
+  const maxRowByCol = new Map();
   let categoryColIndex = null;
 
   const maxHeaderScan = Math.min(Math.max(worksheet.columnCount || 12, 12), 30);
+  let row1LooksLikeDataValues = false;
   for (let c = 1; c <= maxHeaderScan; c++) {
     const rawHeader = cellText(row1, c);
-    if (!rawHeader) continue;
+    if (!rawHeader || UUID_REGEX.test(rawHeader)) continue;
     const lowerHeader = rawHeader.toLowerCase();
+    // Detect if Row 1 is actually a status option value (e.g. "Pending", "In Progress") rather than a column header
+    if (KNOWN_STATUS_VALUES.has(lowerHeader) && !/\b(options?|list|status(?:es)?)\b/i.test(lowerHeader)) {
+      row1LooksLikeDataValues = true;
+    }
     headerByCol.set(c, lowerHeader);
     setsByCol.set(c, new Set());
+    maxRowByCol.set(c, 1);
+    if (!statusHeaderMatchedCol && /\b(status|statuses|state|stage|disposition|outcome)\b/i.test(rawHeader)) {
+      statusHeaderMatchedCol = c;
+    }
     if (
       c >= 2 &&
       c !== 5 &&
@@ -2896,28 +3307,30 @@ function parseValidationSheet(worksheet) {
   }
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return;
+    if (rowNumber === 1 && !row1LooksLikeDataValues) return;
     const actionVal = cellText(row, 1);
     const statusValB = cellText(row, 2);
     const statusValE = cellText(row, 5);
 
-    if (actionVal) actionsSet.add(actionVal);
-    if (statusValB) statusesColB.add(statusValB);
-    if (statusValE) statusesColE.add(statusValE);
+    if (actionVal && !UUID_REGEX.test(actionVal)) actionsSet.add(actionVal);
+    if (statusValB && !UUID_REGEX.test(statusValB)) statusesColB.add(statusValB);
+    if (statusValE && !UUID_REGEX.test(statusValE)) statusesColE.add(statusValE);
 
-    if (actionVal && categoryColIndex) {
+    if (actionVal && !UUID_REGEX.test(actionVal) && categoryColIndex) {
       const catVal = cellText(row, categoryColIndex);
-      if (catVal) {
+      if (catVal && !UUID_REGEX.test(catVal)) {
         actionCategoryMap.set(actionVal.toLowerCase(), catVal);
       }
     }
 
-    headerByCol.forEach((_, colIdx) => {
+    for (let colIdx = 1; colIdx <= maxHeaderScan; colIdx++) {
       const cellVal = cellText(row, colIdx);
-      if (cellVal) {
+      if (cellVal && !UUID_REGEX.test(cellVal)) {
+        if (!setsByCol.has(colIdx)) setsByCol.set(colIdx, new Set());
         setsByCol.get(colIdx).add(cellVal);
+        maxRowByCol.set(colIdx, Math.max(maxRowByCol.get(colIdx) || 1, rowNumber));
       }
-    });
+    }
   });
 
   headerByCol.forEach((lowerHeader, colIdx) => {
@@ -2928,9 +3341,77 @@ function parseValidationSheet(worksheet) {
   });
 
   validationActions = Array.from(actionsSet);
-  validationStatuses = statusesColE.size > 0
-    ? Array.from(statusesColE)
-    : Array.from(statusesColB);
+
+  let chosenStatusColIdx = null;
+  let chosenStatuses = [];
+
+  if (statusHeaderMatchedCol && (setsByCol.get(statusHeaderMatchedCol) || new Set()).size > 0) {
+    chosenStatusColIdx = statusHeaderMatchedCol;
+    chosenStatuses = Array.from(setsByCol.get(statusHeaderMatchedCol));
+  } else if (statusesColE.size > 0) {
+    chosenStatusColIdx = 5;
+    chosenStatuses = Array.from(statusesColE);
+  } else if (statusesColB.size > 0) {
+    chosenStatusColIdx = 2;
+    chosenStatuses = Array.from(statusesColB);
+  } else {
+    // Check if any column on the validation sheet contains known status values (e.g. Col A on a single-list validation tab)
+    for (const [colIdx, valSet] of setsByCol.entries()) {
+      const arr = Array.from(valSet);
+      const knownHits = arr.filter(v => KNOWN_STATUS_VALUES.has(v.toLowerCase())).length;
+      if (knownHits >= 1 && arr.length > 0) {
+        chosenStatusColIdx = colIdx;
+        chosenStatuses = arr;
+        break;
+      }
+    }
+  }
+
+  validationStatuses = chosenStatuses.filter(s => s && !UUID_REGEX.test(String(s).trim()));
+
+  const startRow = row1LooksLikeDataValues ? 1 : 2;
+  let statusRangeFormula = null;
+  if (chosenStatusColIdx) {
+    const colLet = colNumberToExcelLetters(chosenStatusColIdx);
+    const endRow = Math.max(maxRowByCol.get(chosenStatusColIdx) || 10, chosenStatuses.length + startRow + 2);
+    const escapedSheetName = worksheet.name.replace(/'/g, "''");
+    statusRangeFormula = `'${escapedSheetName}'!$${colLet}$${startRow}:$${colLet}$${endRow}`;
+  }
+
+  validationSheetMeta = {
+    sheetName: worksheet.name,
+    startRow,
+    statusColIdx: chosenStatusColIdx,
+    statusRangeFormula
+  };
+}
+
+function buildCustomSchemaDataValidationsExtLst() {
+  if (!activeSchemaConfig || activeSchemaConfig.isStandardSchema || !activeSchemaConfig.statusCol) {
+    return null;
+  }
+  const statusColLet = colNumberToExcelLetters(activeSchemaConfig.statusCol);
+  let formulaInner = '';
+  if (validationSheetMeta && validationSheetMeta.statusRangeFormula) {
+    formulaInner = validationSheetMeta.statusRangeFormula;
+  } else {
+    const stColObj = activeSchemaConfig.columns.find(c => c.colIndex === activeSchemaConfig.statusCol);
+    const opts = (stColObj && Array.isArray(stColObj.dropdownOptions) && stColObj.dropdownOptions.length > 0)
+      ? stColObj.dropdownOptions
+      : validationStatuses;
+    const cleanOpts = (opts || []).filter(s => s && !UUID_REGEX.test(String(s).trim()));
+    if (cleanOpts.length === 0) return null;
+    const joined = cleanOpts.join(',');
+    if (joined.length > 250) return null;
+    formulaInner = `"${joined.replace(/"/g, '""')}"`;
+  }
+
+  const escapedFormula = formulaInner
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  return `<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:dataValidations count="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1"><x14:formula1><xm:f>${escapedFormula}</xm:f></x14:formula1><xm:sqref>${statusColLet}2:${statusColLet}500</xm:sqref></x14:dataValidation></x14:dataValidations></ext></extLst>`;
 }
 
 function parseMasterAccountsSheet(worksheet) {
@@ -3175,35 +3656,72 @@ function getNextEmptyRow(worksheet) {
 }
 
 function findTemplateSheet() {
-  let found = null;
+  let tplWs = null;
   workbook.eachSheet((ws) => {
     if (ws.name.trim().toLowerCase() === 'template') {
-      found = ws;
+      tplWs = ws;
     }
   });
-  if (!found && dateSheets.length > 0) {
-    found = workbook.getWorksheet(dateSheets[0]);
+  const primaryDailyWs = findPrimarySchemaHeaderWorksheet(workbook);
+
+  // For custom schemas or when a daily tab has more columns than an outdated template sheet (e.g. Status added mid-month),
+  // prefer the richest daily sheet so new tabs inherit all current columns, widths, and data validations
+  if (primaryDailyWs && primaryDailyWs !== tplWs) {
+    if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
+      return primaryDailyWs;
+    }
+    if (tplWs) {
+      const tplCols = extractDetectedRow1HeadersFromSheet(tplWs).columns.length;
+      const dailyCols = extractDetectedRow1HeadersFromSheet(primaryDailyWs).columns.length;
+      if (dailyCols > tplCols) {
+        return primaryDailyWs;
+      }
+    }
   }
-  return found;
+
+  if (tplWs) return tplWs;
+  if (primaryDailyWs) return primaryDailyWs;
+  if (dateSheets.length > 0) {
+    return workbook.getWorksheet(dateSheets[0]);
+  }
+  return null;
 }
 
-function placeWorksheetFirstInWorkbook(wb, targetSheet) {
+/**
+ * Orders all MM-DD-YYYY daily worksheet tabs chronologically from left to right
+ * (oldest date on the left -> newest date on the right) while keeping all non-date
+ * sheets (Scratch, Master Accounts, validation lists, template) to their right.
+ */
+function orderWorkbookSheetsChronologically(wb = workbook) {
+  if (!wb) return;
   try {
-    let order = 2;
+    const dateTabs = [];
+    const otherTabs = [];
     wb.eachSheet((ws) => {
-      if (ws.id === targetSheet.id) {
-        ws.orderNo = 1;
+      const raw = ws.name.trim();
+      if (DATE_TAB_REGEX.test(raw)) {
+        dateTabs.push(ws);
       } else {
-        ws.orderNo = order++;
+        otherTabs.push(ws);
       }
     });
+
+    dateTabs.sort((a, b) => parseDateTab(a.name.trim()) - parseDateTab(b.name.trim()));
+    const ordered = [...dateTabs, ...otherTabs];
+    ordered.forEach((ws, idx) => {
+      ws.orderNo = idx + 1;
+    });
   } catch (e) {
-    console.warn('Could not reorder worksheet tabs:', e);
+    console.warn('Could not reorder worksheet tabs chronologically:', e);
   }
 }
 
-function placeWorksheetFirst(targetSheet) {
-  if (workbook) placeWorksheetFirstInWorkbook(workbook, targetSheet);
+function placeWorksheetFirstInWorkbook(wb, _targetSheet) {
+  orderWorkbookSheetsChronologically(wb);
+}
+
+function placeWorksheetFirst(_targetSheet) {
+  if (workbook) orderWorkbookSheetsChronologically(workbook);
 }
 
 function cloneTemplateStructure(templateSheet, newSheet) {
@@ -3239,7 +3757,24 @@ function cloneTemplateStructure(templateSheet, newSheet) {
   });
   newHeader.commit();
 
+  // Copy ExcelJS dataValidations.model so newly created daily tabs inherit dropdown lists
+  if (templateSheet.dataValidations && templateSheet.dataValidations.model && newSheet.dataValidations) {
+    newSheet.dataValidations.model = expandDataValidationModelRanges(templateSheet.dataValidations.model);
+  }
+
   const colMap = getWorksheetColumnMap(newSheet);
+  if (colMap.isCustomSchema && Array.isArray(colMap.columns)) {
+    colMap.columns.forEach(c => {
+      newSheet.getColumn(c.colIndex).hidden = false;
+      if (!cellText(newHeader, c.colIndex)) {
+        newHeader.getCell(c.colIndex).value = c.header;
+      }
+    });
+    if (colMap.trackingCol && !cellText(newHeader, colMap.trackingCol)) {
+      newHeader.getCell(colMap.trackingCol).value = 'Tracking ID';
+    }
+    newHeader.commit();
+  }
   newSheet.getColumn(colMap.trackingCol).hidden = true;
   if (colMap.emailSubjCol) {
     newSheet.getColumn(colMap.emailSubjCol).hidden = false;
@@ -3273,12 +3808,15 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
       const idx = col.colIndex;
       const key = `col_${idx}`;
       let val = customMap[key] !== undefined ? customMap[key] : '';
+      if (val && UUID_REGEX.test(String(val).trim())) {
+        val = '';
+      }
       if (!val) {
         if (idx === colMap.primaryCol && item.subject) val = item.subject;
         else if (idx === colMap.ticketCol && item.ticket) val = item.ticket;
         else if (idx === colMap.secondaryCol && item.broker) val = item.broker;
         else if (idx === colMap.notesCol && item.notes) val = item.notes;
-        else if (idx === colMap.statusCol && item.status) val = item.status;
+        else if (idx === colMap.statusCol && item.status && !UUID_REGEX.test(String(item.status).trim())) val = item.status;
       }
       if (idx === colMap.ticketCol && val) {
         val = String(val).toUpperCase();
@@ -3289,7 +3827,8 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
       row.getCell(colMap.notesCol).value = item.notes || '';
     }
     if (colMap.statusCol && item.status !== undefined && customMap[`col_${colMap.statusCol}`] === undefined) {
-      row.getCell(colMap.statusCol).value = item.status || '';
+      const cleanSt = UUID_REGEX.test(String(item.status || '').trim()) ? getDefaultStatus() : (item.status || '');
+      row.getCell(colMap.statusCol).value = cleanSt;
     }
     row.getCell(colMap.trackingCol).value = item.key;
     row.commit();
@@ -3313,6 +3852,10 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
 
 function prepareWorkbookFormulasBeforeSave(wb) {
   if (!wb) return;
+  orderWorkbookSheetsChronologically(wb);
+  if (wb === workbook) {
+    syncWorkbookSheetsWithActiveSchema(wb);
+  }
   wb.eachSheet((ws) => {
     const rawName = ws.name.trim();
     const lower = rawName.toLowerCase();
@@ -3323,6 +3866,11 @@ function prepareWorkbookFormulasBeforeSave(wb) {
     if (!isDailyOrTemplate) return;
 
     const colMap = getWorksheetColumnMap(ws);
+    if (colMap.isCustomSchema && Array.isArray(colMap.columns)) {
+      colMap.columns.forEach(c => {
+        ws.getColumn(c.colIndex).hidden = false;
+      });
+    }
     ws.getColumn(colMap.trackingCol).hidden = true;
     if (colMap.emailSubjCol) {
       ws.getColumn(colMap.emailSubjCol).hidden = false;

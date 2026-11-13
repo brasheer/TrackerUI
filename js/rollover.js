@@ -70,15 +70,17 @@ function areRowsSameUniqueRequest(rowA, rowB) {
     const pCol = activeSchemaConfig ? activeSchemaConfig.primaryCol : 1;
     const pA = normalizeMatchText(cvA[`col_${pCol}`] || rowA.subject);
     const pB = normalizeMatchText(cvB[`col_${pCol}`] || rowB.subject);
-    if (!pA || pA !== pB) return false;
+    if ((pA || pB) && pA !== pB) return false;
 
     let populatedMatches = 0;
     for (const c of cols) {
       if (c.colIndex === activeSchemaConfig.statusCol || c.colIndex === activeSchemaConfig.notesCol || c.colIndex === activeSchemaConfig.ticketCol) {
         continue;
       }
-      const vA = normalizeMatchText(cvA[`col_${c.colIndex}`]);
-      const vB = normalizeMatchText(cvB[`col_${c.colIndex}`]);
+      const rawA = String(cvA[`col_${c.colIndex}`] || '').trim();
+      const rawB = String(cvB[`col_${c.colIndex}`] || '').trim();
+      const vA = UUID_REGEX.test(rawA) ? '' : normalizeMatchText(rawA);
+      const vB = UUID_REGEX.test(rawB) ? '' : normalizeMatchText(rawB);
       if (vA && vB && vA !== vB) return false;
       if (vA && vB && vA === vB) populatedMatches++;
     }
@@ -373,11 +375,30 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
     : pickLatestIfUnkeyedMerge(baseRow.ticket, 'ticket');
 
   let consolidatedCustomValues = undefined;
+  let resolvedCustomStatus = baseRow.status && !UUID_REGEX.test(String(baseRow.status).trim())
+    ? baseRow.status
+    : '';
+  if (!resolvedCustomStatus) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const candSt = entries[i].status;
+      if (candSt && String(candSt).trim() !== '' && !UUID_REGEX.test(String(candSt).trim())) {
+        resolvedCustomStatus = candSt;
+        break;
+      }
+    }
+  }
+  if (!resolvedCustomStatus) {
+    resolvedCustomStatus = getDefaultStatus();
+  }
+
   if (baseRow.customValues || (activeSchemaConfig && !activeSchemaConfig.isStandardSchema)) {
     consolidatedCustomValues = { ...(baseRow.customValues || {}) };
     const cols = (activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) ? activeSchemaConfig.columns : [];
     cols.forEach(c => {
       const k = `col_${c.colIndex}`;
+      if (consolidatedCustomValues[k] && UUID_REGEX.test(String(consolidatedCustomValues[k]).trim())) {
+        consolidatedCustomValues[k] = '';
+      }
       if (c.colIndex === activeSchemaConfig.notesCol) {
         consolidatedCustomValues[k] = mergedNotes;
         return;
@@ -386,10 +407,14 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
         consolidatedCustomValues[k] = mergedTicket;
         return;
       }
+      if (c.colIndex === activeSchemaConfig.statusCol) {
+        consolidatedCustomValues[k] = resolvedCustomStatus;
+        return;
+      }
       if (!consolidatedCustomValues[k] || String(consolidatedCustomValues[k]).trim() === '') {
         for (let i = entries.length - 1; i >= 0; i--) {
           const cand = entries[i].customValues && entries[i].customValues[k];
-          if (cand && String(cand).trim() !== '') {
+          if (cand && String(cand).trim() !== '' && !UUID_REGEX.test(String(cand).trim())) {
             consolidatedCustomValues[k] = cand;
             break;
           }
@@ -410,11 +435,26 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
     yard: pickLatestIfUnkeyedMerge(baseRow.yard, 'yard'),
     lots: pickLatestIfUnkeyedMerge(baseRow.lots, 'lots'),
     notes: mergedNotes,
+    status: resolvedCustomStatus,
     ...(consolidatedCustomValues ? { customValues: consolidatedCustomValues } : {}),
     _entries: entries,
     _sourceTabCount: entries.length,
     _firstSheet: entries[0] ? entries[0].sheetName : baseRow.sheetName
   };
+}
+
+function getRolloverItemDisplayTitle(item) {
+  if (!item) return '(Untitled Request)';
+  if (item.subject && String(item.subject).trim()) return String(item.subject).trim();
+  if (item.ticket && String(item.ticket).trim()) return `Ticket #${String(item.ticket).trim()}`;
+  if (item.customValues && activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) {
+    for (const c of activeSchemaConfig.columns) {
+      if (c.colIndex === activeSchemaConfig.statusCol || c.colIndex === activeSchemaConfig.notesCol) continue;
+      const v = String(item.customValues[`col_${c.colIndex}`] || '').trim();
+      if (v && !UUID_REGEX.test(v)) return `${c.header}: ${v}`;
+    }
+  }
+  return `Row ${item.rowNumber || '?'} (${item.sheetName || ''})`;
 }
 
 function unifyHistoricalGroupTrackingIds(entries, canonicalKey) {
@@ -423,25 +463,43 @@ function unifyHistoricalGroupTrackingIds(entries, canonicalKey) {
 
   entries.forEach(histRow => {
     if (!histRow || !histRow.sheetName || !histRow.rowNumber) return;
-    if (histRow.key && histRow.key.trim().toLowerCase() === normCanonical) return;
 
     const ws = workbook.getWorksheet(histRow.sheetName);
     if (!ws) return;
     const colMap = getWorksheetColumnMap(ws);
-
-    // Ensure no other distinct row on the same sheet already holds canonicalKey
-    let collision = false;
-    ws.eachRow({ includeEmpty: false }, (r, rNum) => {
-      if (rNum === 1 || rNum === histRow.rowNumber) return;
-      if (cellText(r, colMap.trackingCol).trim().toLowerCase() === normCanonical) {
-        collision = true;
-      }
-    });
-    if (collision) return;
-
     const excelRow = ws.getRow(histRow.rowNumber);
-    excelRow.getCell(colMap.trackingCol).value = canonicalKey;
-    excelRow.commit();
+    let mutated = false;
+
+    // Auto-heal any earlier sheet where Status column held the retroactive UUIDv4
+    if (colMap.isCustomSchema && colMap.statusCol) {
+      const curStCell = cellText(excelRow, colMap.statusCol);
+      if (curStCell && UUID_REGEX.test(curStCell)) {
+        const cleanHistSt = (histRow.status && !UUID_REGEX.test(String(histRow.status).trim()))
+          ? histRow.status
+          : getDefaultStatus();
+        excelRow.getCell(colMap.statusCol).value = cleanHistSt;
+        mutated = true;
+      }
+    }
+
+    if (!histRow.key || histRow.key.trim().toLowerCase() !== normCanonical || cellText(excelRow, colMap.trackingCol).trim().toLowerCase() !== normCanonical) {
+      // Ensure no other distinct row on the same sheet already holds canonicalKey
+      let collision = false;
+      ws.eachRow({ includeEmpty: false }, (r, rNum) => {
+        if (rNum === 1 || rNum === histRow.rowNumber) return;
+        if (cellText(r, colMap.trackingCol).trim().toLowerCase() === normCanonical) {
+          collision = true;
+        }
+      });
+      if (!collision) {
+        excelRow.getCell(colMap.trackingCol).value = canonicalKey;
+        mutated = true;
+      }
+    }
+
+    if (mutated) {
+      excelRow.commit();
+    }
   });
 }
 
@@ -719,7 +777,7 @@ function updateRolloverModalPreview() {
       html += `
         <div class="preview-item">
           <div class="preview-item-main">
-            <strong>${escapeHtml(item.subject)}</strong>
+            <strong>${escapeHtml(getRolloverItemDisplayTitle(item))}</strong>
             <span class="preview-item-sub">${escapeHtml(item.broker || 'No Broker')} • ${spanInfo}${notesMeta} • ID: ${escapeHtml(item.key.slice(0, 8))}...</span>
           </div>
           <span class="badge badge-pending">${escapeHtml(item.status)}</span>
@@ -739,7 +797,7 @@ function updateRolloverModalPreview() {
       html += `
         <div class="preview-item">
           <div class="preview-item-main">
-            <strong>${escapeHtml(targetRow.subject)}</strong>
+            <strong>${escapeHtml(getRolloverItemDisplayTitle(targetRow))}</strong>
             <span class="preview-item-sub">${escapeHtml(targetRow.broker || 'No Broker')} • Row ${targetRow.rowNumber} on ${escapeHtml(targetVal)}${syncNoteLabel}</span>
           </div>
           <span class="badge ${isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending'}">
@@ -766,7 +824,7 @@ function updateRolloverModalPreview() {
           <div style="display:flex; align-items:center; gap:10px;">
             <input type="checkbox" class="chk-force-rollover" data-key="${escapeHtml(openRow.key)}" style="width:16px; height:16px;">
             <div class="preview-item-main">
-              <strong>${escapeHtml(openRow.subject)}</strong>
+              <strong>${escapeHtml(getRolloverItemDisplayTitle(openRow))}</strong>
               <span class="preview-item-sub">
                 ${escapeHtml(openRow.broker || 'No Broker')} • Was <strong>${escapeHtml(openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>${escapeHtml(completedRow.status)}</strong> on ${escapeHtml(completedRow.sheetName)}
               </span>

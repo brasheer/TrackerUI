@@ -7,6 +7,11 @@
 // --- INDEX WORKSHEET ROWS & LEGACY GUID BACKFILL ---
 function indexWorksheetRows(worksheet, sheetName) {
   const colMap = getWorksheetColumnMap(worksheet);
+  if (colMap.isCustomSchema && Array.isArray(colMap.columns)) {
+    colMap.columns.forEach(c => {
+      worksheet.getColumn(c.colIndex).hidden = false;
+    });
+  }
   worksheet.getColumn(colMap.trackingCol).hidden = true;
   if (colMap.emailSubjCol) {
     worksheet.getColumn(colMap.emailSubjCol).hidden = false;
@@ -19,8 +24,13 @@ function indexWorksheetRows(worksheet, sheetName) {
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
     const existingKey = cellText(row, colMap.trackingCol).toLowerCase();
-    if (existingKey) {
+    if (existingKey && UUID_REGEX.test(existingKey)) {
       usedKeysOnSheet.add(existingKey);
+    } else if (colMap.isCustomSchema && colMap.statusCol) {
+      const legacyColUuid = cellText(row, colMap.statusCol);
+      if (UUID_REGEX.test(legacyColUuid)) {
+        usedKeysOnSheet.add(legacyColUuid.toLowerCase());
+      }
     } else if (colMap.isTemplateLayout) {
       const col11Text = cellText(row, 11);
       if (UUID_REGEX.test(col11Text)) {
@@ -43,23 +53,62 @@ function indexWorksheetRows(worksheet, sheetName) {
 
       const customValues = {};
       let hasAnyVisibleValue = false;
+      let legacyUuidFromVisibleCol = '';
+      const uuidPollutedColIndices = [];
+
       customCols.forEach(c => {
         let v = cellText(row, c.colIndex);
-        if (c.colIndex === colMap.ticketCol && v) {
+        if (v && UUID_REGEX.test(v)) {
+          if (!legacyUuidFromVisibleCol) {
+            legacyUuidFromVisibleCol = v.toLowerCase();
+          }
+          uuidPollutedColIndices.push(c.colIndex);
+          v = '';
+        } else if (c.colIndex === colMap.ticketCol && v) {
           v = v.toUpperCase();
         }
         customValues[`col_${c.colIndex}`] = v;
         if (v !== '') hasAnyVisibleValue = true;
       });
 
-      const statusRaw = colMap.statusCol ? (customValues[`col_${colMap.statusCol}`] || cellText(row, colMap.statusCol)) : '';
-      const notesRaw = colMap.notesCol ? (customValues[`col_${colMap.notesCol}`] || cellText(row, colMap.notesCol)) : '';
-      if (statusRaw !== '' || notesRaw !== '') hasAnyVisibleValue = true;
-      if (!hasAnyVisibleValue) return;
+      let statusRaw = colMap.statusCol ? (customValues[`col_${colMap.statusCol}`] || cellText(row, colMap.statusCol)) : '';
+      if (statusRaw && UUID_REGEX.test(statusRaw)) {
+        if (!legacyUuidFromVisibleCol) {
+          legacyUuidFromVisibleCol = statusRaw.toLowerCase();
+        }
+        if (colMap.statusCol && !uuidPollutedColIndices.includes(colMap.statusCol)) {
+          uuidPollutedColIndices.push(colMap.statusCol);
+        }
+        statusRaw = '';
+        if (colMap.statusCol) {
+          customValues[`col_${colMap.statusCol}`] = '';
+        }
+      }
 
-      const finalStatus = colMap.statusCol ? (statusRaw || defaultStatusVal) : (statusRaw || 'Open');
-      if (colMap.statusCol && !customValues[`col_${colMap.statusCol}`]) {
-        customValues[`col_${colMap.statusCol}`] = finalStatus;
+      let notesRaw = colMap.notesCol ? (customValues[`col_${colMap.notesCol}`] || cellText(row, colMap.notesCol)) : '';
+      if (notesRaw && UUID_REGEX.test(notesRaw)) {
+        if (!legacyUuidFromVisibleCol) {
+          legacyUuidFromVisibleCol = notesRaw.toLowerCase();
+        }
+        if (colMap.notesCol && !uuidPollutedColIndices.includes(colMap.notesCol)) {
+          uuidPollutedColIndices.push(colMap.notesCol);
+        }
+        notesRaw = '';
+        if (colMap.notesCol) {
+          customValues[`col_${colMap.notesCol}`] = '';
+        }
+      }
+
+      if (statusRaw !== '' || notesRaw !== '') hasAnyVisibleValue = true;
+      if (!hasAnyVisibleValue) {
+        // Clear any stray UUID on an otherwise completely empty row
+        if (uuidPollutedColIndices.length > 0) {
+          uuidPollutedColIndices.forEach(idx => {
+            row.getCell(idx).value = null;
+          });
+          row.commit();
+        }
+        return;
       }
 
       const subject = colMap.primaryCol ? (customValues[`col_${colMap.primaryCol}`] || '') : '';
@@ -68,7 +117,9 @@ function indexWorksheetRows(worksheet, sheetName) {
       const action = inferredActionColObj ? (customValues[`col_${inferredActionColObj.colIndex}`] || '') : '';
 
       let key = cellText(row, colMap.trackingCol).toLowerCase();
-      if (!key) {
+      let rowMutated = false;
+
+      if (!key || !UUID_REGEX.test(key)) {
         const cacheKey = `${workingFileHandle ? workingFileHandle.name : 'wb'}::${sheetName}::${rowNumber}`;
         const candidateRow = {
           subject,
@@ -81,7 +132,7 @@ function indexWorksheetRows(worksheet, sheetName) {
           lots: '',
           customValues,
           isCustomSchema: true,
-          key: ''
+          key: legacyUuidFromVisibleCol || ''
         };
 
         let inheritedPriorKey = '';
@@ -98,6 +149,9 @@ function indexWorksheetRows(worksheet, sheetName) {
         if (inheritedPriorKey) {
           key = inheritedPriorKey;
           legacyBackfillMap.set(cacheKey, key);
+        } else if (legacyUuidFromVisibleCol) {
+          key = legacyUuidFromVisibleCol;
+          legacyBackfillMap.set(cacheKey, key);
         } else if (legacyBackfillMap.has(cacheKey) && !usedKeysOnSheet.has(legacyBackfillMap.get(cacheKey))) {
           key = legacyBackfillMap.get(cacheKey);
         } else {
@@ -107,9 +161,39 @@ function indexWorksheetRows(worksheet, sheetName) {
 
         usedKeysOnSheet.add(key);
         row.getCell(colMap.trackingCol).value = key;
-        row.commit();
+        rowMutated = true;
       } else {
         usedKeysOnSheet.add(key);
+      }
+
+      // If statusRaw was blank or held a legacy UUID (from before Status was added in Col J),
+      // inherit the latest real status from a prior sheet for this same Tracking ID, or fall back to defaultStatusVal
+      let resolvedStatus = statusRaw;
+      if (!resolvedStatus && colMap.statusCol) {
+        for (let i = allRows.length - 1; i >= 0; i--) {
+          const prior = allRows[i];
+          if (prior.key === key && prior.status && !UUID_REGEX.test(prior.status)) {
+            resolvedStatus = prior.status;
+            break;
+          }
+        }
+      }
+      const finalStatus = colMap.statusCol
+        ? (resolvedStatus || defaultStatusVal)
+        : (resolvedStatus || 'Open');
+      if (colMap.statusCol) {
+        customValues[`col_${colMap.statusCol}`] = finalStatus;
+      }
+
+      // Auto-heal any visible cell (such as Col J Status) that held a retroactive UUIDv4
+      if (uuidPollutedColIndices.length > 0) {
+        uuidPollutedColIndices.forEach(idx => {
+          row.getCell(idx).value = (idx === colMap.statusCol) ? finalStatus : '';
+        });
+        rowMutated = true;
+      }
+      if (rowMutated) {
+        row.commit();
       }
 
       allRows.push({
