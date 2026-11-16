@@ -8,22 +8,28 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.18.3` (Current — `meerkat`)
+### `v1.18.4` (Current — `main` / `meerkat`)
+- **🏷️ Centralized App Version Management (`index.html`, `js/core-ui.js`)**:
+  - Added `syncAppVersionDOM()` in `js/core-ui.js` wired to `data-app-version` attributes so `APP_VERSION` (`v1.18.4`) serves as the single source of truth for `document.title`, `#appVersionTag` (text & tooltip), the `Check for Updates & Clear Cache` menu item, User Manual badge, and status bar footer.
+- **📊 Excel-Styled HTML Table & Color-Preserving Scratch Sheet Copy/Paste (`js/scratch-sheets.js`, `css/styles.css`)**:
+  - Updated Scratch Sheet copy/cut (`Ctrl+C`/`Ctrl+X` and right-click Copy/Cut) to export both `text/plain` (TSV) and a native Excel-compatible `text/html` `<table>` (`serializeScratchSelectionToExcelHtml`, including cell borders, Calibri/Aptos 11pt typography, column widths, bold header shading, cell fill colors via inline CSS + `bgcolor`, and font colors) for clean pasting into Outlook, Gmail, Teams, and Word.
+  - Updated Scratch Sheet paste (`Ctrl+V` and right-click Paste) to preserve cell fill colors, font colors, and bold formatting across internal Scratch Sheet copies and external Excel/HTML tables (`parseClipboardHtmlTableToMatrix`, supporting Excel `<style>` class rules as well as inline styles).
 - **📋 Integrated Split-Pill Copy-to-Clipboard & Per-Column Mapper Toggles (`index.html`, `css/styles.css`, `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`)**:
-  - Redesigned `.cell-copy-group` + `.btn-inline-copy` into a full-width **split-pill** control sharing a unified hover outline: value text uses the full pill width with `white-space: nowrap` on code pills (preventing 3-digit Yard # wrapping like `340`), while `.btn-inline-copy` overlays the right edge transparently until hovered; clicking the left segment filters Like-Items and clicking the copy overlay copies to clipboard.
+  - Redesigned `.cell-copy-group` + `.btn-inline-copy` into a full-width **split-pill** control sharing a unified hover outline: value text uses the full pill width with `white-space: nowrap` on code pills (preventing 3-digit Yard # wrapping like `340`), while `.btn-inline-copy` overlays the right edge transparently until hovered with an opaque backing (`opacity: 0.92` on pill hover, `1` on direct button hover); clicking the left segment filters Like-Items and clicking the copy overlay copies to clipboard.
   - Enabled split-pill copy buttons across **Email Subject, Ticket #, Master #, Bidder #, Yard #, and Lot #** (each lot token individually filterable and copyable) on the Standard Daily Tracker and `#ticketDetailsModal`—excluding Broker Name, Requested Action, Action Notes, Status, and Tracking ID/UUID.
   - Added per-column **`📋 Copy`** checkboxes inside **Configure Column Mapping (`#schemaMapperModal`)** (`inferDefaultCopyableForCustomColumn`, persisted per workbook/profile via `copyCols`) so users can customize which columns display inline copy pills on Custom Department Trackers.
+- **📐 Reclaimed Vertical Screen Space (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**:
+  - Removed the redundant `#filePathsBar` strip beneath `#trackerProfilesBar` (paths and `Auto-Reconnect Folders on Startup` remain accessible inside `⚙️ Tools & Setup ▾` with full-path hover tooltips and in the bottom status bar) to give the tracker table more vertical room.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v36'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.4` in [`index.html`](index.html).
+
+### `v1.18.3`
 - **🔀 Unified Feature Merge (`main` + `meerkat`) (`index.html`, `css/styles.css`, `js/*`)**:
   - Merged all `main` (`v1.18.1`–`v1.18.2`) enhancements—**Manual Row Copy & Paste**, **Optional Primary Field on Custom Schemas**, **Chronological Left-to-Right Daily Tab Ordering**, **Mid-Month Status vs. Retroactive UUIDv4 Auto-Healing**, and **Clean Validation List Dropdown Sync**—with all `meerkat` enhancements (**Smart Overdue Mutation & `.overdue-outline-red` Alerting**, **`Waiting` & `On Hold` Rollover Whitelist**, **Inline Copy Buttons**, **Multi-Tab Instance Locking & Save Mutex**, and **Template Sort Deprioritization**).
 - **🔢 Left-Hand Row Numbers (`index.html`, `js/tracker-table.js`, `js/workbook-io.js`, `css/styles.css`)**:
   - Added read-only Excel-style left-hand line/row numbers (`#` header `.tracker-row-num-th` and `<th scope="row" class="tracker-row-num-cell">`) showing sequential row index `1..N` (with a tooltip displaying the underlying Excel sheet and row number) across both Standard and Custom Department tracker tables, preserving checkbox batch selection, Like-Item filtering, and click-to-edit row behavior.
-- **📐 Reclaimed Vertical Screen Space (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**:
-  - Removed the redundant `#filePathsBar` strip beneath `#trackerProfilesBar` (paths and `Auto-Reconnect Folders on Startup` remain accessible inside `⚙️ Tools & Setup ▾` with full-path hover tooltips and in the bottom status bar) to give the tracker table more vertical room.
-- **📊 Excel-Styled HTML Table & Color-Preserving Scratch Sheet Copy/Paste (`js/scratch-sheets.js`, `css/styles.css`)**:
-  - Updated Scratch Sheet copy/cut (`Ctrl+C`/`Ctrl+X` and right-click Copy/Cut) to export both `text/plain` (TSV) and a native Excel-compatible `text/html` `<table>` (`serializeScratchSelectionToExcelHtml`, including cell borders, Calibri/Aptos 11pt typography, column widths, bold header shading, cell fill colors via inline CSS + `bgcolor`, and font colors) for clean pasting into Outlook, Gmail, Teams, and Word.
-  - Updated Scratch Sheet paste (`Ctrl+V` and right-click Paste) to preserve cell fill colors, font colors, and bold formatting across internal Scratch Sheet copies and external Excel/HTML tables (`parseClipboardHtmlTableToMatrix`, supporting Excel `<style>` class rules as well as inline styles).
 - **PWA Cache Bump**:
-  - Incremented `CACHE_NAME` to `'tracker-ui-v35'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+  - Incremented `CACHE_NAME` to `'tracker-ui-v30'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
 
 ### `v1.18.2`
 - **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:

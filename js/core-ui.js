@@ -1588,7 +1588,22 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.18.3';
+const APP_VERSION = 'v1.18.4';
+
+function syncAppVersionDOM() {
+  if (typeof document === 'undefined') return;
+  document.title = `TrackerUI ${APP_VERSION}`;
+  if (appVersionTag) {
+    appVersionTag.textContent = APP_VERSION;
+    appVersionTag.title = `TrackerUI ${APP_VERSION} — Click to check for updates & refresh app cache`;
+  }
+  if (typeof document.querySelectorAll === 'function') {
+    document.querySelectorAll('[data-app-version]').forEach((el) => {
+      if (el) el.textContent = APP_VERSION;
+    });
+  }
+}
+syncAppVersionDOM();
 
 // Cross-Tab Session Lock & Concurrent Save Protection
 const TAB_INSTANCE_ID = `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;

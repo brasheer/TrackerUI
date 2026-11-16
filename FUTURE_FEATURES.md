@@ -37,7 +37,7 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.18.3`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.18.4`)
 
 ### 🔢 Left-Hand Row Numbers (`v1.18.3` on `meerkat`)
 - **Status**: ✅ Implemented in `v1.18.3`
