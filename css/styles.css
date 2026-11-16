@@ -1305,27 +1305,61 @@ tbody#listBody tr {
   transition: background 0.1s ease;
 }
 
+.tracker-row-num-th {
+  width: 2.35rem;
+  min-width: 2.2rem;
+  text-align: center !important;
+  color: var(--text-muted);
+  border-right: 1px solid var(--border);
+  padding-left: 0.35rem !important;
+  padding-right: 0.35rem !important;
+  user-select: none;
+}
+
+tbody#listBody th.tracker-row-num-cell {
+  width: 2.35rem;
+  min-width: 2.2rem;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  background: var(--table-bg);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 0.5rem 0.35rem;
+  user-select: none;
+}
+
 /* Excel-Style Alternating Shaded Rows (Bright / Gray Banding) */
-tbody#listBody tr[data-sheet]:nth-child(odd) td {
+tbody#listBody tr[data-sheet]:nth-child(odd) td,
+tbody#listBody tr[data-sheet]:nth-child(odd) th.tracker-row-num-cell {
   background: var(--table-bg);
 }
 
-tbody#listBody tr[data-sheet]:nth-child(even) td {
+tbody#listBody tr[data-sheet]:nth-child(even) td,
+tbody#listBody tr[data-sheet]:nth-child(even) th.tracker-row-num-cell {
   background: var(--row-stripe);
 }
 
 tbody#listBody tr:hover td,
-tbody#listBody tr[data-sheet]:hover td {
+tbody#listBody tr[data-sheet]:hover td,
+tbody#listBody tr:hover th.tracker-row-num-cell,
+tbody#listBody tr[data-sheet]:hover th.tracker-row-num-cell {
   background: var(--row-hover);
 }
 
 tbody#listBody tr.active-editing-row td,
-tbody#listBody tr[data-sheet].active-editing-row td {
+tbody#listBody tr[data-sheet].active-editing-row td,
+tbody#listBody tr.active-editing-row th.tracker-row-num-cell,
+tbody#listBody tr[data-sheet].active-editing-row th.tracker-row-num-cell {
   background: var(--row-active);
   border-bottom-color: var(--accent-border);
 }
 
-tbody#listBody tr.active-editing-row td:first-child {
+tbody#listBody tr.active-editing-row td:first-child,
+tbody#listBody tr.active-editing-row th.tracker-row-num-cell:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -1352,11 +1386,13 @@ tbody#listBody tr.active-editing-row td:first-child {
   accent-color: var(--danger);
 }
 
-tr.selected-for-batch td {
+tr.selected-for-batch td,
+tr.selected-for-batch th.tracker-row-num-cell {
   background: var(--accent-soft) !important;
 }
 
-tr.selected-for-delete td {
+tr.selected-for-delete td,
+tr.selected-for-delete th.tracker-row-num-cell {
   background: var(--danger-soft) !important;
 }
 
@@ -1646,11 +1682,13 @@ tbody#listBody tr.overdue-outline-red {
   outline-offset: -2px;
 }
 
-tbody#listBody tr.overdue-outline-red td {
+tbody#listBody tr.overdue-outline-red td,
+tbody#listBody tr.overdue-outline-red th.tracker-row-num-cell {
   box-shadow: inset 0 1.5px 0 var(--danger), inset 0 -1.5px 0 var(--danger);
 }
 
-tbody#listBody tr.overdue-outline-red td:first-child {
+tbody#listBody tr.overdue-outline-red td:first-child,
+tbody#listBody tr.overdue-outline-red th.tracker-row-num-cell:first-child {
   box-shadow: inset 3px 0 0 var(--danger), inset 0 1.5px 0 var(--danger), inset 0 -1.5px 0 var(--danger);
 }
 
@@ -4655,4 +4693,27 @@ button.manual-toc-item.active:hover {
   .user-manual-toc {
     max-height: 150px;
   }
+}
+
+/* Manual Row Copy & Paste Toolbar & Batch Controls (v1.18.1) */
+.paste-rows-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-paste-rows-bar {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.btn-clear-copied-rows {
+  padding: 0.35rem 0.5rem;
+  font-weight: 700;
+}
+
+.batch-status-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }

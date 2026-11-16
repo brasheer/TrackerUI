@@ -8,27 +8,47 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.18.2` (Current — `main` / `meerkat`)
-- **🔒 Multi-Instance Cross-Tab Session Lock, Save Mutex & External Disk Guard (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`, `js/scratch-sheets.js`)**:
+### `v1.18.3` (Current — `meerkat`)
+- **🔀 Unified Feature Merge (`main` + `meerkat`) (`index.html`, `css/styles.css`, `js/*`)**:
+  - Merged all `main` (`v1.18.1`–`v1.18.2`) enhancements—**Manual Row Copy & Paste**, **Optional Primary Field on Custom Schemas**, **Chronological Left-to-Right Daily Tab Ordering**, **Mid-Month Status vs. Retroactive UUIDv4 Auto-Healing**, and **Clean Validation List Dropdown Sync**—with all `meerkat` enhancements (**Smart Overdue Mutation & `.overdue-outline-red` Alerting**, **`Waiting` & `On Hold` Rollover Whitelist**, **Inline Ticket/Master Copy Buttons**, **Multi-Tab Instance Locking & Save Mutex**, and **Template Sort Deprioritization**).
+- **🔢 Left-Hand Row Numbers (`index.html`, `js/tracker-table.js`, `js/workbook-io.js`, `css/styles.css`)**:
+  - Added read-only Excel-style left-hand line/row numbers (`#` header `.tracker-row-num-th` and `<th scope="row" class="tracker-row-num-cell">`) showing sequential row index `1..N` (with a tooltip displaying the underlying Excel sheet and row number) across both Standard and Custom Department tracker tables, preserving checkbox batch selection, Like-Item filtering, and click-to-edit row behavior.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v30'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+
+### `v1.18.2`
+- **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
+  - **Optional First Field on Custom Department Schemas**: Removed the hardcoded HTML `required` constraint on the first column (`primaryCol`) in `buildDynamicFieldsHtmlForScope` and updated `saveRequestToWorkbook` and `areRowsSameUniqueRequest` so custom department trackers can save and match requests even when the first column is left blank.
+  - **Chronological Left-to-Right Daily Tab Ordering (`orderWorkbookSheetsChronologically`)**: Replaced `placeWorksheetFirstInWorkbook` with `orderWorkbookSheetsChronologically`, ordering all `MM-DD-YYYY` daily tabs chronologically from left to right (oldest date on the left → newest date on the right) while keeping all non-date sheets (`Scratch`, `Master Accounts`, `validation lists`, `template`) to their right.
+  - **Mid-Month Status Column vs. Retroactive UUIDv4 Auto-Healing**: Fixed the collision when a `Status` column (e.g., Column J) is added midway through the month where earlier sheets had a retroactive UUIDv4 `Tracking ID` in that same column:
+    - `findPrimarySchemaHeaderWorksheet` and `findTemplateSheet` now select the daily sheet with the most visible non-tracking columns (`syncWorkbookSheetsWithActiveSchema` syncs `template` and earlier tabs so `Status` in Column J stays visible and `Tracking ID` in Column K stays hidden).
+    - `indexWorksheetRows`, `writeItemToWorksheetRow`, `buildConsolidatedRolloverItem`, and `unifyHistoricalGroupTrackingIds` automatically detect any UUIDv4 sitting in `statusCol` (or other visible columns), migrate it to `trackingCol` (Column K), and replace the visible cell with the row's clean status instead of displaying a UUID in the Status column.
+  - **Clean Validation List Dropdown Sync & UUID Filtering**: Stopped `loadWorkbookFromDisk` from scraping past sheet values (and retroactive UUIDs) into `validationStatuses`. Added `extractDataValidationOptionsByCol`, `buildCustomSchemaDataValidationsExtLst`, and expanded `<extLst>` / `<dataValidations>` preservation in `captureOriginalArchiveState` and `repairSavedXlsxArchive` so new daily tabs on secondary trackers inherit Excel validation list dropdowns cleanly.
+- **🔒 Multi-Instance Cross-Tab Session Lock, Save Mutex & External Disk Guard (`meerkat` — `index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`, `js/scratch-sheets.js`)**:
   - Added browser-wide session coordination (`initMultiTabInstanceLock`) via Web Locks API (`navigator.locks`), `BroadcastChannel`, and `localStorage` heartbeat fallback so opening TrackerUI in a second tab places the duplicate instance into **Standby Mode** (`#multiTabLockBanner`), pauses background auto-saves/mirror retries, and prevents concurrent Excel file race conditions.
   - Added **`⚡ Take Over Active Session Here`** (`#btnTakeOverSession`) and `ensureActiveTabLockBeforeWrite` to safely transfer the lock and reload the latest `.xlsx` from disk before any write, plus automatic lock handoff when the primary tab closes.
   - Serialized `saveWorkbookToDisk` through `saveWorkbookMutexPromise` and added a pre-write `lastLoadedDiskModifiedMs` disk check to warn before overwriting files modified externally.
 - **📁 Multi-Day Testing Workbook & Template Sort Deprioritization (`assets/Testing/`, `js/workbook-io.js`)**:
   - Updated `extractMonthYearWeight` so template filenames (`template`, `make a copy`) always sort below working/monthly `.xlsx` workbooks, and preserved `lastSavedWorkbookName` when re-selecting an Agent folder.
-  - Generated [`assets/Testing/Agent Bidder Support Tracker - November 2026.xlsx`](assets/Testing/Agent%20Bidder%20Support%20Tracker%20-%20November%202026.xlsx) (and `(VIEW ONLY).xlsx` mirror) with 8 daily tabs (`11-06-2026` through `11-16-2026`), 158 `Master Accounts`, updated `Validation List`, populated `Scratch` sheet, and realistic business test cases covering Smart Overdue Mutation (`> 5 days` & `7+ carries`), `Waiting` / `Waiting on Buyer` / `On Hold` rollovers, `🎯 Grab Ticket`, `📥 Pull Prior`, `🔄 Sync Forward`, and inline copy buttons.
+  - Generated [`assets/Testing/Agent Bidder Support Tracker - November 2026.xlsx`](assets/Testing/Agent%20Bidder%20Support%20Tracker%20-%20November%202026.xlsx) (and `(VIEW ONLY).xlsx` mirror) with 8 daily tabs (`11-06-2026` through `11-16-2026`), 158 `Master Accounts`, updated `Validation List`, populated `Scratch` sheet, and realistic business test cases covering Smart Overdue Mutation (`> 5 days` & `7+ carries`), `Waiting` / `Waiting on Buyer` / `On Hold` rollovers, `🎯 Grab Ticket`, `📥 Pull Prior`, `🔄 Sync Forward`, and inline copy buttons (excluded from git via `.gitignore`).
 - **PWA Cache Bump**:
   - Incremented `CACHE_NAME` to `'tracker-ui-v29'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.2` in [`index.html`](index.html).
 
 ### `v1.18.1`
-- **🚨 Smart Overdue Mutation & `.overdue-outline-red` Alerting (`js/core-ui.js`, `js/rollover.js`, `js/tracker-table.js`, `css/styles.css`)**:
+- **📋 Manual Row Copy & Paste Across Daily Tabs (`main` — `#btnBatchCopyRows`, `#btnBatchCopyToTab`, `#btnPasteTrackerRows`, `js/tracker-table.js`)**:
+  - Added manual checkbox-based **Copy & Paste** for daily request rows so entries on secondary/custom department workbooks (even those without a Status column or `validation lists` sheet) can be carried forward to the next day manually.
+  - **Two-Step Copy → Switch Tab → Paste**: Check 1+ rows and click **`📋 Copy Row(s)`** in the floating Batch Action Bar (or press `Ctrl+C`), switch to any target `MM-DD-YYYY` tab, and click **`📥 Paste Row(s) (N)`** in the top Controls bar (or press `Ctrl+V`).
+  - **One-Step Direct Copy to Next Day / Tab**: Check 1+ rows and click **`📅 Copy to Next Day / Tab...`** in the floating Batch Action Bar to copy and paste selected rows directly to tomorrow's/today's tab (automatically creating the new `MM-DD-YYYY` tab with your custom or standard headers if it doesn't exist yet).
+  - Preserves all custom department column values (`customValues`) and each row's hidden UUIDv4 `Tracking ID` across daily tabs, and automatically hides the `Set Status` control group in the Batch Bar when a custom workbook has no Status column.
+- **🚨 Smart Overdue Mutation & `.overdue-outline-red` Alerting (`meerkat` — `js/core-ui.js`, `js/rollover.js`, `js/tracker-table.js`, `css/styles.css`)**:
   - Added `evaluateRequestOverdueMetrics` and automated **Overdue** escalation during rollover whenever an active unfinished request is **> 5 days old** or has **carried over 7+ daily tabs**, plus red row/preview outline styling (`.overdue-outline-red`) and `.badge-overdue` pills.
-- **⏳ First-Class `Waiting`, `On Hold`, and `Overdue` Statuses (`js/core-ui.js`, `js/workbook-io.js`, `js/request-editors.js`, `js/rollover.js`, `index.html`, `css/styles.css`)**:
+- **⏳ First-Class `Waiting`, `On Hold`, and `Overdue` Statuses (`meerkat` — `js/core-ui.js`, `js/workbook-io.js`, `js/request-editors.js`, `js/rollover.js`, `index.html`, `css/styles.css`)**:
   - Added **`Waiting`**, **`On Hold`**, and **`Overdue`** to `DEFAULT_STATUSES`, `#batchStatusSelect`, `#dockStatus`, `#fStatus`, and dynamic custom status dropdowns (`mergeRequiredOperationalStatuses`), with dedicated `.badge-waiting`, `.badge-progress`, `.badge-escalated`, and `.badge-overdue` badge styling across the Tracker Table, Ticket Details timeline, and View-Only Inspector.
   - Added explicit `ROLLOVER_ACTIVE_STATUS_WHITELIST` / `isRolloverActiveStatus` preservation in `js/rollover.js` so `Waiting`, `Waiting on Buyer`, `On Hold`, and `Overdue` entries always roll forward cleanly.
-- **📋 Inline Copy Buttons for Ticket # & Master # (`js/core-ui.js`, `js/tracker-table.js`, `js/request-editors.js`, `css/styles.css`)**:
+- **📋 Inline Copy Buttons for Ticket # & Master # (`meerkat` — `js/core-ui.js`, `js/tracker-table.js`, `js/request-editors.js`, `css/styles.css`)**:
   - Added isolated 1-click SVG copy buttons (`.btn-inline-copy` via `renderInlineCopyBtnHtml` and `copyTextToClipboard`) beside **Ticket #** and **Master #** chips in the Tracker Table (including custom schema Ticket/Account columns) and `#ticketDetailsModal`, using `e.stopPropagation()` so copying never triggers Like-Item filtering or row selection.
 - **🗺️ Roadmap Consolidation (`FUTURE_FEATURES.md`)**:
-  - Merged Gemini Pro backlog proposals into [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md), marked the newly shipped statuses/overdue/copy features as `✅ Implemented in v1.18.1`, and removed temporary export drafts.
+  - Merged Gemini Pro backlog proposals into [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md), marked the newly shipped features accordingly, and removed temporary export drafts.
 - **PWA Cache Bump**:
   - Incremented `CACHE_NAME` to `'tracker-ui-v28'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.1` in [`index.html`](index.html).
 

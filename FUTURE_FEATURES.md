@@ -4,60 +4,118 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 1. Newly Implemented Features (`v1.17.0` – `v1.18.2` on `meerkat`)
+## 1. Planned Enhancements & Active Backlog (📋 Planned)
 
-### 🔒 Multi-Tab Instance Locking, Save Mutex & External Modification Guard (`v1.18.2`)
+### 📋 Custom Field Validation Assignment
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Allow users to explicitly assign validation dropdowns and list sources to any desired field/column in both Custom Department and Standard tracker profiles.
+  - Rather than relying solely on automated header substring matching against the `validation lists` sheet or existing in-sheet XML, provide a configuration UI (e.g., inside Column Mapping / Schema Setup) where users can select which columns get dropdown validation, choose the source range or validation sheet column (or specify a custom comma-separated list of options), and have those validations reflected in both the in-app forms/grids (`<select>` / `<datalist>`) and written into the `.xlsx` worksheet data validations (`<x14:dataValidations>` / `<dataValidations>`).
+
+---
+
+### 🧩 Comprehensive Full-Column Schema Mapping
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Expand the Column Mapping modal (`#schemaMapperModal`) to manage and configure **all** columns in a workbook, eliminating the current constraint where only 6 semantic roles (Primary/Subject, Ticket #, Secondary/Account, Requested Action, Notes, Status) can be mapped.
+  - Provide a full interactive column list for the active workbook showing every detected column (Col A, Col B, Col C, etc.), allowing users to inspect, re-label, assign semantic roles, set visibility/hidden flags, configure custom validation sources, and assign field types across all columns without limit.
+
+---
+
+### 🔍 1-Click Copyable UUIDv4 Tracking IDs
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Make the UUIDv4 Tracking ID chips in the table (`🔍 8f4a92c1...`) and badges in the Bottom Editor Dock (`#dockKeyBadge`), Edit Modal (`#modalKeyDisplay`), and Ticket Details modal 1-click copy-able.
+  - Clicking the chip or an adjacent copy icon will copy the full 36-character UUIDv4 to the system clipboard (`navigator.clipboard.writeText`) and trigger a quick feedback toast (e.g., `📋 Copied Tracking ID to clipboard: 8f4a92c1-...`).
+
+| Feature / Suggestion | Subsystem | Status | Description & Architecture |
+|---|---|---|---|
+| **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
+| **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
+| **Action Queue Array Routing** | *Scratch Sheets* | 📋 Planned | Quick-filter toggle buttons (e.g., Missing Tracking, Available Tracking, Duplicates by Lot) that instantly filter `mainList` and re-render the view without complex formulas. |
+| **Supervisor Dashboard Auto-Refresh** | *Supervisor View* | 📋 Planned | A 3-to-5-minute active polling loop (`setInterval`) to traverse the directory and re-parse the master aggregated list, keeping the dashboard current. |
+
+---
+
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.18.3`)
+
+### 🔢 Left-Hand Row Numbers (`v1.18.3` on `meerkat`)
+- **Status**: ✅ Implemented in `v1.18.3`
+- **Delivered**: Injected read-only Excel-style `<th scope="row" class="tracker-row-num-cell">` line numbers (`1..N`) along the left edge of the Daily Tracker table across both Standard and Custom Department views (showing underlying Excel row and sheet name on hover), preserving batch checkbox selection, Like-Item filtering, and click-to-edit row interactions.
+
+---
+
+### 🔒 Multi-Tab Instance Locking, Save Mutex & External Modification Guard (`v1.18.2` on `meerkat`)
 - **Status**: ✅ Implemented in `v1.18.2`
 - **Delivered**: Added cross-tab session coordination (`initMultiTabInstanceLock` using Web Locks API `navigator.locks` + `BroadcastChannel` + `localStorage` heartbeat fallback) in `js/core-ui.js`, placing duplicate tabs into **Read-Only Standby Mode** (`#multiTabLockBanner`, pausing background auto-saves and mirror retries) with a 1-click **`⚡ Take Over Active Session Here`** button (`#btnTakeOverSession`), plus an in-tab async `saveWorkbookMutexPromise` queue and `lastLoadedDiskModifiedMs` external file modification guard in `js/workbook-io.js` and `js/scratch-sheets.js`.
 
 ---
 
-### 🚨 Smart Overdue Mutation & `.overdue-outline-red` Alerting (`v1.18.1`)
+### 🔧 Secondary / Custom Tracker Auto-Healing & Chronological Ordering (`v1.18.2` on `main`)
+- **Status**: ✅ Implemented in `v1.18.2`
+- **Delivered**:
+  - Removed mandatory first field requirement on custom schemas;
+  - Added chronological left-to-right daily tab ordering (`orderWorkbookSheetsChronologically`);
+  - Fixed mid-month Status column vs. retroactive UUIDv4 collision by auto-migrating legacy UUIDs to Column K and restoring clean statuses;
+  - Cleaned validation list dropdown synchronization and prevented UUID scraping into status dropdowns.
+
+---
+
+### 🚨 Smart Overdue Mutation & `.overdue-outline-red` Alerting (`v1.18.1` on `meerkat`)
 - **Status**: ✅ Implemented in `v1.18.1`
 - **Delivered**: Added first-class **`Overdue`** status badges (`.badge-overdue`) and automated aging evaluation (`evaluateRequestOverdueMetrics` in `js/core-ui.js`, `js/rollover.js`, `js/tracker-table.js`). Unfinished active items that are **> 5 days old** or **carried over 7+ times** automatically update to `"Overdue"` during rollover and render a red row/preview outline (`.overdue-outline-red`).
 
 ---
 
-### ⏳ "Waiting" & "On Hold" Rollover Whitelist (`v1.18.1`)
+### ⏳ "Waiting" & "On Hold" Rollover Whitelist (`v1.18.1` on `meerkat`)
 - **Status**: ✅ Implemented in `v1.18.1`
 - **Delivered**: Added **`Waiting`** and **`On Hold`** to `DEFAULT_STATUSES`, status dropdowns (`#batchStatusSelect`, `#dockStatus`, `#fStatus`, dynamic custom status columns, and `mergeRequiredOperationalStatuses`), distinct purple/violet status badges (`.badge-waiting`), and explicit `ROLLOVER_ACTIVE_STATUS_WHITELIST` / `isRolloverActiveStatus` preservation in `js/rollover.js` so Waiting / Waiting on Buyer / On Hold items are never dropped.
 
 ---
 
-### 📋 Inline Copy Buttons (`v1.18.1`)
+### 📋 Inline Copy Buttons (`v1.18.1` on `meerkat`)
 - **Status**: ✅ Implemented in `v1.18.1`
 - **Delivered**: Injected isolated inline SVG copy icon buttons (`.btn-inline-copy` via `renderInlineCopyBtnHtml` & `copyTextToClipboard`) alongside **Ticket #** and **Master #** cells in `#listBody`, custom schema equivalent cells, and `#ticketDetailsModal`, using `e.stopPropagation()` so 1-click clipboard copying never triggers Like-Item filtering or row editing.
 
 ---
 
+### 📋 Manual Row Copy & Paste Across Daily Tabs (`v1.18.1` on `main`)
+- **Status**: ✅ Implemented in `v1.18.1`
+- **Delivered**: Manual checkbox-based row copy & paste (`#btnBatchCopyRows`, `#btnBatchCopyToTab`, `#btnPasteTrackerRows`) allowing 1-click or two-step copying of requests across daily tabs on any tracker profile.
+
+---
+
+### 📖 Interactive In-App User Manual & Reference Guide (`v1.18.0`)
+- **Status**: ✅ Implemented in `v1.18.0`
+- **Delivered**: Interactive two-column documentation modal (`#userManualModal`, `USER_MANUAL.md`) with live search, sticky Table of Contents, 10 high-resolution screenshots, and lightbox viewer.
+
+---
+
 ### 🎯 Grab Ticket Number from Email Subject (`[XXXX-XX-XXXX]`)
 - **Status**: ✅ Implemented in `v1.17.0`
-- **Delivered**: Manual `🎯 Grab Ticket` button (`#btnDockGrabTicket`, `#btnModalGrabTicket`, and dynamic custom ticket fields) extracts one or more bracketed hyphenated ticket patterns (`[ABCD-12-3456]`, `[1234-56-7890]`) from Subject, normalizes to uppercase, and merges comma-delimited without duplicates (`extractBracketedTicketsFromSubject` + `mergeCommaDelimitedTickets`).
+- **Delivered**: Manual `🎯 Grab Ticket` button (`#btnDockGrabTicket`, `#btnModalGrabTicket`, and dynamic custom ticket fields) extracts bracketed hyphenated ticket patterns from Subject, normalizes to uppercase, and merges comma-delimited without duplicates.
 
 ---
 
 ### 🔄 Forward Batch Sync Across Daily Tabs
 - **Status**: ✅ Implemented in `v1.17.0`
-- **Delivered**: `🔄 Sync Forward` button in both `#bottomEditorDock` (`#btnDockSyncForward`) and `#ticketDetailsModal` (`#btnTicketSyncForward`) (`handleForwardBatchSync`). Propagates newly added details forward across newer `MM-DD-YYYY` tabs non-destructively (only populating blank fields while merging Ticket Numbers comma-delimited without duplicates) with a confirmation diff preview before saving.
+- **Delivered**: `🔄 Sync Forward` button in `#bottomEditorDock` and `#ticketDetailsModal` (`handleForwardBatchSync`). Propagates newly added details forward across newer `MM-DD-YYYY` tabs non-destructively with confirmation diff preview.
 
 ---
 
 ### 📥 Sync from Previous Entry ("Pull from Prior Tab")
 - **Status**: ✅ Implemented in `v1.17.0`
-- **Delivered**: `📥 Pull Prior` / `📥 Pull from Prior Tab` button in `#bottomEditorDock` (`#btnDockPullPrior`) and `#editModal` (`#btnModalPullPrior`) (`handlePullFromPriorTab`). Scans earlier `MM-DD-YYYY` tabs for matching requests (by Tracking ID, Ticket #, composite identity, or Subject), fills only blank fields on the current form, and merges Ticket Numbers comma-delimited.
+- **Delivered**: `📥 Pull Prior` / `📥 Pull from Prior Tab` button in `#bottomEditorDock` and `#editModal` (`handlePullFromPriorTab`). Scans earlier `MM-DD-YYYY` tabs for matching requests and fills blank fields while comma-merging Ticket Numbers.
 
 ---
 
 ### 🗂️ Multi-Department Tracker Tabs & Dynamic Column Schema Engine
 - **Status**: ✅ Implemented in `v1.17.0`
-- **Delivered**:
-  1. **Multiple Tracker Profiles in `#workspaceTabsBar`**: `＋ Tracker Tab` (`#btnAddTrackerProfile` & `#menuAddTrackerProfile`) creates independent workspace profiles with isolated `IndexedDB` folder handles, instant runtime snapshot switching, double-click tab renaming, and per-profile `(VIEW ONLY).xlsx` mirror toggle (`#chkEnableMirrorCopy`).
-  2. **Dynamic Header Discovery & Role Mapper (`#schemaMapperModal`)**: Auto-detects Standard 11/12-column Broker layouts vs. arbitrary custom department Row-1 headers, auto-infers Primary, Status, Notes, Ticket #, and Secondary columns, assigns hidden UUIDv4 `Tracking ID` to `maxVisibleCol + 1`, binds matching `validation lists` columns, and provides `Configure Column Mapping...` (`#btnOpenSchemaMapper`).
-  3. **Schema-Driven Table, Editors, View-Only & Rollover**: Dynamically drives `#tableHead`, `#listBody`, `#dockDynamicFieldsGrid`, `#modalDynamicFieldsGrid`, `#ticketDetailsModal`, `#viewOnlyModal`, and Smart Rollover (`js/rollover.js`).
+- **Delivered**: Multiple Tracker Profiles in `#trackerProfilesBar`, dynamic Row-1 header discovery & role mapper (`#schemaMapperModal`), and dynamic table/editor grid generation.
 
 ---
 
-## 2. Completed Architectural Backlog (`v1.17.0` on `meerkat`)
+## 3. Completed Architectural Backlog (`v1.17.0`)
 
 | Feature / Suggestion | Source | Status | Implementation Summary |
 |---|---|---|---|
@@ -70,18 +128,7 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 3. Active Backlog & Planned Features
-
-| Feature / Suggestion | Subsystem | Status | Description & Architecture |
-|---|---|---|---|
-| **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
-| **Left-Hand Row Numbers** | *Tracker Table* | 📋 Planned | Inject read-only `<th>` elements mirroring Excel's native row numbering without breaking the custom grid selection logic. |
-| **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
-| **Action Queue Array Routing** | *Scratch Sheets* | 📋 Planned | Quick-filter toggle buttons (e.g., Missing Tracking, Available Tracking, Duplicates by Lot) that instantly filter `mainList` and re-render the view without complex formulas. |
-| **Supervisor Dashboard Auto-Refresh** | *Supervisor View* | 📋 Planned | A 3-to-5-minute active polling loop (`setInterval`) to traverse the directory and re-parse the master aggregated list, keeping the dashboard current. |
-
 ---
-
 ## 4. Parked & Deferred Scope
 
 | Concept | Status | Rationale |
