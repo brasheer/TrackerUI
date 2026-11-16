@@ -20,7 +20,7 @@ This document records the version release history, major feature rollouts, bug f
 - **📐 Reclaimed Vertical Screen Space (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**:
   - Removed the redundant `#filePathsBar` strip beneath `#trackerProfilesBar` (paths and `Auto-Reconnect Folders on Startup` remain accessible inside `⚙️ Tools & Setup ▾` with full-path hover tooltips and in the bottom status bar) to give the tracker table more vertical room.
 - **PWA Cache Bump**:
-  - Incremented `CACHE_NAME` to `'tracker-ui-v33'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+  - Incremented `CACHE_NAME` to `'tracker-ui-v34'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
 
 ### `v1.18.2`
 - **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
