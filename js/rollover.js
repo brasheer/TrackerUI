@@ -352,7 +352,7 @@ if (rolloverSourceGroup) {
   });
 }
 
-function buildConsolidatedRolloverItem(entries, baseRow) {
+function buildConsolidatedRolloverItem(entries, baseRow, targetTabName = '') {
   const mergedNotes = mergeChronologicalActionNotes(entries);
   const canonicalRow = entries[entries.length - 1] || baseRow;
   const pickLatestIfUnkeyedMerge = (primaryVal, fieldName) => {
@@ -363,6 +363,29 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
     }
     return primaryVal;
   };
+
+  const fallbackRefTab = (entries[entries.length - 1] && entries[entries.length - 1].sheetName) || baseRow.sheetName;
+  const overdueMetrics = typeof evaluateRequestOverdueMetrics === 'function'
+    ? evaluateRequestOverdueMetrics(entries, targetTabName || fallbackRefTab)
+    : { ageDays: 0, carryCount: entries.length, firstSheet: fallbackRefTab, qualifiesForAutoOverdue: false };
+  const isActive = typeof isRolloverActiveStatus === 'function'
+    ? isRolloverActiveStatus(baseRow.status)
+    : !isCompletedStatus(baseRow.status);
+  const autoMutatedToOverdue = Boolean(
+    isActive &&
+    overdueMetrics.qualifiesForAutoOverdue &&
+    typeof isOverdueStatus === 'function' &&
+    !isOverdueStatus(baseRow.status)
+  );
+  const effectiveStatus = (isActive && overdueMetrics.qualifiesForAutoOverdue)
+    ? 'Overdue'
+    : baseRow.status;
+  const isOverdueFlag = Boolean(
+    isActive && (
+      (typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveStatus)) ||
+      overdueMetrics.qualifiesForAutoOverdue
+    )
+  );
 
   // Merge ticket tokens comma-delimited across daily entries without duplicates
   const mergedTicket = typeof mergeCommaDelimitedTickets === 'function'
@@ -384,6 +407,10 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
       }
       if (c.colIndex === activeSchemaConfig.ticketCol) {
         consolidatedCustomValues[k] = mergedTicket;
+        return;
+      }
+      if (c.colIndex === activeSchemaConfig.statusCol) {
+        consolidatedCustomValues[k] = effectiveStatus;
         return;
       }
       if (!consolidatedCustomValues[k] || String(consolidatedCustomValues[k]).trim() === '') {
@@ -410,10 +437,16 @@ function buildConsolidatedRolloverItem(entries, baseRow) {
     yard: pickLatestIfUnkeyedMerge(baseRow.yard, 'yard'),
     lots: pickLatestIfUnkeyedMerge(baseRow.lots, 'lots'),
     notes: mergedNotes,
+    status: effectiveStatus,
     ...(consolidatedCustomValues ? { customValues: consolidatedCustomValues } : {}),
     _entries: entries,
     _sourceTabCount: entries.length,
-    _firstSheet: entries[0] ? entries[0].sheetName : baseRow.sheetName
+    _firstSheet: overdueMetrics.firstSheet || (entries[0] ? entries[0].sheetName : baseRow.sheetName),
+    _ageDays: overdueMetrics.ageDays,
+    _carryCount: overdueMetrics.carryCount,
+    _autoOverdue: autoMutatedToOverdue,
+    _previousStatus: baseRow.status,
+    _isOverdue: isOverdueFlag
   };
 }
 
@@ -510,11 +543,15 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         }
       }
 
+      const rowIsActive = typeof isRolloverActiveStatus === 'function'
+        ? isRolloverActiveStatus(row.status)
+        : !isCompletedStatus(row.status);
+
       if (matchedGroup) {
         matchedGroupIdsOnSheet.add(matchedGroup.id);
         matchedGroup.entries.push(row);
         matchedGroup.latestRow = row;
-        if (!isCompletedStatus(row.status)) {
+        if (rowIsActive) {
           matchedGroup.lastOpenRow = row;
         }
       } else {
@@ -522,7 +559,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
           id: nextGroupId++,
           entries: [row],
           latestRow: row,
-          lastOpenRow: isCompletedStatus(row.status) ? null : row
+          lastOpenRow: rowIsActive ? row : null
         };
         matchedGroupIdsOnSheet.add(newGroup.id);
         requestGroups.push(newGroup);
@@ -542,8 +579,11 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
 
   requestGroups.forEach(group => {
     const latestRow = group.latestRow;
-    const isLatestComplete = isCompletedStatus(latestRow.status);
-    const consolidatedLatest = buildConsolidatedRolloverItem(group.entries, latestRow);
+    const isLatestActive = typeof isRolloverActiveStatus === 'function'
+      ? isRolloverActiveStatus(latestRow.status)
+      : !isCompletedStatus(latestRow.status);
+    const isLatestComplete = !isLatestActive;
+    const consolidatedLatest = buildConsolidatedRolloverItem(group.entries, latestRow, targetTabName);
     const inSelectedSourceScope = !allowedActiveSourceSheets ||
       group.entries.some(e => allowedActiveSourceSheets.has(e.sheetName));
 
@@ -560,7 +600,20 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
 
     if (targetRow) {
       matchedTargetRowNums.add(targetRow.rowNumber);
-      const isTargetComplete = isCompletedStatus(targetRow.status);
+      const targetIsActive = typeof isRolloverActiveStatus === 'function'
+        ? isRolloverActiveStatus(targetRow.status)
+        : !isCompletedStatus(targetRow.status);
+      const isTargetComplete = !targetIsActive;
+      const targetOverdueMetrics = typeof evaluateRequestOverdueMetrics === 'function'
+        ? evaluateRequestOverdueMetrics([...group.entries, targetRow], targetTabName)
+        : { qualifiesForAutoOverdue: false, ageDays: 0, carryCount: group.entries.length + 1 };
+      const autoOverdueOnTarget = Boolean(
+        inSelectedSourceScope &&
+        targetIsActive &&
+        targetOverdueMetrics.qualifiesForAutoOverdue &&
+        typeof isOverdueStatus === 'function' &&
+        !isOverdueStatus(targetRow.status)
+      );
       const priorCores = extractNoteCoresSet(consolidatedLatest.notes);
       const targetCores = extractNoteCoresSet(targetRow.notes);
       let hasMissingPriorNotes = false;
@@ -578,6 +631,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         latestRow: consolidatedLatest,
         targetRow,
         reopenedOnSource: inSelectedSourceScope && isTargetComplete && !isLatestComplete,
+        autoOverdueOnTarget,
         hasMissingPriorNotes: inSelectedSourceScope && hasMissingPriorNotes,
         mergedTargetNotes: inSelectedSourceScope ? mergedTargetNotes : targetRow.notes,
         groupEntries: group.entries
@@ -590,10 +644,15 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
     } else if (group.lastOpenRow) {
       const canOfferReopen = effectiveSourceMode === 'all' || (
         immediatePrevSheet &&
-        group.entries.some(e => e.sheetName === immediatePrevSheet && !isCompletedStatus(e.status))
+        group.entries.some(e => {
+          if (e.sheetName !== immediatePrevSheet) return false;
+          return typeof isRolloverActiveStatus === 'function'
+            ? isRolloverActiveStatus(e.status)
+            : !isCompletedStatus(e.status);
+        })
       );
       if (canOfferReopen) {
-        const consolidatedOpen = buildConsolidatedRolloverItem(group.entries, group.lastOpenRow);
+        const consolidatedOpen = buildConsolidatedRolloverItem(group.entries, group.lastOpenRow, targetTabName);
         supersededByComplete.push({
           openRow: consolidatedOpen,
           completedRow: latestRow,
@@ -609,6 +668,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         latestRow: targetRow,
         targetRow,
         reopenedOnSource: false,
+        autoOverdueOnTarget: false,
         hasMissingPriorNotes: false,
         mergedTargetNotes: targetRow.notes,
         groupEntries: []
@@ -668,10 +728,10 @@ function updateRolloverModalPreview() {
   if (rolloverSourceDesc) {
     if (rolloverSourceMode === 'previous') {
       rolloverSourceDesc.textContent = immediatePrev
-        ? `Carries forward unfinished requests from ${immediatePrev} only (Complete / Completed / Closed items are excluded) while preserving historical notes & Tracking IDs.`
+        ? `Carries forward unfinished requests from ${immediatePrev} only (including Waiting / On Hold; Complete / Closed excluded). Items > 5 days old or carried 7+ times auto-update to Overdue.`
         : `No daily sheet exists prior to ${targetVal}. Create or select a later date, or include future-dated tabs below.`;
     } else {
-      rolloverSourceDesc.textContent = `Scans all ${priorTabs.length} daily tab(s) prior to ${targetVal} chronologically so older unfinished requests are also carried forward (Complete / Completed / Closed items are excluded).`;
+      rolloverSourceDesc.textContent = `Scans all ${priorTabs.length} daily tab(s) prior to ${targetVal} chronologically (including Waiting / On Hold; Complete / Closed excluded). Items > 5 days old or carried 7+ times auto-update to Overdue.`;
     }
   }
 
@@ -712,17 +772,24 @@ function updateRolloverModalPreview() {
     html += `<div class="preview-list">`;
     plan.toRollOver.forEach(item => {
       const spanInfo = item._sourceTabCount > 1
-        ? `From ${escapeHtml(item._firstSheet)} → ${escapeHtml(item.sheetName)} (${item._sourceTabCount} days consolidated)`
-        : `From ${escapeHtml(item.sheetName)}`;
+        ? `From ${escapeHtml(item._firstSheet)} → ${escapeHtml(item.sheetName)} (${item._sourceTabCount} days consolidated${item._ageDays > 0 ? ` • ${item._ageDays}d old` : ''})`
+        : `From ${escapeHtml(item.sheetName)}${item._ageDays > 0 ? ` (${item._ageDays}d old)` : ''}`;
       const noteLineCount = item.notes ? item.notes.split(/\r?\n/).filter(Boolean).length : 0;
       const notesMeta = noteLineCount > 0 ? ` • ${noteLineCount} note line${noteLineCount === 1 ? '' : 's'} appended` : '';
+      const overdueClass = item._isOverdue ? ' overdue-outline-red' : '';
+      const badgeClass = typeof getStatusBadgeClass === 'function'
+        ? getStatusBadgeClass(item.status)
+        : 'badge-pending';
+      const badgeLabel = item._autoOverdue
+        ? `⚠️ ${escapeHtml(item._previousStatus)} → Overdue (${item._ageDays}d / ${item._carryCount}x)`
+        : escapeHtml(item.status);
       html += `
-        <div class="preview-item">
+        <div class="preview-item${overdueClass}">
           <div class="preview-item-main">
             <strong>${escapeHtml(item.subject)}</strong>
             <span class="preview-item-sub">${escapeHtml(item.broker || 'No Broker')} • ${spanInfo}${notesMeta} • ID: ${escapeHtml(item.key.slice(0, 8))}...</span>
           </div>
-          <span class="badge badge-pending">${escapeHtml(item.status)}</span>
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
         </div>
       `;
     });
@@ -734,16 +801,27 @@ function updateRolloverModalPreview() {
     html += `<div>
       <div class="preview-section-title">Already Present on ${escapeHtml(targetVal)} (${plan.alreadyOnTarget.length})</div>
       <div class="preview-list">`;
-    plan.alreadyOnTarget.forEach(({ targetRow, latestRow, reopenedOnSource, hasMissingPriorNotes }) => {
+    plan.alreadyOnTarget.forEach(({ targetRow, latestRow, reopenedOnSource, autoOverdueOnTarget, hasMissingPriorNotes }) => {
       const syncNoteLabel = hasMissingPriorNotes ? ' • +Append missing prior notes' : '';
+      const effectiveTargetStatus = autoOverdueOnTarget
+        ? 'Overdue'
+        : (reopenedOnSource ? latestRow.status : targetRow.status);
+      const targetBadgeClass = typeof getStatusBadgeClass === 'function'
+        ? getStatusBadgeClass(effectiveTargetStatus)
+        : (isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending');
+      const isTargetOverdue = !isCompletedStatus(effectiveTargetStatus) &&
+        typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveTargetStatus);
+      const statusArrowText = reopenedOnSource
+        ? ` → Reopen (${escapeHtml(latestRow.status)})`
+        : (autoOverdueOnTarget ? ' → Overdue' : '');
       html += `
-        <div class="preview-item">
+        <div class="preview-item${isTargetOverdue ? ' overdue-outline-red' : ''}">
           <div class="preview-item-main">
             <strong>${escapeHtml(targetRow.subject)}</strong>
             <span class="preview-item-sub">${escapeHtml(targetRow.broker || 'No Broker')} • Row ${targetRow.rowNumber} on ${escapeHtml(targetVal)}${syncNoteLabel}</span>
           </div>
-          <span class="badge ${isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending'}">
-            ${escapeHtml(targetRow.status)}${reopenedOnSource ? ` → Reopen (${escapeHtml(latestRow.status)})` : ''}
+          <span class="badge ${targetBadgeClass}">
+            ${escapeHtml(targetRow.status)}${statusArrowText}
           </span>
         </div>
       `;
@@ -761,8 +839,11 @@ function updateRolloverModalPreview() {
       </div>
       <div class="preview-list">`;
     plan.supersededByComplete.forEach(({ openRow, completedRow }) => {
+      const reopenBadgeClass = typeof getStatusBadgeClass === 'function'
+        ? getStatusBadgeClass(openRow.status)
+        : 'badge-pending';
       html += `
-        <label class="preview-item" style="cursor:pointer;">
+        <label class="preview-item${openRow._isOverdue ? ' overdue-outline-red' : ''}" style="cursor:pointer;">
           <div style="display:flex; align-items:center; gap:10px;">
             <input type="checkbox" class="chk-force-rollover" data-key="${escapeHtml(openRow.key)}" style="width:16px; height:16px;">
             <div class="preview-item-main">
@@ -772,7 +853,7 @@ function updateRolloverModalPreview() {
               </span>
             </div>
           </div>
-          <span class="badge badge-pending">Reopen as ${escapeHtml(openRow.status)}</span>
+          <span class="badge ${reopenBadgeClass}">Reopen as ${escapeHtml(openRow.status)}</span>
         </label>
       `;
     });
@@ -864,6 +945,7 @@ rolloverForm.addEventListener('submit', async (e) => {
     let addedCount = 0;
     let alreadyPresentCount = existingTargetList.length;
     let reopenedCount = 0;
+    let autoOverdueCount = 0;
     let notesSyncedCount = 0;
 
     for (const item of itemsToCarry) {
@@ -878,6 +960,12 @@ rolloverForm.addEventListener('submit', async (e) => {
         existingTargetList.push(item);
         unifyHistoricalGroupTrackingIds(item._entries, item.key);
         addedCount++;
+        if (item._autoOverdue) {
+          autoOverdueCount++;
+        }
+        if (typeof isOverdueStatus === 'function' && isOverdueStatus(item.status) && typeof ensureStatusOptionExists === 'function') {
+          ensureStatusOptionExists('Overdue');
+        }
       }
     }
 
@@ -886,11 +974,19 @@ rolloverForm.addEventListener('submit', async (e) => {
         unifyHistoricalGroupTrackingIds(entry.groupEntries, entry.targetRow.key);
       }
 
-      if (entry.reopenedOnSource || entry.hasMissingPriorNotes) {
+      if (entry.reopenedOnSource || entry.autoOverdueOnTarget || entry.hasMissingPriorNotes) {
         const excelRow = targetSheet.getRow(entry.targetRow.rowNumber);
-        if (entry.reopenedOnSource && targetColMap.statusCol) {
-          excelRow.getCell(targetColMap.statusCol).value = entry.latestRow.status;
-          reopenedCount++;
+        if ((entry.reopenedOnSource || entry.autoOverdueOnTarget) && targetColMap.statusCol) {
+          const nextStatus = entry.autoOverdueOnTarget ? 'Overdue' : entry.latestRow.status;
+          excelRow.getCell(targetColMap.statusCol).value = nextStatus;
+          if (entry.autoOverdueOnTarget) {
+            autoOverdueCount++;
+            if (typeof ensureStatusOptionExists === 'function') {
+              ensureStatusOptionExists('Overdue');
+            }
+          } else {
+            reopenedCount++;
+          }
         }
         if (entry.hasMissingPriorNotes && entry.mergedTargetNotes && targetColMap.notesCol) {
           excelRow.getCell(targetColMap.notesCol).value = entry.mergedTargetNotes;
@@ -911,6 +1007,7 @@ rolloverForm.addEventListener('submit', async (e) => {
       const detailsParts = [`${alreadyPresentCount} already present`];
       if (notesSyncedCount > 0) detailsParts.push(`${notesSyncedCount} enriched with prior notes`);
       if (reopenedCount > 0) detailsParts.push(`${reopenedCount} reopened`);
+      if (autoOverdueCount > 0) detailsParts.push(`${autoOverdueCount} marked Overdue`);
       const actionLabel = createdNewSheet ? `Created & synced ${targetTabName}` : `Synced ${targetTabName}`;
       const msg = `${actionLabel}: Rolled over ${addedCount} unique request(s) (${detailsParts.join(', ')}).`;
       showToast(msg, 'success');

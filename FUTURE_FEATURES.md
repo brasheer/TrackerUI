@@ -4,7 +4,31 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 1. Newly Implemented Features (`v1.17.0` on `meerkat`)
+## 1. Newly Implemented Features (`v1.17.0` – `v1.18.2` on `meerkat`)
+
+### 🔒 Multi-Tab Instance Locking, Save Mutex & External Modification Guard (`v1.18.2`)
+- **Status**: ✅ Implemented in `v1.18.2`
+- **Delivered**: Added cross-tab session coordination (`initMultiTabInstanceLock` using Web Locks API `navigator.locks` + `BroadcastChannel` + `localStorage` heartbeat fallback) in `js/core-ui.js`, placing duplicate tabs into **Read-Only Standby Mode** (`#multiTabLockBanner`, pausing background auto-saves and mirror retries) with a 1-click **`⚡ Take Over Active Session Here`** button (`#btnTakeOverSession`), plus an in-tab async `saveWorkbookMutexPromise` queue and `lastLoadedDiskModifiedMs` external file modification guard in `js/workbook-io.js` and `js/scratch-sheets.js`.
+
+---
+
+### 🚨 Smart Overdue Mutation & `.overdue-outline-red` Alerting (`v1.18.1`)
+- **Status**: ✅ Implemented in `v1.18.1`
+- **Delivered**: Added first-class **`Overdue`** status badges (`.badge-overdue`) and automated aging evaluation (`evaluateRequestOverdueMetrics` in `js/core-ui.js`, `js/rollover.js`, `js/tracker-table.js`). Unfinished active items that are **> 5 days old** or **carried over 7+ times** automatically update to `"Overdue"` during rollover and render a red row/preview outline (`.overdue-outline-red`).
+
+---
+
+### ⏳ "Waiting" & "On Hold" Rollover Whitelist (`v1.18.1`)
+- **Status**: ✅ Implemented in `v1.18.1`
+- **Delivered**: Added **`Waiting`** and **`On Hold`** to `DEFAULT_STATUSES`, status dropdowns (`#batchStatusSelect`, `#dockStatus`, `#fStatus`, dynamic custom status columns, and `mergeRequiredOperationalStatuses`), distinct purple/violet status badges (`.badge-waiting`), and explicit `ROLLOVER_ACTIVE_STATUS_WHITELIST` / `isRolloverActiveStatus` preservation in `js/rollover.js` so Waiting / Waiting on Buyer / On Hold items are never dropped.
+
+---
+
+### 📋 Inline Copy Buttons (`v1.18.1`)
+- **Status**: ✅ Implemented in `v1.18.1`
+- **Delivered**: Injected isolated inline SVG copy icon buttons (`.btn-inline-copy` via `renderInlineCopyBtnHtml` & `copyTextToClipboard`) alongside **Ticket #** and **Master #** cells in `#listBody`, custom schema equivalent cells, and `#ticketDetailsModal`, using `e.stopPropagation()` so 1-click clipboard copying never triggers Like-Item filtering or row editing.
+
+---
 
 ### 🎯 Grab Ticket Number from Email Subject (`[XXXX-XX-XXXX]`)
 - **Status**: ✅ Implemented in `v1.17.0`
@@ -46,17 +70,32 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 3. Parked & Deferred Scope
+## 3. Active Backlog & Planned Features
+
+| Feature / Suggestion | Subsystem | Status | Description & Architecture |
+|---|---|---|---|
+| **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
+| **Left-Hand Row Numbers** | *Tracker Table* | 📋 Planned | Inject read-only `<th>` elements mirroring Excel's native row numbering without breaking the custom grid selection logic. |
+| **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
+| **Action Queue Array Routing** | *Scratch Sheets* | 📋 Planned | Quick-filter toggle buttons (e.g., Missing Tracking, Available Tracking, Duplicates by Lot) that instantly filter `mainList` and re-render the view without complex formulas. |
+| **Supervisor Dashboard Auto-Refresh** | *Supervisor View* | 📋 Planned | A 3-to-5-minute active polling loop (`setInterval`) to traverse the directory and re-parse the master aggregated list, keeping the dashboard current. |
+
+---
+
+## 4. Parked & Deferred Scope
 
 | Concept | Status | Rationale |
 |---|---|---|
+| **Cross-Queue Ticket Claiming (Tombstoning)** | ⏸️ Parked | Manual dual-write transfer of tickets between agent workbooks. Intentionally parked to prioritize core workflow stability before introducing cross-file mutation. |
+| **Hidden UUID Configuration Sheets** | ⏸️ Parked | Generating and storing Agent UUID/Names in a hidden `TrackerConfig` Excel tab. Parked alongside cross-queue sharing. |
+| **Nested Agent JSON Config Storage** | ⏸️ Parked | Saving a `settings.json` file inside a nested agent directory for state persistence. Parked for now. |
 | **Mass Report Filter (380,000-Row Client-Side `Set` Filter)** | ⏸️ Parked | Explicitly parked. High memory overhead; requires `{ header: 1 }` stream parsing to avoid V8 memory crashes. |
 | **Smart Scratchpad (Real-Time Regex Lot # & Title Extractor)** | ⏸️ Parked | Split-pane scratchpad with automated regex scraping for 8-digit lot numbers. Parked in favor of Excel-like in-app scratch sheet tabs (`v1.15.0`). |
 | **Chart.js Metric View for Current Data** | ⏸️ On Hold | Deferred to prioritize agent daily workflow, table responsiveness, and scratch sheet capabilities. |
 
 ---
 
-## 4. Architecture Decisions & Decided Against
+## 5. Architecture Decisions & Decided Against
 
 | Decision | Date | Reason / Alternative Chosen |
 |---|---|---|

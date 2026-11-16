@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.18.0</title>
+  <title>TrackerUI v1.18.2</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.18.0">
+  <link rel="stylesheet" href="css/styles.css?v=1.18.2">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.18.0 — Click to check for updates &amp; refresh app cache">v1.18.0</span>
+      <span class="version-tag" id="appVersionTag" title="TrackerUI v1.18.2 — Click to check for updates &amp; refresh app cache">v1.18.2</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta">v1.18.0</span>
+              <span class="menu-item-meta">v1.18.2</span>
             </button>
           </div>
         </div>
@@ -436,6 +436,17 @@
     <div class="pwa-update-banner-actions">
       <button type="button" id="btnPwaReloadNow" class="btn-primary btn-sm">Reload Now</button>
       <button type="button" id="btnPwaDismissUpdate" class="btn-sm">Later</button>
+    </div>
+  </div>
+
+  <!-- Multi-Instance Cross-Tab Lock Standby Banner -->
+  <div id="multiTabLockBanner" class="multi-tab-lock-banner" style="display:none;" role="alert">
+    <div class="multi-tab-lock-text">
+      <strong>🔒 Active in Another Tab:</strong>
+      <span id="multiTabLockDesc">TrackerUI is already open in another browser tab or window. Editing and background saves are paused here to prevent Excel file race conditions.</span>
+    </div>
+    <div class="multi-tab-lock-actions">
+      <button type="button" id="btnTakeOverSession" class="btn-primary btn-sm">⚡ Take Over Active Session Here</button>
     </div>
   </div>
 
@@ -645,7 +656,10 @@
         <select id="batchStatusSelect" aria-label="Batch target request status">
           <option value="Pending">Pending</option>
           <option value="In Progress">In Progress</option>
+          <option value="Waiting">Waiting</option>
           <option value="Waiting on Buyer">Waiting on Buyer</option>
+          <option value="On Hold">On Hold</option>
+          <option value="Overdue">Overdue</option>
           <option value="Escalated">Escalated</option>
           <option value="Complete">Complete</option>
         </select>
@@ -737,7 +751,10 @@
           <select id="dockStatus">
             <option value="Pending">Pending</option>
             <option value="In Progress">In Progress</option>
+            <option value="Waiting">Waiting</option>
             <option value="Waiting on Buyer">Waiting on Buyer</option>
+            <option value="On Hold">On Hold</option>
+            <option value="Overdue">Overdue</option>
             <option value="Escalated">Escalated</option>
             <option value="Complete">Complete</option>
           </select>
@@ -990,7 +1007,10 @@
             <select id="fStatus">
               <option value="Pending">Pending</option>
               <option value="In Progress">In Progress</option>
+              <option value="Waiting">Waiting</option>
               <option value="Waiting on Buyer">Waiting on Buyer</option>
+              <option value="On Hold">On Hold</option>
+              <option value="Overdue">Overdue</option>
               <option value="Escalated">Escalated</option>
               <option value="Complete">Complete</option>
             </select>
@@ -1710,16 +1730,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" title="TrackerUI Application Version">v1.18.0</span>
+      <span class="status-meta-item" title="TrackerUI Application Version">v1.18.2</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.18.0"></script>
-  <script src="js/core-ui.js?v=1.18.0"></script>
-  <script src="js/workbook-io.js?v=1.18.0"></script>
-  <script src="js/tracker-table.js?v=1.18.0"></script>
-  <script src="js/request-editors.js?v=1.18.0"></script>
-  <script src="js/scratch-sheets.js?v=1.18.0"></script>
-  <script src="js/rollover.js?v=1.18.0"></script>
+  <script src="js/mockMasterAccounts.js?v=1.18.2"></script>
+  <script src="js/core-ui.js?v=1.18.2"></script>
+  <script src="js/workbook-io.js?v=1.18.2"></script>
+  <script src="js/tracker-table.js?v=1.18.2"></script>
+  <script src="js/request-editors.js?v=1.18.2"></script>
+  <script src="js/scratch-sheets.js?v=1.18.2"></script>
+  <script src="js/rollover.js?v=1.18.2"></script>
 </body>
 </html>

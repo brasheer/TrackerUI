@@ -8,7 +8,31 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.18.0` (Current — `main` / `meerkat`)
+### `v1.18.2` (Current — `main` / `meerkat`)
+- **🔒 Multi-Instance Cross-Tab Session Lock, Save Mutex & External Disk Guard (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`, `js/scratch-sheets.js`)**:
+  - Added browser-wide session coordination (`initMultiTabInstanceLock`) via Web Locks API (`navigator.locks`), `BroadcastChannel`, and `localStorage` heartbeat fallback so opening TrackerUI in a second tab places the duplicate instance into **Standby Mode** (`#multiTabLockBanner`), pauses background auto-saves/mirror retries, and prevents concurrent Excel file race conditions.
+  - Added **`⚡ Take Over Active Session Here`** (`#btnTakeOverSession`) and `ensureActiveTabLockBeforeWrite` to safely transfer the lock and reload the latest `.xlsx` from disk before any write, plus automatic lock handoff when the primary tab closes.
+  - Serialized `saveWorkbookToDisk` through `saveWorkbookMutexPromise` and added a pre-write `lastLoadedDiskModifiedMs` disk check to warn before overwriting files modified externally.
+- **📁 Multi-Day Testing Workbook & Template Sort Deprioritization (`assets/Testing/`, `js/workbook-io.js`)**:
+  - Updated `extractMonthYearWeight` so template filenames (`template`, `make a copy`) always sort below working/monthly `.xlsx` workbooks, and preserved `lastSavedWorkbookName` when re-selecting an Agent folder.
+  - Generated [`assets/Testing/Agent Bidder Support Tracker - November 2026.xlsx`](assets/Testing/Agent%20Bidder%20Support%20Tracker%20-%20November%202026.xlsx) (and `(VIEW ONLY).xlsx` mirror) with 8 daily tabs (`11-06-2026` through `11-16-2026`), 158 `Master Accounts`, updated `Validation List`, populated `Scratch` sheet, and realistic business test cases covering Smart Overdue Mutation (`> 5 days` & `7+ carries`), `Waiting` / `Waiting on Buyer` / `On Hold` rollovers, `🎯 Grab Ticket`, `📥 Pull Prior`, `🔄 Sync Forward`, and inline copy buttons.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v29'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.2` in [`index.html`](index.html).
+
+### `v1.18.1`
+- **🚨 Smart Overdue Mutation & `.overdue-outline-red` Alerting (`js/core-ui.js`, `js/rollover.js`, `js/tracker-table.js`, `css/styles.css`)**:
+  - Added `evaluateRequestOverdueMetrics` and automated **Overdue** escalation during rollover whenever an active unfinished request is **> 5 days old** or has **carried over 7+ daily tabs**, plus red row/preview outline styling (`.overdue-outline-red`) and `.badge-overdue` pills.
+- **⏳ First-Class `Waiting`, `On Hold`, and `Overdue` Statuses (`js/core-ui.js`, `js/workbook-io.js`, `js/request-editors.js`, `js/rollover.js`, `index.html`, `css/styles.css`)**:
+  - Added **`Waiting`**, **`On Hold`**, and **`Overdue`** to `DEFAULT_STATUSES`, `#batchStatusSelect`, `#dockStatus`, `#fStatus`, and dynamic custom status dropdowns (`mergeRequiredOperationalStatuses`), with dedicated `.badge-waiting`, `.badge-progress`, `.badge-escalated`, and `.badge-overdue` badge styling across the Tracker Table, Ticket Details timeline, and View-Only Inspector.
+  - Added explicit `ROLLOVER_ACTIVE_STATUS_WHITELIST` / `isRolloverActiveStatus` preservation in `js/rollover.js` so `Waiting`, `Waiting on Buyer`, `On Hold`, and `Overdue` entries always roll forward cleanly.
+- **📋 Inline Copy Buttons for Ticket # & Master # (`js/core-ui.js`, `js/tracker-table.js`, `js/request-editors.js`, `css/styles.css`)**:
+  - Added isolated 1-click SVG copy buttons (`.btn-inline-copy` via `renderInlineCopyBtnHtml` and `copyTextToClipboard`) beside **Ticket #** and **Master #** chips in the Tracker Table (including custom schema Ticket/Account columns) and `#ticketDetailsModal`, using `e.stopPropagation()` so copying never triggers Like-Item filtering or row selection.
+- **🗺️ Roadmap Consolidation (`FUTURE_FEATURES.md`)**:
+  - Merged Gemini Pro backlog proposals into [`FUTURE_FEATURES.md`](FUTURE_FEATURES.md), marked the newly shipped statuses/overdue/copy features as `✅ Implemented in v1.18.1`, and removed temporary export drafts.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v28'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.1` in [`index.html`](index.html).
+
+### `v1.18.0`
 - **📖 Interactive In-App User Manual & Reference Guide (`#userManualModal`, `USER_MANUAL.md`, `index.html`, `css/styles.css`, `js/core-ui.js`)**:
   - Added a dedicated **`📖 Manual`** button (`#btnOpenUserManual`) in the top header bar alongside **`User Manual & Reference Guide...`** (`#menuOpenUserManual`) inside **`⚙️ Tools & Setup ▾`**.
   - Built an interactive two-column in-app documentation modal (`#userManualModal`) featuring a sticky 14-section Table of Contents sidebar (`#userManualTocList`) with smooth-scroll navigation and scroll-spy active section highlighting, live instant keyword search (`#userManualSearchInput`), "Where to Click" reference tables, keyboard shortcuts, and 10 embedded high-resolution workspace screenshots (`assets/images/manual/*.png`).

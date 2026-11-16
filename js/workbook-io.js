@@ -512,7 +512,7 @@ async function promptSelectAgentFolder() {
     btnLinkFile.style.display = 'none';
     btnNewWorkbook.disabled = false;
     updateAgentDirUI();
-    await scanDirectoryAndLoadWorkbooks();
+    await scanDirectoryAndLoadWorkbooks(lastSavedWorkbookName);
   } catch (err) {
     if (err.name !== 'AbortError') {
       await showModalAlert({
@@ -710,6 +710,9 @@ if (btnResetTemplatesDir) {
 }
 
 function extractMonthYearWeight(fileName, fallbackLastModified) {
+  if (/\b(template|make a copy)\b/i.test(String(fileName || ''))) {
+    return 0;
+  }
   const months = {
     january: 0, jan: 0,
     february: 1, feb: 1,
@@ -1861,6 +1864,9 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
 
   let file = await workingFileHandle.getFile();
   let arrayBuffer = await file.arrayBuffer();
+  if (typeof lastLoadedDiskModifiedMs !== 'undefined') {
+    lastLoadedDiskModifiedMs = file.lastModified || 0;
+  }
 
   // Check IndexedDB Fail-Safe Staging Cache for unsaved primary .xlsx edits (e.g., from when Desktop Excel locked the file)
   if (!options.skipStagedRecoveryCheck) {
@@ -1889,6 +1895,9 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
           await attemptMirrorWrite(stagedRecord.buffer, false);
           file = await workingFileHandle.getFile();
           arrayBuffer = await file.arrayBuffer();
+          if (typeof lastLoadedDiskModifiedMs !== 'undefined') {
+            lastLoadedDiskModifiedMs = file.lastModified || 0;
+          }
           showToast(`Recovered and saved staged edits to "${workingFileHandle.name}".`, 'success');
         } catch (lockErr) {
           // File is still locked in Excel; load the staged buffer into memory and keep Retry Primary Save active!
@@ -2091,7 +2100,11 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   }
 
   if (!options.preserveStatus && !pendingMirrorBuffer && !pendingPrimarySaveState) {
-    setStatus(`Synced: ${file.name}`, 'ready');
+    if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
+      setStatus('🔒 Standby (Open in Another Tab)', 'locked');
+    } else {
+      setStatus(`Synced: ${file.name}`, 'ready');
+    }
   }
   renderList();
   syncWorkspaceTabsUI();
@@ -2974,7 +2987,10 @@ function parseMasterAccountsSheet(worksheet) {
 
 function populateSelectWithStatuses(selectEl) {
   if (!selectEl) return;
-  const statusesToUse = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
+  const baseStatuses = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
+  const statusesToUse = typeof mergeRequiredOperationalStatuses === 'function'
+    ? mergeRequiredOperationalStatuses(baseStatuses)
+    : baseStatuses;
   const currentSelected = selectEl.value;
   selectEl.innerHTML = '';
   statusesToUse.forEach(st => {
@@ -3364,6 +3380,12 @@ function clearPrimarySaveRetryUI() {
 
 async function retryStagedPrimarySaveNow() {
   if (!workingFileHandle) return;
+  if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
+    if (typeof ensureActiveTabLockBeforeWrite === 'function') {
+      await ensureActiveTabLockBeforeWrite('retry primary save');
+    }
+    return;
+  }
   if (btnRetryPrimarySave) {
     btnRetryPrimarySave.textContent = '⏳ Saving...';
   }
@@ -3530,8 +3552,48 @@ btnRetryMirror.addEventListener('click', () => {
   retryMirrorSyncNow(false);
 });
 
-async function saveWorkbookToDisk() {
+async function saveWorkbookToDiskInternal() {
   if (!workingFileHandle) return false;
+
+  if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
+    if (typeof ensureActiveTabLockBeforeWrite === 'function') {
+      await ensureActiveTabLockBeforeWrite('save changes');
+    }
+    return false;
+  }
+
+  // External Disk Modification Guard: detect if another tab or Desktop Excel updated the file after this tab loaded it
+  try {
+    const diskFileBeforeWrite = await workingFileHandle.getFile();
+    if (
+      typeof lastLoadedDiskModifiedMs === 'number' &&
+      lastLoadedDiskModifiedMs > 0 &&
+      diskFileBeforeWrite.lastModified > lastLoadedDiskModifiedMs + 1000
+    ) {
+      const diskTimeStr = new Date(diskFileBeforeWrite.lastModified).toLocaleTimeString();
+      const loadedTimeStr = new Date(lastLoadedDiskModifiedMs).toLocaleTimeString();
+      const reloadInstead = await showModalConfirm({
+        title: '⚠️ Workbook Modified Externally on Disk',
+        badge: workingFileHandle.name,
+        message:
+          `"${workingFileHandle.name}" was updated on disk (at ${diskTimeStr}) after this tab loaded it (at ${loadedTimeStr}) — possibly from another TrackerUI tab or Desktop Excel.\n\n` +
+          `Reload the latest disk version safely (recommended), or overwrite disk with this tab's changes?`,
+        confirmText: '🔄 Reload Latest from Disk (Safe)',
+        cancelText: '⚠️ Overwrite Disk File',
+        variant: 'danger'
+      });
+      if (reloadInstead) {
+        await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, {
+          skipFlushPendingScratch: true,
+          skipStagedRecoveryCheck: true
+        });
+        showToast('Reloaded latest workbook from disk without overwriting external edits.', 'info');
+        return false;
+      }
+    }
+  } catch (statErr) {
+    console.warn('Could not verify disk modification timestamp before write:', statErr);
+  }
 
   setStatus('Saving to Excel...', '');
   let buffer;
@@ -3553,6 +3615,25 @@ async function saveWorkbookToDisk() {
     const writable = await workingFileHandle.createWritable();
     await writable.write(buffer);
     await writable.close();
+
+    try {
+      const postSaveFile = await workingFileHandle.getFile();
+      if (typeof lastLoadedDiskModifiedMs !== 'undefined') {
+        lastLoadedDiskModifiedMs = postSaveFile.lastModified || Date.now();
+      }
+    } catch (_) {
+      if (typeof lastLoadedDiskModifiedMs !== 'undefined') {
+        lastLoadedDiskModifiedMs = Date.now();
+      }
+    }
+
+    if (typeof broadcastInstanceMessage === 'function') {
+      broadcastInstanceMessage({
+        type: 'WORKBOOK_SAVED',
+        fileName: workingFileHandle.name,
+        lastModified: typeof lastLoadedDiskModifiedMs !== 'undefined' ? lastLoadedDiskModifiedMs : Date.now()
+      });
+    }
 
     const stagedKey = getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId);
     await deleteHandleFromIDB(stagedKey);
@@ -3584,6 +3665,16 @@ async function saveWorkbookToDisk() {
   // 2. Dual-Write Mirroring to (VIEW ONLY).xlsx with Auto-Retry & Manual Retry fallback
   const mirrorOk = await attemptMirrorWrite(buffer, false);
   return mirrorOk ? true : 'mirror-locked';
+}
+
+function saveWorkbookToDisk() {
+  const run = async () => await saveWorkbookToDiskInternal();
+  if (typeof saveWorkbookMutexPromise === 'undefined') {
+    return run();
+  }
+  const nextPromise = saveWorkbookMutexPromise.then(run, run);
+  saveWorkbookMutexPromise = nextPromise.catch(() => false);
+  return nextPromise;
 }
 
 // ============================================================================

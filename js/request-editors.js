@@ -507,9 +507,12 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
     }
 
     if (isStatus) {
-      const statusOpts = (Array.isArray(col.dropdownOptions) && col.dropdownOptions.length > 0)
+      const baseStatusOpts = (Array.isArray(col.dropdownOptions) && col.dropdownOptions.length > 0)
         ? col.dropdownOptions
         : defaultStatusesList;
+      const statusOpts = typeof mergeRequiredOperationalStatuses === 'function'
+        ? mergeRequiredOperationalStatuses(baseStatusOpts)
+        : baseStatusOpts;
       const optionsHtml = statusOpts
         .map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`)
         .join('');
@@ -1694,15 +1697,20 @@ function renderTicketDetailsModal(seedItem) {
   }
 
   if (ticketDetailsMetaGrid) {
-    const isDone = isCompletedStatus(latest.status);
     if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
       const customCards = activeSchemaConfig.columns
         .filter(c => c.colIndex !== activeSchemaConfig.notesCol)
         .map(c => {
           const val = (latest.customValues && latest.customValues[`col_${c.colIndex}`]) || '';
+          const isCopyableField =
+            c.colIndex === activeSchemaConfig.ticketCol ||
+            c.colIndex === activeSchemaConfig.secondaryCol ||
+            /\b(master\s*#?|account\s*#?|member\s*#?)\b/i.test(c.header);
           const inner = c.colIndex === activeSchemaConfig.statusCol
-            ? `<span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(val || latest.status)}</span>`
-            : escapeHtml(val || '—');
+            ? `<span class="badge ${getStatusBadgeClass(val || latest.status)}">${escapeHtml(val || latest.status)}</span>`
+            : (isCopyableField && val
+                ? `<span class="cell-copy-group"><span>${escapeHtml(val)}</span>${renderInlineCopyBtnHtml(val, c.header)}</span>`
+                : escapeHtml(val || '—'));
           return `
             <div class="ticket-meta-card">
               <div class="ticket-meta-card-label">${escapeHtml(c.header)}</div>
@@ -1720,15 +1728,21 @@ function renderTicketDetailsModal(seedItem) {
       `;
     } else {
       const parentCategory = resolveActionParentCategory(latest.action);
+      const ticketCardVal = latest.ticket
+        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.ticket)}</span>${renderInlineCopyBtnHtml(latest.ticket, 'Ticket #')}</span>`
+        : '—';
+      const masterCardVal = latest.master
+        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.master)}</span>${renderInlineCopyBtnHtml(latest.master, 'Master #')}</span>`
+        : '—';
       ticketDetailsMetaGrid.innerHTML = `
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Ticket Number</div>
-          <div class="ticket-meta-card-val">${escapeHtml(latest.ticket || '—')}</div>
+          <div class="ticket-meta-card-val">${ticketCardVal}</div>
         </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Current Status (${escapeHtml(latest.sheetName)})</div>
           <div class="ticket-meta-card-val">
-            <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(latest.status)}</span>
+            <span class="badge ${getStatusBadgeClass(latest.status)}">${escapeHtml(latest.status)}</span>
           </div>
         </div>
         <div class="ticket-meta-card">
@@ -1737,7 +1751,7 @@ function renderTicketDetailsModal(seedItem) {
         </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
-          <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${escapeHtml(latest.master || '—')} / B: ${escapeHtml(latest.bidder || '—')})</div>
+          <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${masterCardVal} / B: ${escapeHtml(latest.bidder || '—')})</div>
         </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Requested Action &amp; Category</div>
@@ -1770,7 +1784,7 @@ function renderTicketDetailsModal(seedItem) {
             <span style="font-size:0.6875rem; color:var(--text-muted); font-weight:500; margin-left:6px;">(Row ${entry.rowNumber} • ${stepLabel})</span>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(entry.status)}</span>
+            <span class="badge ${getStatusBadgeClass(entry.status)}">${escapeHtml(entry.status)}</span>
             <button type="button" class="btn-edit btn-sm btn-timeline-load-dock" data-sheet="${escapeHtml(entry.sheetName)}" data-row="${entry.rowNumber}">Edit Row</button>
           </div>
         </div>
@@ -2109,12 +2123,11 @@ function renderViewOnlyTable() {
 
   filtered.forEach(item => {
     const tr = document.createElement('tr');
-    const isDone = isCompletedStatus(item.status);
     if (isCustom) {
       const cells = viewOnlyState.customColumns.map(c => {
         const val = (item.customValues && item.customValues[`col_${c.colIndex}`]) || '';
         if (c.colIndex === activeSchemaConfig.statusCol) {
-          return `<td><span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(val || item.status)}</span></td>`;
+          return `<td><span class="badge ${getStatusBadgeClass(val || item.status)}">${escapeHtml(val || item.status)}</span></td>`;
         }
         return `<td class="cell-sm" style="max-width:260px; white-space:pre-wrap;">${escapeHtml(val || '—')}</td>`;
       }).join('');
@@ -2132,7 +2145,7 @@ function renderViewOnlyTable() {
       <td>${escapeHtml(item.action || '—')}</td>
       <td class="cell-sm">Y: ${escapeHtml(item.yard || '—')}<br>L: ${escapeHtml(item.lots || '—')}</td>
       <td class="cell-sm" style="max-width:260px; white-space:pre-wrap;">${escapeHtml(item.notes || '—')}</td>
-      <td><span class="badge ${isDone ? 'badge-complete' : 'badge-pending'}">${escapeHtml(item.status)}</span></td>
+      <td><span class="badge ${getStatusBadgeClass(item.status)}">${escapeHtml(item.status)}</span></td>
     `;
     viewOnlyBody.appendChild(tr);
   });

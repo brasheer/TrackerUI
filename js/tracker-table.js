@@ -585,15 +585,16 @@ function renderClickableLotsHtml(lotsStr) {
 function renderClickableTicketTokensHtml(ticketStr, filterField = 'ticket', filterLabel = 'Ticket #') {
   const trimmed = String(ticketStr || '').trim();
   if (!trimmed || trimmed === '—') return '—';
+  const copyBtnFn = typeof renderInlineCopyBtnHtml === 'function' ? renderInlineCopyBtnHtml : () => '';
   const tokens = splitNormalizedTicketTokens(trimmed);
   if (tokens.length <= 1) {
     const activeClass = isFieldFilterActive(filterField, trimmed) ? ' active-filter-match' : '';
-    return `<span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(trimmed)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+    return `<span class="cell-copy-group"><span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(trimmed)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>${copyBtnFn(trimmed, filterLabel)}</span>`;
   }
   return tokens
     .map(tok => {
       const activeClass = isFieldFilterActive(filterField, tok) ? ' active-filter-match' : '';
-      return `<span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(tok)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(tok)}">${escapeHtml(tok)}</span>`;
+      return `<span class="cell-copy-group"><span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(tok)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(tok)}">${escapeHtml(tok)}</span>${copyBtnFn(tok, filterLabel)}</span>`;
     })
     .join(', ');
 }
@@ -884,6 +885,26 @@ function renderList() {
     return;
   }
 
+  const requestStatsByKey = new Map();
+  allRows.forEach(r => {
+    const normKey = String(r.key || '').trim().toLowerCase();
+    if (!normKey) return;
+    let stat = requestStatsByKey.get(normKey);
+    if (!stat) {
+      stat = { firstTime: 0, sheetTimeMap: new Map() };
+      requestStatsByKey.set(normKey, stat);
+    }
+    const t = parseDateTab(r.sheetName);
+    if (t > 0 && (!stat.firstTime || t < stat.firstTime)) {
+      stat.firstTime = t;
+    }
+    if (r.sheetName && !stat.sheetTimeMap.has(r.sheetName)) {
+      stat.sheetTimeMap.set(r.sheetName, t);
+    }
+  });
+
+  const copyBtnFn = typeof renderInlineCopyBtnHtml === 'function' ? renderInlineCopyBtnHtml : () => '';
+
   sorted.forEach((item, idx) => {
     const tr = document.createElement('tr');
     tr.dataset.sheet = item.sheetName;
@@ -902,7 +923,31 @@ function renderList() {
       tr.classList.add('active-editing-row');
     }
 
-    const isComplete = isCompletedStatus(item.status);
+    const normItemKey = String(item.key || '').trim().toLowerCase();
+    const itemStat = normItemKey ? requestStatsByKey.get(normItemKey) : null;
+    const itemTabTime = parseDateTab(item.sheetName);
+    const ageDays = (itemStat && itemStat.firstTime > 0 && itemTabTime >= itemStat.firstTime)
+      ? Math.round((itemTabTime - itemStat.firstTime) / (1000 * 60 * 60 * 24))
+      : 0;
+    let occurrencesUpToSheet = 1;
+    if (itemStat) {
+      let count = 0;
+      itemStat.sheetTimeMap.forEach((tVal) => {
+        if (!tVal || !itemTabTime || tVal <= itemTabTime) count++;
+      });
+      occurrencesUpToSheet = Math.max(1, count);
+    }
+    const isRowOverdue =
+      !isCompletedStatus(item.status) &&
+      (
+        (typeof isOverdueStatus === 'function' && isOverdueStatus(item.status)) ||
+        ageDays > SMART_OVERDUE_MAX_AGE_DAYS ||
+        occurrencesUpToSheet >= SMART_OVERDUE_MIN_CARRIES
+      );
+    if (isRowOverdue) {
+      tr.classList.add('overdue-outline-red');
+    }
+
     const noteText = item.notes || '—';
     const isLongNote = noteText.length > 45 || noteText.includes('\n');
     const shortGuid = item.key.length > 8 ? `${item.key.slice(0, 8)}...` : item.key;
@@ -923,11 +968,13 @@ function renderList() {
 
         if (c.colIndex === activeSchemaConfig.statusCol) {
           const stText = trimmedVal || item.status || 'Pending';
-          const stDone = isCompletedStatus(stText);
+          const stBadgeClass = typeof getStatusBadgeClass === 'function'
+            ? getStatusBadgeClass(stText)
+            : (isCompletedStatus(stText) ? 'badge-complete' : 'badge-pending');
           const stActive = isFieldFilterActive(fieldKey, stText) ? ' active-filter-match' : '';
           return `
             <td>
-              <span class="badge clickable-badge ${stDone ? 'badge-complete' : 'badge-pending'}${stActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(stText)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(stText)}">
+              <span class="badge clickable-badge ${stBadgeClass}${stActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(stText)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(stText)}">
                 ${escapeHtml(stText)}
               </span>
             </td>
@@ -953,11 +1000,14 @@ function renderList() {
           return '<td>—</td>';
         }
         const cellActive = isFieldFilterActive(fieldKey, trimmedVal) ? ' active-filter-match' : '';
+        const isCopyableCustomCol =
+          c.colIndex === activeSchemaConfig.secondaryCol ||
+          /\b(master\s*#?|account\s*#?|member\s*#?)\b/i.test(c.header);
+        const copyHtml = isCopyableCustomCol ? copyBtnFn(trimmedVal, c.header) : '';
+        const cellSpanHtml = `<span class="clickable-cell${cellActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(trimmedVal)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(trimmedVal)}">${escapeHtml(trimmedVal)}</span>`;
         return `
           <td>
-            <span class="clickable-cell${cellActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(trimmedVal)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(trimmedVal)}">
-              ${escapeHtml(trimmedVal)}
-            </span>
+            ${copyHtml ? `<span class="cell-copy-group">${cellSpanHtml}${copyHtml}</span>` : cellSpanHtml}
           </td>
         `;
       }).join('');
@@ -1005,7 +1055,7 @@ function renderList() {
       : '—';
 
     const masterHtml = item.master
-      ? `<span class="clickable-code${masterActiveClass}" data-filter-field="master" data-filter-label="Master #" data-filter-val="${escapeHtml(item.master)}" title="Click to show all requests with Master # ${escapeHtml(item.master)}">${escapeHtml(item.master)}</span>`
+      ? `<span class="cell-copy-group"><span class="clickable-code${masterActiveClass}" data-filter-field="master" data-filter-label="Master #" data-filter-val="${escapeHtml(item.master)}" title="Click to show all requests with Master # ${escapeHtml(item.master)}">${escapeHtml(item.master)}</span>${copyBtnFn(item.master, 'Master #')}</span>`
       : '—';
 
     const bidderHtml = item.bidder
@@ -1021,6 +1071,9 @@ function renderList() {
       : '—';
 
     const lotsHtml = renderClickableLotsHtml(item.lots);
+    const stdStatusBadgeClass = typeof getStatusBadgeClass === 'function'
+      ? getStatusBadgeClass(item.status)
+      : (isCompletedStatus(item.status) ? 'badge-complete' : 'badge-pending');
 
     tr.innerHTML = `
       ${rowCheckboxCell}
@@ -1049,7 +1102,7 @@ function renderList() {
         ${isLongNote ? `<span class="notes-toggle" data-target="note-${idx}">[+ Expand]</span>` : ''}
       </td>
       <td>
-        <span class="badge clickable-badge ${isComplete ? 'badge-complete' : 'badge-pending'}${statusActiveClass}" data-filter-field="status" data-filter-label="Status" data-filter-val="${escapeHtml(item.status)}" title="Click to show all requests with Status: ${escapeHtml(item.status)}">
+        <span class="badge clickable-badge ${stdStatusBadgeClass}${statusActiveClass}" data-filter-field="status" data-filter-label="Status" data-filter-val="${escapeHtml(item.status)}" title="Click to show all requests with Status: ${escapeHtml(item.status)}">
           ${escapeHtml(item.status)}
         </span>
       </td>
@@ -1454,6 +1507,16 @@ if (tableHead) {
 
 // Delegate clicks for Shadow New Request Row, Date Tab jump, Key Chip, Like-Item chips, Collapsible Notes, Details button, Edit button, and Row Selection
 listBody.addEventListener('click', (e) => {
+  const copyBtn = e.target.closest('.btn-inline-copy');
+  if (copyBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (typeof copyTextToClipboard === 'function') {
+      copyTextToClipboard(copyBtn.dataset.copyVal, copyBtn.dataset.copyLabel || 'Value', copyBtn);
+    }
+    return;
+  }
+
   const shadowRow = e.target.closest('.shadow-new-row');
   if (shadowRow) {
     if (bottomEditorDock && bottomEditorDock.style.display !== 'none') {

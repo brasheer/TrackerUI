@@ -1185,11 +1185,17 @@ function isUserActivelyInteractingWithScratch() {
 }
 
 function scheduleScratchAutoSave(delayMs = 1800) {
+  if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
+    return;
+  }
   if (scratchAutoSaveTimer) {
     clearTimeout(scratchAutoSaveTimer);
   }
   scratchAutoSaveTimer = setTimeout(() => {
     scratchAutoSaveTimer = null;
+    if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
+      return;
+    }
     if (isUserActivelyInteractingWithScratch()) {
       // Never steal focus or commit mid-typing; wait until the user finishes editing the cell
       scheduleScratchAutoSave(1500);
@@ -1204,6 +1210,9 @@ async function flushPendingScratchEditsToDisk({
   silentToast = false,
   commitInline = true
 } = {}) {
+  if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab && silentToast) {
+    return false;
+  }
   if (commitInline) {
     if (scratchAutoSaveTimer) {
       clearTimeout(scratchAutoSaveTimer);

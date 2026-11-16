@@ -178,7 +178,10 @@ const DEFAULT_ACTIONS = [
 const DEFAULT_STATUSES = [
   'Pending',
   'In Progress',
+  'Waiting',
   'Waiting on Buyer',
+  'On Hold',
+  'Overdue',
   'Escalated',
   'Complete'
 ];
@@ -187,11 +190,14 @@ const KNOWN_STATUS_VALUES = new Set([
   'pending',
   'in progress',
   'waiting on buyer',
+  'awaiting buyer',
   'escalated',
   'complete',
   'completed',
   'new',
   'waiting',
+  'on hold',
+  'hold',
   'overdue',
   'closed',
   'resolved',
@@ -209,6 +215,23 @@ const COMPLETED_STATUS_SET = new Set([
   'cancelled',
   'canceled'
 ]);
+
+const ROLLOVER_ACTIVE_STATUS_WHITELIST = new Set([
+  'pending',
+  'in progress',
+  'waiting',
+  'waiting on buyer',
+  'on hold',
+  'hold',
+  'overdue',
+  'escalated',
+  'new',
+  'open',
+  'reopened'
+]);
+
+const SMART_OVERDUE_MAX_AGE_DAYS = 5;
+const SMART_OVERDUE_MIN_CARRIES = 7;
 
 const STANDARD_HEADERS = [
   'Subject',
@@ -256,15 +279,131 @@ function isCustomScratchSheetName(sheetName, wsState = 'visible') {
   return true;
 }
 
+function isWaitingOrHoldStatus(status) {
+  const norm = String(status || '').trim().toLowerCase();
+  if (!norm) return false;
+  return (
+    norm === 'waiting' ||
+    norm === 'waiting on buyer' ||
+    norm === 'awaiting buyer' ||
+    norm === 'on hold' ||
+    norm === 'hold' ||
+    /^(waiting|on\s*hold|awaiting)\b/i.test(norm)
+  );
+}
+
+function isOverdueStatus(status) {
+  const norm = String(status || '').trim().toLowerCase();
+  if (!norm) return false;
+  return norm === 'overdue' || /^overdue\b/i.test(norm);
+}
+
 function isCompletedStatus(status) {
   const norm = String(status || '').trim().toLowerCase();
   if (!norm) return false;
+  if (
+    ROLLOVER_ACTIVE_STATUS_WHITELIST.has(norm) ||
+    isWaitingOrHoldStatus(norm) ||
+    isOverdueStatus(norm)
+  ) {
+    return false;
+  }
   if (COMPLETED_STATUS_SET.has(norm)) return true;
   return (
     norm.startsWith('complete') ||
     norm.startsWith('closed') ||
     norm.startsWith('resolved')
   );
+}
+
+function isRolloverActiveStatus(status) {
+  const norm = String(status || '').trim().toLowerCase();
+  if (!norm) return true;
+  if (
+    ROLLOVER_ACTIVE_STATUS_WHITELIST.has(norm) ||
+    isWaitingOrHoldStatus(norm) ||
+    isOverdueStatus(norm)
+  ) {
+    return true;
+  }
+  return !isCompletedStatus(norm);
+}
+
+function getStatusBadgeClass(status) {
+  if (isCompletedStatus(status)) return 'badge-complete';
+  if (isOverdueStatus(status)) return 'badge-overdue';
+  const norm = String(status || '').trim().toLowerCase();
+  if (/escalat/i.test(norm)) return 'badge-escalated';
+  if (isWaitingOrHoldStatus(norm)) return 'badge-waiting';
+  if (/^(in\s*progress|new)$/i.test(norm)) return 'badge-progress';
+  return 'badge-pending';
+}
+
+function evaluateRequestOverdueMetrics(entries, referenceTabOrTime = null) {
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
+  let firstTime = 0;
+  let firstSheet = '';
+  let latestTime = 0;
+  const distinctSheets = new Set();
+
+  list.forEach(entry => {
+    if (!entry || !entry.sheetName) return;
+    distinctSheets.add(entry.sheetName);
+    const t = parseDateTab(entry.sheetName);
+    if (t > 0) {
+      if (!firstTime || t < firstTime) {
+        firstTime = t;
+        firstSheet = entry.sheetName;
+      }
+      if (t > latestTime) {
+        latestTime = t;
+      }
+    }
+  });
+
+  let refTime = 0;
+  if (typeof referenceTabOrTime === 'number' && Number.isFinite(referenceTabOrTime)) {
+    refTime = referenceTabOrTime;
+  } else if (typeof referenceTabOrTime === 'string' && DATE_TAB_REGEX.test(referenceTabOrTime.trim())) {
+    refTime = parseDateTab(referenceTabOrTime.trim());
+  }
+  if (!refTime) {
+    refTime = latestTime;
+  }
+
+  const ageDays = (firstTime > 0 && refTime > 0 && refTime >= firstTime)
+    ? Math.round((refTime - firstTime) / (1000 * 60 * 60 * 24))
+    : 0;
+  const carryCount = Math.max(list.length, distinctSheets.size);
+
+  return {
+    ageDays,
+    carryCount,
+    firstSheet,
+    qualifiesForAutoOverdue: ageDays > SMART_OVERDUE_MAX_AGE_DAYS || carryCount >= SMART_OVERDUE_MIN_CARRIES
+  };
+}
+
+function mergeRequiredOperationalStatuses(baseStatuses) {
+  const list = Array.isArray(baseStatuses)
+    ? baseStatuses.map(s => String(s || '').trim()).filter(Boolean)
+    : [];
+  const required = ['Waiting', 'On Hold', 'Overdue'];
+  const result = [...list];
+
+  required.forEach(reqStatus => {
+    const exists = result.some(s => s.toLowerCase() === reqStatus.toLowerCase());
+    if (!exists) {
+      const completeIdx = result.findIndex(s => isCompletedStatus(s));
+      if (completeIdx !== -1) {
+        result.splice(completeIdx, 0, reqStatus);
+      } else {
+        result.push(reqStatus);
+      }
+    }
+  });
+
+  return result;
 }
 
 function getDefaultStatus() {
@@ -361,6 +500,9 @@ const appVersionTag = document.getElementById('appVersionTag');
 const pwaUpdateBanner = document.getElementById('pwaUpdateBanner');
 const btnPwaReloadNow = document.getElementById('btnPwaReloadNow');
 const btnPwaDismissUpdate = document.getElementById('btnPwaDismissUpdate');
+const multiTabLockBanner = document.getElementById('multiTabLockBanner');
+const multiTabLockDesc = document.getElementById('multiTabLockDesc');
+const btnTakeOverSession = document.getElementById('btnTakeOverSession');
 
 // --- APPEARANCE ENGINE: THEME (LIGHT / DARK / AUTO) & APP-WIDE FONT SCALING ---
 const systemLightMediaQuery = typeof window.matchMedia === 'function'
@@ -1377,8 +1519,425 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// --- 9. APP VERSION, DESKTOP CHROME ENVIRONMENT CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.18.0';
+function renderInlineCopyBtnHtml(rawValue, label = 'Value') {
+  const trimmed = String(rawValue || '').trim();
+  if (!trimmed || trimmed === '—') return '';
+  return `<button type="button" class="btn-inline-copy" data-copy-val="${escapeHtml(trimmed)}" data-copy-label="${escapeHtml(label)}" title="Copy ${escapeHtml(label)} (${escapeHtml(trimmed)}) to clipboard" aria-label="Copy ${escapeHtml(label)} ${escapeHtml(trimmed)}"><svg class="copy-icon-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8.5" rx="1.3"></rect><path d="M3.5 10.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h5.5a1 1 0 0 1 1 1v.5"></path></svg></button>`;
+}
+
+async function copyTextToClipboard(rawText, label = 'Value', btnEl = null) {
+  const text = String(rawText || '').trim();
+  if (!text) return false;
+
+  let copied = false;
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch (_) {
+      copied = false;
+    }
+  }
+
+  if (!copied && typeof document !== 'undefined') {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-9999px';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      copied = document.execCommand('copy');
+      ta.remove();
+    } catch (_) {
+      copied = false;
+    }
+  }
+
+  if (!copied) {
+    showToast(`Could not copy ${label} to clipboard.`, 'warning');
+    return false;
+  }
+
+  if (btnEl) {
+    btnEl.classList.add('copied');
+    btnEl.dataset.copied = 'true';
+    if (btnEl._copyTimer) clearTimeout(btnEl._copyTimer);
+    btnEl._copyTimer = setTimeout(() => {
+      btnEl.classList.remove('copied');
+      delete btnEl.dataset.copied;
+    }, 1200);
+  }
+
+  showToast(`📋 Copied ${label}: ${text}`, 'info');
+  return true;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const copyBtn = e.target && e.target.closest ? e.target.closest('.btn-inline-copy') : null;
+    if (!copyBtn) return;
+    if (typeof listBody !== 'undefined' && listBody && listBody.contains(copyBtn)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    copyTextToClipboard(copyBtn.dataset.copyVal, copyBtn.dataset.copyLabel || 'Value', copyBtn);
+  });
+}
+
+// --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
+const APP_VERSION = 'v1.18.2';
+
+// Cross-Tab Session Lock & Concurrent Save Protection
+const TAB_INSTANCE_ID = `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+const INSTANCE_WEB_LOCK_NAME = 'trackerui_active_session_lock_v1';
+const INSTANCE_CHANNEL_NAME = 'trackerui_instance_sync_v1';
+const INSTANCE_STORAGE_HEARTBEAT_KEY = 'trackerui_instance_heartbeat_v1';
+const INSTANCE_STORAGE_TAKEOVER_KEY = 'trackerui_instance_takeover_v1';
+const INSTANCE_HEARTBEAT_INTERVAL_MS = 4000;
+const INSTANCE_HEARTBEAT_STALE_MS = 10000;
+
+let isPrimaryInstanceLockHolder = false;
+let isLockedByOtherTab = false;
+let activeWebLockReleaser = null;
+let instanceLockWaitingQueued = false;
+let instanceHeartbeatTimer = null;
+let instanceBroadcastChannel = null;
+let pendingTakeoverTargetId = null;
+let pendingTakeoverAt = 0;
+let lastLoadedDiskModifiedMs = 0;
+let saveWorkbookMutexPromise = Promise.resolve();
+
+function broadcastInstanceMessage(payload) {
+  const msg = { ...payload, senderTabId: TAB_INSTANCE_ID, sentAt: Date.now() };
+  if (instanceBroadcastChannel) {
+    try {
+      instanceBroadcastChannel.postMessage(msg);
+    } catch (_) { /* ignore */ }
+  }
+  return msg;
+}
+
+function writeInstanceHeartbeat() {
+  if (!isPrimaryInstanceLockHolder) return;
+  try {
+    localStorage.setItem(
+      INSTANCE_STORAGE_HEARTBEAT_KEY,
+      JSON.stringify({ tabId: TAB_INSTANCE_ID, ts: Date.now() })
+    );
+  } catch (_) { /* ignore */ }
+}
+
+function clearOwnInstanceHeartbeat() {
+  try {
+    const raw = localStorage.getItem(INSTANCE_STORAGE_HEARTBEAT_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.tabId === TAB_INSTANCE_ID) {
+      localStorage.removeItem(INSTANCE_STORAGE_HEARTBEAT_KEY);
+    }
+  } catch (_) { /* ignore */ }
+}
+
+function startInstanceHeartbeat() {
+  stopInstanceHeartbeat();
+  writeInstanceHeartbeat();
+  instanceHeartbeatTimer = setInterval(() => {
+    if (isPrimaryInstanceLockHolder) {
+      writeInstanceHeartbeat();
+    } else {
+      stopInstanceHeartbeat();
+    }
+  }, INSTANCE_HEARTBEAT_INTERVAL_MS);
+}
+
+function stopInstanceHeartbeat() {
+  if (instanceHeartbeatTimer) {
+    clearInterval(instanceHeartbeatTimer);
+    instanceHeartbeatTimer = null;
+  }
+}
+
+function releaseActiveWebLock() {
+  stopInstanceHeartbeat();
+  clearOwnInstanceHeartbeat();
+  if (typeof activeWebLockReleaser === 'function') {
+    const rel = activeWebLockReleaser;
+    activeWebLockReleaser = null;
+    try {
+      rel();
+    } catch (_) { /* ignore */ }
+  }
+}
+
+function enterMultiTabStandbyLockMode(reasonText = '') {
+  isPrimaryInstanceLockHolder = false;
+  isLockedByOtherTab = true;
+  stopInstanceHeartbeat();
+
+  if (typeof scratchAutoSaveTimer !== 'undefined' && scratchAutoSaveTimer) {
+    clearTimeout(scratchAutoSaveTimer);
+    scratchAutoSaveTimer = null;
+  }
+  if (typeof mirrorCountdownInterval !== 'undefined' && mirrorCountdownInterval) {
+    clearInterval(mirrorCountdownInterval);
+    mirrorCountdownInterval = null;
+  }
+
+  if (multiTabLockBanner) {
+    multiTabLockBanner.style.display = 'flex';
+  }
+  if (multiTabLockDesc) {
+    multiTabLockDesc.textContent =
+      reasonText ||
+      'TrackerUI is already open in another browser tab or window. Background saves and disk writes are paused here to prevent Excel file race conditions.';
+  }
+  if (statusPill) {
+    setStatus('🔒 Standby (Open in Another Tab)', 'locked');
+  }
+}
+
+async function exitMultiTabStandbyLockMode({ reloadWorkbook = false } = {}) {
+  const wasLocked = isLockedByOtherTab;
+  isLockedByOtherTab = false;
+  isPrimaryInstanceLockHolder = true;
+  startInstanceHeartbeat();
+
+  if (multiTabLockBanner) {
+    multiTabLockBanner.style.display = 'none';
+  }
+
+  if (
+    reloadWorkbook &&
+    wasLocked &&
+    typeof loadWorkbookFromDisk === 'function' &&
+    typeof workingFileHandle !== 'undefined' &&
+    workingFileHandle
+  ) {
+    try {
+      const targetTab = (typeof sheetSelect !== 'undefined' && sheetSelect) ? sheetSelect.value : null;
+      await loadWorkbookFromDisk(targetTab, {
+        skipFlushPendingScratch: true,
+        skipStagedRecoveryCheck: true
+      });
+      showToast('⚡ Active session acquired — synced latest workbook from disk.', 'success');
+    } catch (err) {
+      console.warn('Could not reload workbook after lock acquisition:', err);
+      setStatus(`Synced: ${workingFileHandle.name}`, 'ready');
+    }
+  } else if (wasLocked) {
+    if (typeof workingFileHandle !== 'undefined' && workingFileHandle) {
+      setStatus(`Synced: ${workingFileHandle.name}`, 'ready');
+    } else if (typeof autoReconnectGesturePending !== 'undefined' && autoReconnectGesturePending && typeof cachedDirHandle !== 'undefined' && cachedDirHandle) {
+      setStatus('Click anywhere to auto-reconnect folder', 'warning');
+    } else if (typeof parentDirHandle !== 'undefined' && !parentDirHandle) {
+      setStatus('No Folder Linked', '');
+    }
+  }
+}
+
+function queueWebLockWaiter() {
+  if (instanceLockWaitingQueued) return;
+  if (typeof navigator === 'undefined' || !navigator.locks || typeof navigator.locks.request !== 'function') {
+    return;
+  }
+  instanceLockWaitingQueued = true;
+
+  navigator.locks.request(INSTANCE_WEB_LOCK_NAME, async () => {
+    instanceLockWaitingQueued = false;
+
+    if (
+      pendingTakeoverTargetId &&
+      pendingTakeoverTargetId !== TAB_INSTANCE_ID &&
+      Date.now() - pendingTakeoverAt < 3000
+    ) {
+      // Another tab explicitly initiated takeover; yield immediately and re-queue
+      setTimeout(() => queueWebLockWaiter(), 120);
+      return;
+    }
+
+    await new Promise((resolve) => {
+      activeWebLockReleaser = resolve;
+      exitMultiTabStandbyLockMode({ reloadWorkbook: true });
+      broadcastInstanceMessage({ type: 'LOCK_CLAIMED' });
+    });
+  }).catch((err) => {
+    instanceLockWaitingQueued = false;
+    console.warn('Web Lock waiter error:', err);
+  });
+}
+
+function tryAcquireWebLockImmediately() {
+  if (typeof navigator === 'undefined' || !navigator.locks || typeof navigator.locks.request !== 'function') {
+    return false;
+  }
+  navigator.locks.request(INSTANCE_WEB_LOCK_NAME, { ifAvailable: true }, async (lock) => {
+    if (!lock) {
+      enterMultiTabStandbyLockMode(
+        'TrackerUI is already active in another tab or window. Background saves are paused here to prevent Excel race conditions.'
+      );
+      queueWebLockWaiter();
+      return;
+    }
+
+    await new Promise((resolve) => {
+      activeWebLockReleaser = resolve;
+      exitMultiTabStandbyLockMode({ reloadWorkbook: false });
+      broadcastInstanceMessage({ type: 'LOCK_CLAIMED' });
+    });
+  }).catch((err) => {
+    console.warn('Initial Web Lock request error:', err);
+  });
+  return true;
+}
+
+async function takeOverActiveSessionInThisTab() {
+  if (btnTakeOverSession) btnTakeOverSession.disabled = true;
+  pendingTakeoverTargetId = TAB_INSTANCE_ID;
+  pendingTakeoverAt = Date.now();
+
+  try {
+    broadcastInstanceMessage({
+      type: 'FORCE_TAKEOVER',
+      targetTabId: TAB_INSTANCE_ID
+    });
+    try {
+      localStorage.setItem(
+        INSTANCE_STORAGE_TAKEOVER_KEY,
+        JSON.stringify({ targetTabId: TAB_INSTANCE_ID, ts: Date.now() })
+      );
+    } catch (_) { /* ignore */ }
+
+    const hasWebLocks = typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function';
+    if (hasWebLocks) {
+      queueWebLockWaiter();
+      // Wait up to 1.4s for the previous holder to release its Web Lock cleanly
+      const start = Date.now();
+      while (isLockedByOtherTab && Date.now() - start < 1400) {
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      if (isLockedByOtherTab) {
+        // Fallback promotion if previous tab was unresponsive or closed without releasing
+        await exitMultiTabStandbyLockMode({ reloadWorkbook: true });
+      }
+    } else {
+      await exitMultiTabStandbyLockMode({ reloadWorkbook: true });
+    }
+  } finally {
+    if (btnTakeOverSession) btnTakeOverSession.disabled = false;
+  }
+}
+
+async function ensureActiveTabLockBeforeWrite(actionLabel = 'save changes') {
+  if (!isLockedByOtherTab) return true;
+
+  const confirmTakeOver = await showModalConfirm({
+    title: '🔒 TrackerUI Active in Another Tab',
+    badge: 'Standby Mode',
+    message:
+      `Another TrackerUI tab or window currently holds the active workspace lock.\n\n` +
+      `To prevent race conditions and accidental overwrites before you ${actionLabel}, take over the active session here and reload the latest file from disk?`,
+    confirmText: '⚡ Take Over & Reload',
+    cancelText: 'Keep in Standby',
+    variant: 'danger'
+  });
+
+  if (confirmTakeOver) {
+    await takeOverActiveSessionInThisTab();
+  }
+  // Always return false so stale standby data in memory is never written over disk without fresh reload
+  return false;
+}
+
+function handleRemoteInstanceMessage(msg) {
+  if (!msg || !msg.type || msg.senderTabId === TAB_INSTANCE_ID) return;
+
+  if (msg.type === 'FORCE_TAKEOVER') {
+    pendingTakeoverTargetId = msg.targetTabId || null;
+    pendingTakeoverAt = Date.now();
+    if (isPrimaryInstanceLockHolder || activeWebLockReleaser) {
+      releaseActiveWebLock();
+      enterMultiTabStandbyLockMode('Control was transferred to another TrackerUI tab. Click "Take Over Active Session Here" to resume editing in this tab.');
+      queueWebLockWaiter();
+      showToast('🔒 Active session moved to another TrackerUI tab.', 'warning');
+    }
+  } else if (msg.type === 'WORKBOOK_SAVED' && isLockedByOtherTab) {
+    if (multiTabLockDesc && msg.fileName) {
+      const savedTime = msg.lastModified ? new Date(msg.lastModified).toLocaleTimeString() : 'just now';
+      multiTabLockDesc.textContent = `"${msg.fileName}" was updated in the active tab at ${savedTime}. Take over here to reload fresh data before editing.`;
+    }
+  }
+}
+
+function initMultiTabInstanceLock() {
+  if (typeof BroadcastChannel === 'function') {
+    try {
+      instanceBroadcastChannel = new BroadcastChannel(INSTANCE_CHANNEL_NAME);
+      instanceBroadcastChannel.onmessage = (evt) => handleRemoteInstanceMessage(evt.data);
+    } catch (_) {
+      instanceBroadcastChannel = null;
+    }
+  }
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('storage', (evt) => {
+      if (!evt || !evt.newValue) return;
+      if (evt.key === INSTANCE_STORAGE_TAKEOVER_KEY) {
+        try {
+          const data = JSON.parse(evt.newValue);
+          if (data && data.targetTabId && data.targetTabId !== TAB_INSTANCE_ID) {
+            handleRemoteInstanceMessage({
+              type: 'FORCE_TAKEOVER',
+              senderTabId: data.targetTabId,
+              targetTabId: data.targetTabId
+            });
+          }
+        } catch (_) { /* ignore */ }
+      }
+    });
+
+    const cleanupOnClose = () => {
+      releaseActiveWebLock();
+      if (instanceBroadcastChannel) {
+        try {
+          instanceBroadcastChannel.close();
+        } catch (_) { /* ignore */ }
+      }
+    };
+    window.addEventListener('beforeunload', cleanupOnClose);
+    window.addEventListener('pagehide', cleanupOnClose);
+  }
+
+  const usedWebLocks = tryAcquireWebLockImmediately();
+  if (!usedWebLocks) {
+    // Fallback for environments without navigator.locks (e.g., file:// protocol)
+    let hasFreshOtherTab = false;
+    try {
+      const rawHb = localStorage.getItem(INSTANCE_STORAGE_HEARTBEAT_KEY);
+      if (rawHb) {
+        const parsed = JSON.parse(rawHb);
+        if (parsed && parsed.tabId !== TAB_INSTANCE_ID && Date.now() - Number(parsed.ts || 0) < INSTANCE_HEARTBEAT_STALE_MS) {
+          hasFreshOtherTab = true;
+        }
+      }
+    } catch (_) { /* ignore */ }
+
+    if (hasFreshOtherTab) {
+      enterMultiTabStandbyLockMode();
+    } else {
+      exitMultiTabStandbyLockMode({ reloadWorkbook: false });
+    }
+  }
+}
+
+if (btnTakeOverSession) {
+  btnTakeOverSession.addEventListener('click', () => {
+    takeOverActiveSessionInThisTab();
+  });
+}
+
+initMultiTabInstanceLock();
 
 function evaluateDesktopChromeCompatibility(navObj = (typeof navigator !== 'undefined' ? navigator : null)) {
   if (!navObj) {

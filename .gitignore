@@ -110,9 +110,11 @@ errorlogs
 *.orig
 
 # ==========================================
-# Local Templates & Working Data
+# Local Templates, Testing & Working Data
 # ==========================================
 tracker templates/
+assets/Testing/
+*.xlsx
 newfeatures.txt
 
 
