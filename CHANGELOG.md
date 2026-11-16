@@ -9,12 +9,16 @@ This document records the version release history, major feature rollouts, bug f
 ## Version Release History
 
 ### `v1.18.3` (Current — `meerkat`)
+- **📋 Integrated Split-Pill Copy-to-Clipboard & Per-Column Mapper Toggles (`index.html`, `css/styles.css`, `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`)**:
+  - Redesigned `.cell-copy-group` + `.btn-inline-copy` into an integrated **split-pill** control sharing a unified hover outline: clicking the left segment filters Like-Items, while clicking the integrated right copy segment copies to clipboard without triggering row editing or filtering.
+  - Enabled split-pill copy buttons across **Email Subject, Ticket #, Master #, Bidder #, Yard #, and Lot #** (each lot token individually filterable and copyable) on the Standard Daily Tracker and `#ticketDetailsModal`—excluding Broker Name, Requested Action, Action Notes, Status, and Tracking ID/UUID.
+  - Added per-column **`📋 Copy`** checkboxes inside **Configure Column Mapping (`#schemaMapperModal`)** (`inferDefaultCopyableForCustomColumn`, persisted per workbook/profile via `copyCols`) so users can customize which columns display inline copy pills on Custom Department Trackers.
 - **🔀 Unified Feature Merge (`main` + `meerkat`) (`index.html`, `css/styles.css`, `js/*`)**:
-  - Merged all `main` (`v1.18.1`–`v1.18.2`) enhancements—**Manual Row Copy & Paste**, **Optional Primary Field on Custom Schemas**, **Chronological Left-to-Right Daily Tab Ordering**, **Mid-Month Status vs. Retroactive UUIDv4 Auto-Healing**, and **Clean Validation List Dropdown Sync**—with all `meerkat` enhancements (**Smart Overdue Mutation & `.overdue-outline-red` Alerting**, **`Waiting` & `On Hold` Rollover Whitelist**, **Inline Ticket/Master Copy Buttons**, **Multi-Tab Instance Locking & Save Mutex**, and **Template Sort Deprioritization**).
+  - Merged all `main` (`v1.18.1`–`v1.18.2`) enhancements—**Manual Row Copy & Paste**, **Optional Primary Field on Custom Schemas**, **Chronological Left-to-Right Daily Tab Ordering**, **Mid-Month Status vs. Retroactive UUIDv4 Auto-Healing**, and **Clean Validation List Dropdown Sync**—with all `meerkat` enhancements (**Smart Overdue Mutation & `.overdue-outline-red` Alerting**, **`Waiting` & `On Hold` Rollover Whitelist**, **Inline Copy Buttons**, **Multi-Tab Instance Locking & Save Mutex**, and **Template Sort Deprioritization**).
 - **🔢 Left-Hand Row Numbers (`index.html`, `js/tracker-table.js`, `js/workbook-io.js`, `css/styles.css`)**:
   - Added read-only Excel-style left-hand line/row numbers (`#` header `.tracker-row-num-th` and `<th scope="row" class="tracker-row-num-cell">`) showing sequential row index `1..N` (with a tooltip displaying the underlying Excel sheet and row number) across both Standard and Custom Department tracker tables, preserving checkbox batch selection, Like-Item filtering, and click-to-edit row behavior.
 - **PWA Cache Bump**:
-  - Incremented `CACHE_NAME` to `'tracker-ui-v30'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+  - Incremented `CACHE_NAME` to `'tracker-ui-v31'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
 
 ### `v1.18.2`
 - **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:

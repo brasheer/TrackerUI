@@ -656,6 +656,7 @@ function renderClickableLotsHtml(lotsStr) {
   const trimmed = String(lotsStr || '').trim();
   if (!trimmed || trimmed === '—') return '—';
 
+  const copyBtnFn = typeof renderInlineCopyBtnHtml === 'function' ? renderInlineCopyBtnHtml : () => '';
   const parts = trimmed.split(/([,;/|\s]+)/);
   return parts
     .map(part => {
@@ -663,24 +664,28 @@ function renderClickableLotsHtml(lotsStr) {
         return escapeHtml(part);
       }
       const activeClass = isFieldFilterActive('lot', part) ? ' active-filter-match' : '';
-      return `<span class="clickable-code${activeClass}" data-filter-field="lot" data-filter-label="Lot #" data-filter-val="${escapeHtml(part)}" title="Click to show all requests with Lot # ${escapeHtml(part)}">${escapeHtml(part)}</span>`;
+      return `<span class="cell-copy-group"><span class="clickable-code${activeClass}" data-filter-field="lot" data-filter-label="Lot #" data-filter-val="${escapeHtml(part)}" title="Click to show all requests with Lot # ${escapeHtml(part)}">${escapeHtml(part)}</span>${copyBtnFn(part, 'Lot #')}</span>`;
     })
     .join('');
 }
 
-function renderClickableTicketTokensHtml(ticketStr, filterField = 'ticket', filterLabel = 'Ticket #') {
+function renderClickableTicketTokensHtml(ticketStr, filterField = 'ticket', filterLabel = 'Ticket #', includeCopy = true) {
   const trimmed = String(ticketStr || '').trim();
   if (!trimmed || trimmed === '—') return '—';
-  const copyBtnFn = typeof renderInlineCopyBtnHtml === 'function' ? renderInlineCopyBtnHtml : () => '';
+  const copyBtnFn = (includeCopy && typeof renderInlineCopyBtnHtml === 'function') ? renderInlineCopyBtnHtml : () => '';
   const tokens = splitNormalizedTicketTokens(trimmed);
   if (tokens.length <= 1) {
     const activeClass = isFieldFilterActive(filterField, trimmed) ? ' active-filter-match' : '';
-    return `<span class="cell-copy-group"><span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(trimmed)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>${copyBtnFn(trimmed, filterLabel)}</span>`;
+    const copyHtml = copyBtnFn(trimmed, filterLabel);
+    const chipHtml = `<span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(trimmed)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(trimmed)}">${escapeHtml(trimmed)}</span>`;
+    return copyHtml ? `<span class="cell-copy-group">${chipHtml}${copyHtml}</span>` : chipHtml;
   }
   return tokens
     .map(tok => {
       const activeClass = isFieldFilterActive(filterField, tok) ? ' active-filter-match' : '';
-      return `<span class="cell-copy-group"><span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(tok)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(tok)}">${escapeHtml(tok)}</span>${copyBtnFn(tok, filterLabel)}</span>`;
+      const copyHtml = copyBtnFn(tok, filterLabel);
+      const chipHtml = `<span class="clickable-code${activeClass}" data-filter-field="${escapeHtml(filterField)}" data-filter-label="${escapeHtml(filterLabel)}" data-filter-val="${escapeHtml(tok)}" title="Click to show all requests with ${escapeHtml(filterLabel)}: ${escapeHtml(tok)}">${escapeHtml(tok)}</span>`;
+      return copyHtml ? `<span class="cell-copy-group">${chipHtml}${copyHtml}</span>` : chipHtml;
     })
     .join(', ');
 }
@@ -1079,22 +1084,27 @@ function renderList() {
           `;
         }
 
+        const isCopyableCustomCol = Array.isArray(activeSchemaConfig.copyCols)
+          ? activeSchemaConfig.copyCols.includes(c.colIndex)
+          : (
+              c.colIndex === activeSchemaConfig.ticketCol ||
+              c.colIndex === activeSchemaConfig.secondaryCol ||
+              /\b(subject|ticket|master\s*#?|account\s*#?|member\s*#?|bidder\s*#?|yard\s*#?|lot\s*#?)\b/i.test(c.header)
+            );
+
         if (c.colIndex === activeSchemaConfig.ticketCol) {
-          return `<td>${renderClickableTicketTokensHtml(trimmedVal, fieldKey, c.header)}</td>`;
+          return `<td>${renderClickableTicketTokensHtml(trimmedVal, fieldKey, c.header, isCopyableCustomCol)}</td>`;
         }
 
         if (!trimmedVal) {
           return '<td>—</td>';
         }
         const cellActive = isFieldFilterActive(fieldKey, trimmedVal) ? ' active-filter-match' : '';
-        const isCopyableCustomCol =
-          c.colIndex === activeSchemaConfig.secondaryCol ||
-          /\b(master\s*#?|account\s*#?|member\s*#?)\b/i.test(c.header);
         const copyHtml = isCopyableCustomCol ? copyBtnFn(trimmedVal, c.header) : '';
         const cellSpanHtml = `<span class="clickable-cell${cellActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(trimmedVal)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(trimmedVal)}">${escapeHtml(trimmedVal)}</span>`;
         return `
           <td>
-            ${copyHtml ? `<span class="cell-copy-group">${cellSpanHtml}${copyHtml}</span>` : cellSpanHtml}
+            ${copyHtml ? `<span class="cell-copy-group cell-copy-text">${cellSpanHtml}${copyHtml}</span>` : cellSpanHtml}
           </td>
         `;
       }).join('');
@@ -1133,10 +1143,10 @@ function renderList() {
     const statusActiveClass = isFieldFilterActive('status', item.status) ? ' active-filter-match' : '';
 
     const subjectHtml = item.subject
-      ? `<span class="clickable-cell${subjectActiveClass}" data-filter-field="subject" data-filter-label="Subject" data-filter-val="${escapeHtml(item.subject)}" title="Click to show all requests with Subject: ${escapeHtml(item.subject)}">${escapeHtml(item.subject)}</span>`
+      ? `<span class="cell-copy-group cell-copy-text"><span class="clickable-cell${subjectActiveClass}" data-filter-field="subject" data-filter-label="Subject" data-filter-val="${escapeHtml(item.subject)}" title="Click to show all requests with Subject: ${escapeHtml(item.subject)}">${escapeHtml(item.subject)}</span>${copyBtnFn(item.subject, 'Email Subject')}</span>`
       : '—';
 
-    const ticketHtml = renderClickableTicketTokensHtml(item.ticket, 'ticket', 'Ticket #');
+    const ticketHtml = renderClickableTicketTokensHtml(item.ticket, 'ticket', 'Ticket #', true);
 
     const brokerHtml = item.broker
       ? `<span class="clickable-cell${brokerActiveClass}" data-filter-field="broker" data-filter-label="Broker" data-filter-val="${escapeHtml(item.broker)}" title="Click to show all requests for Broker: ${escapeHtml(item.broker)}">${escapeHtml(item.broker)}</span>`
@@ -1147,7 +1157,7 @@ function renderList() {
       : '—';
 
     const bidderHtml = item.bidder
-      ? `<span class="clickable-code${bidderActiveClass}" data-filter-field="bidder" data-filter-label="Bidder #" data-filter-val="${escapeHtml(item.bidder)}" title="Click to show all requests with Bidder # ${escapeHtml(item.bidder)}">${escapeHtml(item.bidder)}</span>`
+      ? `<span class="cell-copy-group"><span class="clickable-code${bidderActiveClass}" data-filter-field="bidder" data-filter-label="Bidder #" data-filter-val="${escapeHtml(item.bidder)}" title="Click to show all requests with Bidder # ${escapeHtml(item.bidder)}">${escapeHtml(item.bidder)}</span>${copyBtnFn(item.bidder, 'Bidder #')}</span>`
       : '—';
 
     const actionHtml = item.action
@@ -1155,7 +1165,7 @@ function renderList() {
       : '—';
 
     const yardHtml = item.yard
-      ? `<span class="clickable-code${yardActiveClass}" data-filter-field="yard" data-filter-label="Yard #" data-filter-val="${escapeHtml(item.yard)}" title="Click to show all requests for Yard # ${escapeHtml(item.yard)}">${escapeHtml(item.yard)}</span>`
+      ? `<span class="cell-copy-group"><span class="clickable-code${yardActiveClass}" data-filter-field="yard" data-filter-label="Yard #" data-filter-val="${escapeHtml(item.yard)}" title="Click to show all requests for Yard # ${escapeHtml(item.yard)}">${escapeHtml(item.yard)}</span>${copyBtnFn(item.yard, 'Yard #')}</span>`
       : '—';
 
     const lotsHtml = renderClickableLotsHtml(item.lots);

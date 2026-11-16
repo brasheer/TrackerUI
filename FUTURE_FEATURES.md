@@ -73,9 +73,9 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-### 📋 Inline Copy Buttons (`v1.18.1` on `meerkat`)
-- **Status**: ✅ Implemented in `v1.18.1`
-- **Delivered**: Injected isolated inline SVG copy icon buttons (`.btn-inline-copy` via `renderInlineCopyBtnHtml` & `copyTextToClipboard`) alongside **Ticket #** and **Master #** cells in `#listBody`, custom schema equivalent cells, and `#ticketDetailsModal`, using `e.stopPropagation()` so 1-click clipboard copying never triggers Like-Item filtering or row editing.
+### 📋 Inline Copy Buttons (`v1.18.1` → Enhanced Split-Pill in `v1.18.3`)
+- **Status**: ✅ Implemented in `v1.18.1` / Upgraded in `v1.18.3`
+- **Delivered**: Injected isolated inline SVG copy icon buttons (`.btn-inline-copy` via `renderInlineCopyBtnHtml` & `copyTextToClipboard`) styled as an **integrated split-pill** (`.cell-copy-group`: clicking the left value segment filters; clicking the integrated right copy segment copies to clipboard, sharing one unified hover outline) across **Email Subject, Ticket #, Master #, Bidder #, Yard #, and Lot #** on the Standard Daily Tracker (excluding Broker Name, Requested Action, Action Notes, Status, and Tracking ID) and `#ticketDetailsModal`, plus per-column **`📋 Copy`** checkboxes inside **Configure Column Mapping (`#schemaMapperModal`)** for Custom Department Trackers.
 
 ---
 

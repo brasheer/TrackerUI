@@ -2002,6 +2002,28 @@ function findPrimarySchemaHeaderWorksheet(wb) {
   return firstCustomWs;
 }
 
+function inferDefaultCopyableForCustomColumn(col, roles = {}) {
+  if (!col) return false;
+  const idx = col.colIndex;
+  const header = String(col.header || '').trim();
+  const {
+    statusCol = null,
+    notesCol = null,
+    trackingCol = null,
+    ticketCol = null,
+    secondaryCol = null,
+    primaryCol = null
+  } = roles;
+  if (idx === statusCol || idx === notesCol || idx === trackingCol) return false;
+  if (/\b(request\s*type|requested\s*action|action\s*type|status|state|stage|disposition|uuid|tracking\s*id|guid|notes?|comments?|remarks?|updates?|timeline|action\s*taken)\b/i.test(header)) {
+    return false;
+  }
+  if (idx === ticketCol || idx === secondaryCol || idx === primaryCol) {
+    return true;
+  }
+  return /\b(subject|ticket|case|incident|ref|master|account|member|bidder|buyer|dealer|yard|lot|vin|invoice|po|check|wire|phone|email|id|#)\b/i.test(header);
+}
+
 function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   const refWs = findPrimarySchemaHeaderWorksheet(wb);
   const detected = extractDetectedRow1HeadersFromSheet(refWs);
@@ -2038,7 +2060,8 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
       secondaryCol: 3,
       statusCol: stdMap.statusCol,
       notesCol: stdMap.notesCol,
-      trackingCol: stdMap.trackingCol
+      trackingCol: stdMap.trackingCol,
+      copyCols: [1, 2, 4, 5, 7, 8]
     };
     return activeSchemaConfig;
   }
@@ -2116,6 +2139,22 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     }
   }
 
+  const hasExplicitCopyCols = Boolean(savedOverride && Array.isArray(savedOverride.copyCols));
+  const copyCols = hasExplicitCopyCols
+    ? Array.from(new Set(
+        savedOverride.copyCols
+          .map(Number)
+          .filter(n => validColSet.has(n) && n !== statusCol && n !== notesCol && n !== trackingCol)
+      )).sort((a, b) => a - b)
+    : cols
+        .filter(c => inferDefaultCopyableForCustomColumn(c, { statusCol, notesCol, trackingCol, ticketCol, secondaryCol, primaryCol }))
+        .map(c => c.colIndex)
+        .sort((a, b) => a - b);
+
+  cols.forEach(c => {
+    c.isCopyable = copyCols.includes(c.colIndex);
+  });
+
   activeSchemaConfig = {
     isStandardSchema: false,
     mode,
@@ -2126,7 +2165,8 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     secondaryCol: secondaryCol || null,
     statusCol: statusCol || null,
     notesCol: notesCol || null,
-    trackingCol
+    trackingCol,
+    copyCols
   };
   return activeSchemaConfig;
 }
@@ -4659,6 +4699,11 @@ function refreshSchemaMapperPreviewUI() {
     return;
   }
 
+  const copySet = schemaMapperDetectedState.copyColsSet instanceof Set
+    ? schemaMapperDetectedState.copyColsSet
+    : new Set();
+  const STANDARD_COPY_COLS = new Set([1, 2, 4, 5, 7, 8]);
+
   schemaDetectedColsPreview.innerHTML = cols.map(c => {
     const letter = colNumberToExcelLetters(c.colIndex);
     const roles = [];
@@ -4676,11 +4721,23 @@ function refreshSchemaMapperPreviewUI() {
     const valTag = valOpts.length > 0
       ? `<span class="schema-col-role-tag" title="Bound to validation lists dropdown">▾ ${valOpts.length} opts</span>`
       : '';
+    let copyControlHtml = '';
+    if (effectiveStandard) {
+      if (STANDARD_COPY_COLS.has(c.colIndex)) {
+        copyControlHtml = `<span class="schema-col-role-tag" title="Split-pill inline Copy enabled on Standard Daily Tracker">📋 Copy</span>`;
+      }
+    } else {
+      const isExcludedRole = c.colIndex === stCol || c.colIndex === nCol;
+      const isCopyChecked = !isExcludedRole && copySet.has(c.colIndex);
+      copyControlHtml = isExcludedRole
+        ? `<label class="schema-col-copy-toggle disabled" title="Status &amp; Notes columns do not use inline copy buttons"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" disabled>📋 Copy</label>`
+        : `<label class="schema-col-copy-toggle" title="Enable split-pill Copy to Clipboard button on ${escapeHtml(c.header)}"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" ${isCopyChecked ? 'checked' : ''}>📋 Copy</label>`;
+    }
     return `
       <span class="schema-col-chip">
         <span class="col-letter">Col ${letter}</span>
         <span>${escapeHtml(c.header)}</span>
-        ${roleTag}${valTag}
+        ${roleTag}${valTag}${copyControlHtml}
       </span>
     `;
   }).join('');
@@ -4700,10 +4757,43 @@ function openSchemaMapperModal() {
   const savedOverride = getSavedSchemaOverrideForWorkbook(workingFileHandle.name, activeProfileId);
   const currentMode = (savedOverride && savedOverride.mode) ? savedOverride.mode : (activeSchemaConfig.mode || 'auto');
 
+  const trackingColEstimate = detected.existingTrackingCol || (Math.max(...cols.map(c => c.colIndex), 0) + 1);
+  const findInfer = (re) => {
+    const hit = cols.find(c => re.test(c.header));
+    return hit ? hit.colIndex : '';
+  };
+
+  const defaultPrimary = activeSchemaConfig.primaryCol || cols[0].colIndex;
+  const defaultStatus = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.statusCol || '');
+  const defaultNotes = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.notesCol || '');
+  const defaultTicket = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.ticketCol || '');
+  const defaultSecondary = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.secondaryCol || '');
+
+  const inferredRolesForCopy = {
+    primaryCol: defaultPrimary || findInfer(/subject|title|request|vin|lot|item|account/i) || cols[0].colIndex,
+    statusCol: defaultStatus !== '' ? Number(defaultStatus) : (findInfer(/status|state|stage|disposition/i) || null),
+    notesCol: defaultNotes !== '' ? Number(defaultNotes) : (findInfer(/note|comment|remark|action taken/i) || null),
+    ticketCol: defaultTicket !== '' ? Number(defaultTicket) : (findInfer(/ticket|case|incident|ref/i) || null),
+    secondaryCol: defaultSecondary !== '' ? Number(defaultSecondary) : (findInfer(/broker|account|dealer|owner|assigned|dept/i) || null),
+    trackingCol: trackingColEstimate
+  };
+
+  let initialCopyCols;
+  if (savedOverride && Array.isArray(savedOverride.copyCols)) {
+    initialCopyCols = savedOverride.copyCols.map(Number);
+  } else if (!activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.copyCols)) {
+    initialCopyCols = activeSchemaConfig.copyCols;
+  } else {
+    initialCopyCols = cols
+      .filter(c => inferDefaultCopyableForCustomColumn(c, inferredRolesForCopy))
+      .map(c => c.colIndex);
+  }
+
   schemaMapperDetectedState = {
     columns: cols,
     autoIsStandard,
-    trackingCol: detected.existingTrackingCol || (Math.max(...cols.map(c => c.colIndex), 0) + 1)
+    trackingCol: trackingColEstimate,
+    copyColsSet: new Set(initialCopyCols)
   };
 
   if (schemaMapperSubtitle) {
@@ -4712,18 +4802,6 @@ function openSchemaMapperModal() {
   if (schemaModeSelect) {
     schemaModeSelect.value = ['auto', 'custom', 'standard'].includes(currentMode) ? currentMode : 'auto';
   }
-
-  const defaultPrimary = activeSchemaConfig.primaryCol || cols[0].colIndex;
-  const defaultStatus = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.statusCol || '');
-  const defaultNotes = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.notesCol || '');
-  const defaultTicket = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.ticketCol || '');
-  const defaultSecondary = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.secondaryCol || '');
-
-  // If currently standard, pre-populate sensible inferred defaults in case user switches dropdown to 'custom'
-  const findInfer = (re) => {
-    const hit = cols.find(c => re.test(c.header));
-    return hit ? hit.colIndex : '';
-  };
 
   if (schemaPrimaryColSelect) {
     schemaPrimaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultPrimary || findInfer(/subject|title|request|vin|lot|item|account/i) || cols[0].colIndex, false);
@@ -4786,6 +4864,20 @@ if (btnResetSchemaMapper) {
   });
 }
 
+if (schemaDetectedColsPreview) {
+  schemaDetectedColsPreview.addEventListener('change', (e) => {
+    const chk = e.target.closest('.chk-schema-copy-col');
+    if (!chk || !schemaMapperDetectedState || !schemaMapperDetectedState.copyColsSet) return;
+    const colIdx = parseInt(chk.dataset.colIndex, 10);
+    if (!Number.isFinite(colIdx)) return;
+    if (chk.checked) {
+      schemaMapperDetectedState.copyColsSet.add(colIdx);
+    } else {
+      schemaMapperDetectedState.copyColsSet.delete(colIdx);
+    }
+  });
+}
+
 if (schemaMapperForm) {
   schemaMapperForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -4796,13 +4888,22 @@ if (schemaMapperForm) {
       const n = parseInt(sel.value, 10);
       return Number.isFinite(n) && n >= 1 ? n : null;
     };
+    const statusColVal = parseOptCol(schemaStatusColSelect);
+    const notesColVal = parseOptCol(schemaNotesColSelect);
+    const trackingColVal = schemaMapperDetectedState ? schemaMapperDetectedState.trackingCol : null;
+    const copyCols = (schemaMapperDetectedState && schemaMapperDetectedState.copyColsSet)
+      ? Array.from(schemaMapperDetectedState.copyColsSet)
+          .filter(cIdx => cIdx !== statusColVal && cIdx !== notesColVal && cIdx !== trackingColVal)
+          .sort((a, b) => a - b)
+      : undefined;
     const override = {
       mode,
       primaryCol: parseOptCol(schemaPrimaryColSelect) || 1,
-      statusCol: parseOptCol(schemaStatusColSelect),
-      notesCol: parseOptCol(schemaNotesColSelect),
+      statusCol: statusColVal,
+      notesCol: notesColVal,
       ticketCol: parseOptCol(schemaTicketColSelect),
-      secondaryCol: parseOptCol(schemaSecondaryColSelect)
+      secondaryCol: parseOptCol(schemaSecondaryColSelect),
+      ...(Array.isArray(copyCols) ? { copyCols } : {})
     };
     saveSchemaOverrideForWorkbook(workingFileHandle.name, override, activeProfileId);
     schemaMapperModal.classList.remove('open');

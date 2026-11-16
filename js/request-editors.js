@@ -1729,14 +1729,17 @@ function renderTicketDetailsModal(seedItem) {
         .filter(c => c.colIndex !== activeSchemaConfig.notesCol)
         .map(c => {
           const val = (latest.customValues && latest.customValues[`col_${c.colIndex}`]) || '';
-          const isCopyableField =
-            c.colIndex === activeSchemaConfig.ticketCol ||
-            c.colIndex === activeSchemaConfig.secondaryCol ||
-            /\b(master\s*#?|account\s*#?|member\s*#?)\b/i.test(c.header);
+          const isCopyableField = Array.isArray(activeSchemaConfig.copyCols)
+            ? activeSchemaConfig.copyCols.includes(c.colIndex)
+            : (
+                c.colIndex === activeSchemaConfig.ticketCol ||
+                c.colIndex === activeSchemaConfig.secondaryCol ||
+                /\b(subject|ticket|master\s*#?|account\s*#?|member\s*#?|bidder\s*#?|yard\s*#?|lot\s*#?)\b/i.test(c.header)
+              );
           const inner = c.colIndex === activeSchemaConfig.statusCol
             ? `<span class="badge ${getStatusBadgeClass(val || latest.status)}">${escapeHtml(val || latest.status)}</span>`
             : (isCopyableField && val
-                ? `<span class="cell-copy-group"><span>${escapeHtml(val)}</span>${renderInlineCopyBtnHtml(val, c.header)}</span>`
+                ? `<span class="cell-copy-group cell-copy-text"><span>${escapeHtml(val)}</span>${renderInlineCopyBtnHtml(val, c.header)}</span>`
                 : escapeHtml(val || '—'));
           return `
             <div class="ticket-meta-card">
@@ -1755,13 +1758,29 @@ function renderTicketDetailsModal(seedItem) {
       `;
     } else {
       const parentCategory = resolveActionParentCategory(latest.action);
+      const subjectCardVal = latest.subject
+        ? `<span class="cell-copy-group cell-copy-text"><span>${escapeHtml(latest.subject)}</span>${renderInlineCopyBtnHtml(latest.subject, 'Email Subject')}</span>`
+        : '—';
       const ticketCardVal = latest.ticket
         ? `<span class="cell-copy-group"><span>${escapeHtml(latest.ticket)}</span>${renderInlineCopyBtnHtml(latest.ticket, 'Ticket #')}</span>`
         : '—';
       const masterCardVal = latest.master
         ? `<span class="cell-copy-group"><span>${escapeHtml(latest.master)}</span>${renderInlineCopyBtnHtml(latest.master, 'Master #')}</span>`
         : '—';
+      const bidderCardVal = latest.bidder
+        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.bidder)}</span>${renderInlineCopyBtnHtml(latest.bidder, 'Bidder #')}</span>`
+        : '—';
+      const yardCardVal = latest.yard
+        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.yard)}</span>${renderInlineCopyBtnHtml(latest.yard, 'Yard #')}</span>`
+        : '—';
+      const lotsCardVal = latest.lots
+        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.lots)}</span>${renderInlineCopyBtnHtml(latest.lots, 'Lot Numbers')}</span>`
+        : '—';
       ticketDetailsMetaGrid.innerHTML = `
+        <div class="ticket-meta-card" style="grid-column: 1 / -1;">
+          <div class="ticket-meta-card-label">Email Subject</div>
+          <div class="ticket-meta-card-val">${subjectCardVal}</div>
+        </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Ticket Number</div>
           <div class="ticket-meta-card-val">${ticketCardVal}</div>
@@ -1778,7 +1797,7 @@ function renderTicketDetailsModal(seedItem) {
         </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
-          <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${masterCardVal} / B: ${escapeHtml(latest.bidder || '—')})</div>
+          <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${masterCardVal} / B: ${bidderCardVal})</div>
         </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Requested Action &amp; Category</div>
@@ -1786,7 +1805,7 @@ function renderTicketDetailsModal(seedItem) {
         </div>
         <div class="ticket-meta-card">
           <div class="ticket-meta-card-label">Yard # &amp; Lot Numbers</div>
-          <div class="ticket-meta-card-val">Y: ${escapeHtml(latest.yard || '—')} • Lots: ${escapeHtml(latest.lots || '—')}</div>
+          <div class="ticket-meta-card-val">Y: ${yardCardVal} • Lots: ${lotsCardVal}</div>
         </div>
       `;
     }
