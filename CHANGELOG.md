@@ -19,8 +19,11 @@ This document records the version release history, major feature rollouts, bug f
   - Added read-only Excel-style left-hand line/row numbers (`#` header `.tracker-row-num-th` and `<th scope="row" class="tracker-row-num-cell">`) showing sequential row index `1..N` (with a tooltip displaying the underlying Excel sheet and row number) across both Standard and Custom Department tracker tables, preserving checkbox batch selection, Like-Item filtering, and click-to-edit row behavior.
 - **📐 Reclaimed Vertical Screen Space (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**:
   - Removed the redundant `#filePathsBar` strip beneath `#trackerProfilesBar` (paths and `Auto-Reconnect Folders on Startup` remain accessible inside `⚙️ Tools & Setup ▾` with full-path hover tooltips and in the bottom status bar) to give the tracker table more vertical room.
+- **📊 Excel-Styled HTML Table & Color-Preserving Scratch Sheet Copy/Paste (`js/scratch-sheets.js`, `css/styles.css`)**:
+  - Updated Scratch Sheet copy/cut (`Ctrl+C`/`Ctrl+X` and right-click Copy/Cut) to export both `text/plain` (TSV) and a native Excel-compatible `text/html` `<table>` (`serializeScratchSelectionToExcelHtml`, including cell borders, Calibri/Aptos 11pt typography, column widths, bold header shading, cell fill colors via inline CSS + `bgcolor`, and font colors) for clean pasting into Outlook, Gmail, Teams, and Word.
+  - Updated Scratch Sheet paste (`Ctrl+V` and right-click Paste) to preserve cell fill colors, font colors, and bold formatting across internal Scratch Sheet copies and external Excel/HTML tables (`parseClipboardHtmlTableToMatrix`, supporting Excel `<style>` class rules as well as inline styles).
 - **PWA Cache Bump**:
-  - Incremented `CACHE_NAME` to `'tracker-ui-v34'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+  - Incremented `CACHE_NAME` to `'tracker-ui-v35'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
 
 ### `v1.18.2`
 - **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:

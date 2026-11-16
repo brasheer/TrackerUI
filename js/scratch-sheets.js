@@ -16,6 +16,7 @@ const scratchPendingColWidths = new Map(); // sheetName -> Map<colNumber, excelW
 const scratchPendingFills = new Map(); // sheetName -> Map<'row::col', { fill, font }>
 let scratchClipboardRangeState = null; // { sheetName, minRow, maxRow, minCol, maxCol } | null
 let scratchInternalClipboardText = '';
+let scratchInternalClipboardState = null; // { tsv, html, styleMatrix } | null
 let scratchDragState = null; // { mode: 'cells'|'rows'|'cols', sheetName, clientX, clientY, rafId, lastExpandAt } | null
 let scratchColResizeState = null; // { sheetName, col, thEl, resizerEl, startX, startWidthPx, currentWidthPx } | null
 let lastScratchNativeCopyAt = 0;
@@ -118,11 +119,11 @@ function getContrastingTextHexForBg(bgHex) {
 }
 
 function extractScratchCellVisualStyle(ws, rNum, cNum) {
-  if (!ws) return { bgHex: null, fgHex: null, isBold: false };
+  if (!ws) return { bgHex: null, fgHex: null, isBold: false, align: null };
   const row = ws.findRow ? ws.findRow(rNum) : null;
-  if (!row) return { bgHex: null, fgHex: null, isBold: false };
+  if (!row) return { bgHex: null, fgHex: null, isBold: false, align: null };
   const cell = row.findCell ? row.findCell(cNum) : null;
-  if (!cell) return { bgHex: null, fgHex: null, isBold: false };
+  if (!cell) return { bgHex: null, fgHex: null, isBold: false, align: null };
 
   let bgHex = null;
   const fill = cell.fill;
@@ -132,11 +133,12 @@ function extractScratchCellVisualStyle(ws, rNum, cNum) {
 
   const font = cell.font;
   const isBold = Boolean(font && font.bold);
-  let fgHex = null;
-  if (bgHex) {
-    fgHex = (font && resolveExcelColorToHex(font.color)) || getContrastingTextHexForBg(bgHex);
-  }
-  return { bgHex, fgHex, isBold };
+  const explicitFontHex = font ? resolveExcelColorToHex(font.color) : null;
+  const fgHex = bgHex
+    ? (explicitFontHex || getContrastingTextHexForBg(bgHex))
+    : explicitFontHex;
+  const align = (cell.alignment && cell.alignment.horizontal) ? cell.alignment.horizontal : null;
+  return { bgHex, fgHex, isBold, align };
 }
 
 function captureCellStyleSnapshot(ws, rNum, cNum) {
@@ -202,12 +204,19 @@ function applyVisualStyleToScratchTd(td, visual) {
   td.classList.toggle('bold-cell', Boolean(visual.isBold));
   if (visual.bgHex) {
     td.classList.add('has-custom-fill');
+    td.classList.remove('has-custom-fg');
     td.style.setProperty('--cell-fill-bg', visual.bgHex);
     td.style.setProperty('--cell-fill-fg', visual.fgHex || getContrastingTextHexForBg(visual.bgHex));
   } else {
     td.classList.remove('has-custom-fill');
     td.style.removeProperty('--cell-fill-bg');
-    td.style.removeProperty('--cell-fill-fg');
+    if (visual.fgHex) {
+      td.classList.add('has-custom-fg');
+      td.style.setProperty('--cell-fill-fg', visual.fgHex);
+    } else {
+      td.classList.remove('has-custom-fg');
+      td.style.removeProperty('--cell-fill-fg');
+    }
   }
 }
 
@@ -1771,12 +1780,16 @@ function renderActiveScratchSheetGrid() {
       if (r === 1 && row1HasValues) classes.push('header-like-cell');
       if (visual.isBold) classes.push('bold-cell');
       if (visual.bgHex) classes.push('has-custom-fill');
+      else if (visual.fgHex) classes.push('has-custom-fg');
       if (info.isFormula) classes.push('formula-cell');
       if (isHit) classes.push('search-hit');
 
-      const styleAttr = visual.bgHex
-        ? ` style="--cell-fill-bg:${visual.bgHex}; --cell-fill-fg:${visual.fgHex || getContrastingTextHexForBg(visual.bgHex)};"`
-        : '';
+      let styleAttr = '';
+      if (visual.bgHex) {
+        styleAttr = ` style="--cell-fill-bg:${visual.bgHex}; --cell-fill-fg:${visual.fgHex || getContrastingTextHexForBg(visual.bgHex)};"`;
+      } else if (visual.fgHex) {
+        styleAttr = ` style="--cell-fill-fg:${visual.fgHex};"`;
+      }
       const titleText = info.isFormula ? `${info.rawEdit} → ${info.display}` : info.display;
       rowCellsHtml.push(
         `<td data-r="${r}" data-c="${c}" class="${classes.join(' ')}"${styleAttr} title="${escapeHtml(titleText)}"><span class="scratch-cell-text">${escapeHtml(info.display)}</span></td>`
@@ -2065,6 +2078,32 @@ function computeScratchCtrlArrowTarget(ws, dims, startRow, startCol, dr, dc) {
   }
 }
 
+function resolveEffectiveScratchCopyRange(ws, range) {
+  if (!ws || !range) return range;
+  const dims = getScratchSheetGridDimensions(ws, ws.name || activeWorkspaceTab);
+  const fullHeight = range.minRow === 1 && range.maxRow >= dims.rows;
+  const fullWidth = range.minCol === 1 && range.maxCol >= dims.cols;
+  if (!fullHeight && !fullWidth) return range;
+
+  let lastRow = range.minRow;
+  let lastCol = range.minCol;
+  for (let r = range.minRow; r <= range.maxRow; r++) {
+    for (let c = range.minCol; c <= range.maxCol; c++) {
+      const info = extractScratchCellInfo(ws, r, c);
+      const visual = extractScratchCellVisualStyle(ws, r, c);
+      if (info.display.trim() !== '' || visual.bgHex || visual.isBold) {
+        if (r > lastRow) lastRow = r;
+        if (c > lastCol) lastCol = c;
+      }
+    }
+  }
+  return {
+    ...range,
+    maxRow: fullHeight ? Math.max(range.minRow, lastRow) : range.maxRow,
+    maxCol: fullWidth ? Math.max(range.minCol, lastCol) : range.maxCol
+  };
+}
+
 function serializeScratchSelectionToTSV(ws, range) {
   const lines = [];
   for (let r = range.minRow; r <= range.maxRow; r++) {
@@ -2076,6 +2115,317 @@ function serializeScratchSelectionToTSV(ws, range) {
     lines.push(rowVals.join('\t'));
   }
   return lines.join('\r\n');
+}
+
+function serializeScratchSelectionToExcelHtml(ws, range) {
+  if (!ws || !range) return '';
+  const dims = getScratchSheetGridDimensions(ws, ws.name || activeWorkspaceTab);
+  let row1HasValues = false;
+  for (let c = 1; c <= dims.cols; c++) {
+    if (extractScratchCellInfo(ws, 1, c).display.trim() !== '') {
+      row1HasValues = true;
+      break;
+    }
+  }
+
+  const colTags = [];
+  for (let c = range.minCol; c <= range.maxCol; c++) {
+    const excelCol = ws.getColumn ? ws.getColumn(c) : null;
+    const colW = excelCol && excelCol.width
+      ? Math.max(68, Math.min(500, Math.round(excelCol.width * 7.6)))
+      : 110;
+    colTags.push(`<col width="${colW}" style="width:${colW}px;">`);
+  }
+
+  const trHtml = [];
+  for (let r = range.minRow; r <= range.maxRow; r++) {
+    const tdHtml = [];
+    for (let c = range.minCol; c <= range.maxCol; c++) {
+      const info = extractScratchCellInfo(ws, r, c);
+      const visual = extractScratchCellVisualStyle(ws, r, c);
+      const isAutoHeader = r === 1 && row1HasValues;
+
+      let bgHex = visual.bgHex;
+      let fgHex = visual.fgHex;
+      let isBold = visual.isBold;
+      if (isAutoHeader && !bgHex) {
+        bgHex = '#D9E1F2';
+        fgHex = fgHex || '#0F172A';
+        isBold = true;
+      } else if (bgHex) {
+        fgHex = fgHex || getContrastingTextHexForBg(bgHex);
+      } else if (fgHex && fgHex.toUpperCase() === '#FFFFFF') {
+        fgHex = '#000000';
+      }
+
+      const styles = [
+        'border:1px solid #BFBFBF',
+        'padding:3px 8px',
+        "font-family:Calibri, Aptos, 'Segoe UI', Arial, sans-serif",
+        'font-size:11pt',
+        'vertical-align:middle',
+        'white-space:nowrap'
+      ];
+      if (bgHex) {
+        styles.push(`background:${bgHex}`, `background-color:${bgHex}`);
+      }
+      styles.push(`color:${fgHex || '#000000'}`);
+      if (isBold) {
+        styles.push('font-weight:700');
+      }
+      if (visual.align) {
+        styles.push(`text-align:${visual.align}`);
+      }
+
+      const bgAttr = bgHex ? ` bgcolor="${bgHex}"` : '';
+      const dispTrim = info.display.trim();
+      const cellContent = dispTrim === ''
+        ? '&nbsp;'
+        : escapeHtml(info.display).replace(/\r\n|\r|\n/g, '<br>');
+
+      tdHtml.push(`<td${bgAttr} style="${styles.join('; ')};">${cellContent}</td>`);
+    }
+    trHtml.push(`<tr>${tdHtml.join('')}</tr>`);
+  }
+
+  return `<!--StartFragment--><table border="1" cellspacing="0" cellpadding="0" style="border-collapse:collapse; border:1px solid #BFBFBF; font-family:Calibri, Aptos, 'Segoe UI', Arial, sans-serif; font-size:11pt; color:#000000;"><colgroup>${colTags.join('')}</colgroup><tbody>${trHtml.join('')}</tbody></table><!--EndFragment-->`;
+}
+
+function buildScratchStyleMatrix(ws, range) {
+  const matrix = [];
+  for (let r = range.minRow; r <= range.maxRow; r++) {
+    const rowSnaps = [];
+    for (let c = range.minCol; c <= range.maxCol; c++) {
+      rowSnaps.push(captureCellStyleSnapshot(ws, r, c));
+    }
+    matrix.push(rowSnaps);
+  }
+  return matrix;
+}
+
+function parseCssColorToArgb(cssColorStr) {
+  const raw = String(cssColorStr || '').trim().toLowerCase();
+  if (!raw || raw === 'transparent' || raw === 'none' || raw === 'inherit' || raw === 'initial' || raw === 'window' || raw === 'windowtext' || raw === 'auto') {
+    return null;
+  }
+  const named = {
+    white: 'FFFFFFFF',
+    black: 'FF000000',
+    red: 'FFFF0000',
+    green: 'FF008000',
+    blue: 'FF0000FF',
+    yellow: 'FFFFFF00',
+    gray: 'FF808080',
+    grey: 'FF808080',
+    orange: 'FFFFA500',
+    purple: 'FF800080',
+    navy: 'FF000080',
+    silver: 'FFC0C0C0'
+  };
+  if (named[raw]) return named[raw];
+
+  const hexMatch = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hexMatch) {
+    const h = hexMatch[1].toUpperCase();
+    if (h.length === 3) {
+      return `FF${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`;
+    }
+    if (h.length === 6) {
+      return `FF${h}`;
+    }
+    if (h.length === 8) {
+      return h.slice(0, 2) === '00' ? null : h;
+    }
+  }
+
+  const rgbMatch = raw.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*[,/]\s*([0-9.]+))?\s*\)$/i);
+  if (rgbMatch) {
+    if (rgbMatch[4] !== undefined && parseFloat(rgbMatch[4]) === 0) return null;
+    const toHex = (n) => Math.max(0, Math.min(255, parseInt(n, 10) || 0)).toString(16).padStart(2, '0').toUpperCase();
+    return `FF${toHex(rgbMatch[1])}${toHex(rgbMatch[2])}${toHex(rgbMatch[3])}`;
+  }
+  return null;
+}
+
+function parseStyleDeclarationsMap(declText) {
+  const out = {};
+  String(declText || '').split(';').forEach(part => {
+    const colonIdx = part.indexOf(':');
+    if (colonIdx === -1) return;
+    const prop = part.slice(0, colonIdx).trim().toLowerCase();
+    const val = part.slice(colonIdx + 1).replace(/!important/gi, '').trim();
+    if (prop) out[prop] = val;
+  });
+  return out;
+}
+
+function resolveColorStyleSnapshotFromProps({ bgRaw, fgRaw, weightRaw, tagName = 'td', hasBoldTag = false }) {
+  let bgArgb = parseCssColorToArgb(bgRaw);
+  if (bgArgb === 'FFFFFFFF') bgArgb = null;
+
+  let fgArgb = parseCssColorToArgb(fgRaw);
+  if (!bgArgb && (fgArgb === 'FF000000' || fgArgb === 'FF0F172A')) {
+    fgArgb = null;
+  }
+
+  const wLower = String(weightRaw || '').trim().toLowerCase();
+  const isBold = hasBoldTag || tagName === 'th' || wLower === 'bold' || wLower === 'bolder' || (parseInt(wLower, 10) >= 600);
+
+  const fill = bgArgb
+    ? { type: 'pattern', pattern: 'solid', fgColor: { argb: bgArgb } }
+    : null;
+
+  const fontObj = {};
+  if (fgArgb) fontObj.color = { argb: fgArgb };
+  else if (bgArgb) fontObj.color = { argb: getContrastingTextHexForBg(`#${bgArgb.slice(2)}`).replace('#', 'FF') };
+  if (isBold) fontObj.bold = true;
+  const font = Object.keys(fontObj).length > 0 ? fontObj : null;
+
+  return { fill, font, hasVisualStyle: Boolean(fill || font) };
+}
+
+function parseClipboardHtmlTableToMatrix(htmlText) {
+  const raw = String(htmlText || '');
+  if (!raw || !/<table[\s>]/i.test(raw)) return null;
+
+  const classStyleMap = new Map();
+  const styleBlockRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+  let sMatch;
+  while ((sMatch = styleBlockRegex.exec(raw)) !== null) {
+    const ruleRegex = /([^{}]+)\{([^}]*)\}/g;
+    let rMatch;
+    while ((rMatch = ruleRegex.exec(sMatch[1])) !== null) {
+      const selectors = rMatch[1].split(',');
+      const decls = parseStyleDeclarationsMap(rMatch[2]);
+      selectors.forEach(sel => {
+        const clsMatch = sel.trim().match(/^(?:[a-z0-9*]+\s*)?\.([a-z0-9_-]+)$/i);
+        if (clsMatch) {
+          const prev = classStyleMap.get(clsMatch[1]) || {};
+          classStyleMap.set(clsMatch[1], { ...prev, ...decls });
+        }
+      });
+    }
+  }
+
+  const extractBackgroundProp = (decls) => {
+    if (!decls) return '';
+    if (decls['background-color']) return decls['background-color'];
+    if (decls.background) {
+      const token = String(decls.background).split(/\s+/).find(tok => /^(#[0-9a-f]{3,8}|rgba?\(|white|black|red|green|blue|yellow|gray|grey|orange|purple|navy|silver)$/i.test(tok));
+      if (token) return token;
+    }
+    return '';
+  };
+
+  let styleRows = null;
+  let anyStyle = false;
+
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const doc = new DOMParser().parseFromString(raw, 'text/html');
+      const table = doc.querySelector('table');
+      const trs = table ? Array.from(table.querySelectorAll('tr')) : [];
+      if (trs.length > 0) {
+        styleRows = trs.map(tr => {
+          const cells = Array.from(tr.querySelectorAll('th, td'));
+          const rowOut = [];
+          cells.forEach(cell => {
+            const clsDecls = {};
+            String(cell.getAttribute('class') || '').split(/\s+/).filter(Boolean).forEach(clsName => {
+              const found = classStyleMap.get(clsName);
+              if (found) Object.assign(clsDecls, found);
+            });
+            const inlineDecls = parseStyleDeclarationsMap(cell.getAttribute('style') || '');
+            const merged = { ...clsDecls, ...inlineDecls };
+            const bgRaw = extractBackgroundProp(merged) || cell.getAttribute('bgcolor') || '';
+            const fgRaw = merged.color || cell.getAttribute('color') || '';
+            const weightRaw = merged['font-weight'] || '';
+            const hasBoldTag = Boolean(cell.querySelector('b, strong'));
+            const snap = resolveColorStyleSnapshotFromProps({
+              bgRaw,
+              fgRaw,
+              weightRaw,
+              tagName: cell.tagName.toLowerCase(),
+              hasBoldTag
+            });
+            if (snap.hasVisualStyle) anyStyle = true;
+            const colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
+            for (let i = 0; i < colspan; i++) {
+              rowOut.push({ fill: snap.fill, font: snap.font });
+            }
+          });
+          return rowOut;
+        });
+      }
+    } catch (_) {
+      styleRows = null;
+    }
+  }
+
+  if (!styleRows) {
+    // Lightweight fallback parser when DOMParser is unavailable (e.g. non-browser environment)
+    const trMatches = raw.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+    if (trMatches.length === 0) return null;
+    styleRows = trMatches.map(trStr => {
+      const cellMatches = trStr.match(/<(td|th)\b[^>]*>[\s\S]*?<\/\1>/gi) || [];
+      const rowOut = [];
+      cellMatches.forEach(cellStr => {
+        const tagMatch = cellStr.match(/^<(td|th)\b([^>]*)>([\s\S]*?)<\/\1>/i);
+        if (!tagMatch) return;
+        const tagName = tagMatch[1].toLowerCase();
+        const attrs = tagMatch[2] || '';
+        const inner = tagMatch[3] || '';
+        const clsAttr = (attrs.match(/\bclass\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
+        const styleAttr = (attrs.match(/\bstyle\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
+        const bgcolorAttr = (attrs.match(/\bbgcolor\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
+        const colspanAttr = parseInt((attrs.match(/\bcolspan\s*=\s*["']?(\d+)/i) || [])[1] || '1', 10) || 1;
+
+        const clsDecls = {};
+        clsAttr.split(/\s+/).filter(Boolean).forEach(clsName => {
+          const found = classStyleMap.get(clsName);
+          if (found) Object.assign(clsDecls, found);
+        });
+        const inlineDecls = parseStyleDeclarationsMap(styleAttr);
+        const merged = { ...clsDecls, ...inlineDecls };
+        const bgRaw = extractBackgroundProp(merged) || bgcolorAttr;
+        const fgRaw = merged.color || '';
+        const weightRaw = merged['font-weight'] || '';
+        const hasBoldTag = /<(b|strong)\b/i.test(inner);
+
+        const snap = resolveColorStyleSnapshotFromProps({ bgRaw, fgRaw, weightRaw, tagName, hasBoldTag });
+        if (snap.hasVisualStyle) anyStyle = true;
+        for (let i = 0; i < colspanAttr; i++) {
+          rowOut.push({ fill: snap.fill, font: snap.font });
+        }
+      });
+      return rowOut;
+    });
+  }
+
+  return styleRows && styleRows.length > 0 && anyStyle ? styleRows : null;
+}
+
+function writeScratchClipboardPayloadToSystem(tsv, html) {
+  if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+  if (typeof navigator.clipboard.write === 'function' && typeof ClipboardItem !== 'undefined' && typeof Blob !== 'undefined' && html) {
+    try {
+      const item = new ClipboardItem({
+        'text/plain': new Blob([tsv], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' })
+      });
+      navigator.clipboard.write([item]).catch(() => {
+        if (typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(tsv).catch(() => {});
+        }
+      });
+      return;
+    } catch (_) {
+      // fallback to writeText below
+    }
+  }
+  if (typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(tsv).catch(() => {});
+  }
 }
 
 function clearScratchSelectionCells(sheetName, range) {
@@ -2105,11 +2455,15 @@ function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemC
   const ws = workbook.getWorksheet(sheetName);
   if (!ws) return '';
 
-  const tsv = serializeScratchSelectionToTSV(ws, range);
+  const effRange = isCut ? range : resolveEffectiveScratchCopyRange(ws, range);
+  const tsv = serializeScratchSelectionToTSV(ws, effRange);
+  const html = serializeScratchSelectionToExcelHtml(ws, effRange);
+  const styleMatrix = buildScratchStyleMatrix(ws, effRange);
   scratchInternalClipboardText = tsv;
+  scratchInternalClipboardState = { tsv, html, styleMatrix };
 
-  if (writeSystemClipboard && navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(tsv).catch(() => {});
+  if (writeSystemClipboard) {
+    writeScratchClipboardPayloadToSystem(tsv, html);
   }
 
   if (isCut) {
@@ -2125,17 +2479,17 @@ function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemC
   } else {
     scratchClipboardRangeState = {
       sheetName,
-      minRow: range.minRow,
-      maxRow: range.maxRow,
-      minCol: range.minCol,
-      maxCol: range.maxCol
+      minRow: effRange.minRow,
+      maxRow: effRange.maxRow,
+      minCol: effRange.minCol,
+      maxCol: effRange.maxCol
     };
     applyScratchSelectionDOM();
-    if (range.cellCount > 1 || !writeSystemClipboard) {
+    if (effRange.cellCount > 1 || !writeSystemClipboard) {
       showToast(
-        range.cellCount > 1
-          ? `Copied ${range.cellCount} cells (${getRangeCoordString(range)}).`
-          : `Copied cell ${getRangeCoordString(range)}.`,
+        effRange.cellCount > 1
+          ? `Copied ${effRange.cellCount} cells (${getRangeCoordString(effRange)}).`
+          : `Copied cell ${getRangeCoordString(effRange)}.`,
         'info'
       );
     }
@@ -2143,7 +2497,7 @@ function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemC
   return tsv;
 }
 
-function applyScratchPasteFromText(sheetName, rawText) {
+function applyScratchPasteFromText(sheetName, rawText, htmlText = '') {
   if (!workbook || !sheetName || sheetName === DAILY_TRACKER_WS_TAB) return 0;
   if (rawText === undefined || rawText === null || rawText === '') return 0;
 
@@ -2153,6 +2507,17 @@ function applyScratchPasteFromText(sheetName, rawText) {
   const matrix = parseClipboardTSVMatrix(rawText);
   if (matrix.length === 0) return 0;
 
+  let styleMatrix = null;
+  if (
+    scratchInternalClipboardState &&
+    scratchInternalClipboardState.tsv === rawText &&
+    Array.isArray(scratchInternalClipboardState.styleMatrix)
+  ) {
+    styleMatrix = scratchInternalClipboardState.styleMatrix;
+  } else if (htmlText) {
+    styleMatrix = parseClipboardHtmlTableToMatrix(htmlText);
+  }
+
   const curRange = getScratchSelectionRange(sheetName);
   const isSingleValueClipboard = matrix.length === 1 && matrix[0].length === 1;
   const edits = [];
@@ -2161,9 +2526,14 @@ function applyScratchPasteFromText(sheetName, rawText) {
   if (isSingleValueClipboard && curRange.cellCount > 1) {
     // Excel-style Repeat-Fill: fill entire highlighted multi-cell range with the single copied value
     const fillVal = matrix[0][0];
+    const singleStyle = styleMatrix && styleMatrix[0] ? styleMatrix[0][0] : undefined;
     for (let r = curRange.minRow; r <= curRange.maxRow; r++) {
       for (let c = curRange.minCol; c <= curRange.maxCol; c++) {
-        edits.push({ r, c, rawText: fillVal });
+        const editObj = { r, c, rawText: fillVal };
+        if (singleStyle !== undefined) {
+          editObj.styleSnap = singleStyle || { fill: null, font: null };
+        }
+        edits.push(editObj);
       }
     }
     nextSelection = {
@@ -2180,12 +2550,18 @@ function applyScratchPasteFromText(sheetName, rawText) {
     let maxC = startCol;
 
     matrix.forEach((cols, rOffset) => {
+      const styleRow = styleMatrix && styleMatrix[rOffset] ? styleMatrix[rOffset] : null;
       cols.forEach((cellVal, cOffset) => {
         const r = startRow + rOffset;
         const c = startCol + cOffset;
         if (r > maxR) maxR = r;
         if (c > maxC) maxC = c;
-        edits.push({ r, c, rawText: cellVal });
+        const editObj = { r, c, rawText: cellVal };
+        if (styleMatrix) {
+          const cellStyle = styleRow && styleRow[cOffset] ? styleRow[cOffset] : null;
+          editObj.styleSnap = cellStyle || { fill: null, font: null };
+        }
+        edits.push(editObj);
       });
     });
 
@@ -2213,8 +2589,27 @@ async function handleScratchContextPaste() {
   if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
   const targetSheet = activeWorkspaceTab;
   let clipText = null;
+  let clipHtml = '';
 
-  if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+  if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (!clipText && item.types && item.types.includes('text/plain')) {
+          const blob = await item.getType('text/plain');
+          clipText = await blob.text();
+        }
+        if (!clipHtml && item.types && item.types.includes('text/html')) {
+          const blob = await item.getType('text/html');
+          clipHtml = await blob.text();
+        }
+      }
+    } catch (_) {
+      clipText = null;
+    }
+  }
+
+  if ((clipText === null || clipText === '') && navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
     try {
       clipText = await navigator.clipboard.readText();
     } catch (_) {
@@ -2224,10 +2619,13 @@ async function handleScratchContextPaste() {
 
   if ((clipText === null || clipText === '') && scratchInternalClipboardText !== '') {
     clipText = scratchInternalClipboardText;
+    if (!clipHtml && scratchInternalClipboardState && scratchInternalClipboardState.tsv === clipText) {
+      clipHtml = scratchInternalClipboardState.html || '';
+    }
   }
 
   if (clipText !== null && clipText !== '') {
-    applyScratchPasteFromText(targetSheet, clipText);
+    applyScratchPasteFromText(targetSheet, clipText, clipHtml);
     if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
   } else {
     showToast('Allow clipboard read permission when prompted, or press Ctrl+V to paste.', 'info');
@@ -3589,7 +3987,7 @@ if (scratchGridWrap) {
     closeScratchContextMenu();
   });
 
-  // Multi-Cell TSV Copy Handler (Ctrl+C)
+  // Multi-Cell Excel HTML + TSV Copy Handler (Ctrl+C)
   scratchGridWrap.addEventListener('copy', (e) => {
     if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
     if (scratchInlineEditState) return;
@@ -3597,29 +3995,34 @@ if (scratchGridWrap) {
     const ws = workbook.getWorksheet(activeWorkspaceTab);
     if (!ws) return;
     const range = getScratchSelectionRange(activeWorkspaceTab);
-    const tsv = serializeScratchSelectionToTSV(ws, range);
+    const effRange = resolveEffectiveScratchCopyRange(ws, range);
+    const tsv = serializeScratchSelectionToTSV(ws, effRange);
+    const html = serializeScratchSelectionToExcelHtml(ws, effRange);
+    const styleMatrix = buildScratchStyleMatrix(ws, effRange);
     scratchInternalClipboardText = tsv;
+    scratchInternalClipboardState = { tsv, html, styleMatrix };
 
     if (e.clipboardData) {
       e.preventDefault();
       e.clipboardData.setData('text/plain', tsv);
+      if (html) e.clipboardData.setData('text/html', html);
       lastScratchNativeCopyAt = Date.now();
     }
 
     scratchClipboardRangeState = {
       sheetName: activeWorkspaceTab,
-      minRow: range.minRow,
-      maxRow: range.maxRow,
-      minCol: range.minCol,
-      maxCol: range.maxCol
+      minRow: effRange.minRow,
+      maxRow: effRange.maxRow,
+      minCol: effRange.minCol,
+      maxCol: effRange.maxCol
     };
     applyScratchSelectionDOM();
-    if (range.cellCount > 1) {
-      showToast(`Copied ${range.cellCount} cells (${getRangeCoordString(range)}).`, 'info');
+    if (effRange.cellCount > 1) {
+      showToast(`Copied ${effRange.cellCount} cells (${getRangeCoordString(effRange)}).`, 'info');
     }
   });
 
-  // Multi-Cell TSV Cut Handler (Ctrl+X)
+  // Multi-Cell Excel HTML + TSV Cut Handler (Ctrl+X)
   scratchGridWrap.addEventListener('cut', (e) => {
     if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
     if (scratchInlineEditState) return;
@@ -3628,11 +4031,15 @@ if (scratchGridWrap) {
     if (!ws) return;
     const range = getScratchSelectionRange(activeWorkspaceTab);
     const tsv = serializeScratchSelectionToTSV(ws, range);
+    const html = serializeScratchSelectionToExcelHtml(ws, range);
+    const styleMatrix = buildScratchStyleMatrix(ws, range);
     scratchInternalClipboardText = tsv;
+    scratchInternalClipboardState = { tsv, html, styleMatrix };
 
     if (e.clipboardData) {
       e.preventDefault();
       e.clipboardData.setData('text/plain', tsv);
+      if (html) e.clipboardData.setData('text/html', html);
       lastScratchNativeCopyAt = Date.now();
     }
 
@@ -3644,16 +4051,18 @@ if (scratchGridWrap) {
     }
   });
 
-  // Multi-Cell TSV / Excel / Email Clipboard Paste Handler (Ctrl+V + 1-Cell Repeat-Fill)
+  // Multi-Cell TSV / Excel / HTML Clipboard Paste Handler (Ctrl+V + 1-Cell Repeat-Fill)
   scratchGridWrap.addEventListener('paste', (e) => {
     if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
     if (scratchInlineEditState) return; // Let inline editor handle single-cell text paste
 
-    const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+    const cb = e.clipboardData || window.clipboardData;
+    const text = cb.getData('text/plain');
+    const html = cb.getData('text/html') || '';
     if (text === undefined || text === null || text === '') return;
     e.preventDefault();
 
-    applyScratchPasteFromText(activeWorkspaceTab, text);
+    applyScratchPasteFromText(activeWorkspaceTab, text, html);
   });
 }
 

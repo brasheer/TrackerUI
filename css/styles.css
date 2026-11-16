@@ -3543,7 +3543,8 @@ button.ws-app-tab.active:hover {
   color: var(--accent);
 }
 
-.scratch-cell.has-custom-fill .scratch-cell-text {
+.scratch-cell.has-custom-fill .scratch-cell-text,
+.scratch-cell.has-custom-fg:not(.has-custom-fill) .scratch-cell-text {
   color: var(--cell-fill-fg, var(--text));
 }
 
