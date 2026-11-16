@@ -10,7 +10,7 @@ This document records the version release history, major feature rollouts, bug f
 
 ### `v1.18.3` (Current — `meerkat`)
 - **📋 Integrated Split-Pill Copy-to-Clipboard & Per-Column Mapper Toggles (`index.html`, `css/styles.css`, `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`)**:
-  - Redesigned `.cell-copy-group` + `.btn-inline-copy` into an integrated **split-pill** control sharing a unified hover outline: clicking the left segment filters Like-Items, while clicking the integrated right copy segment copies to clipboard without triggering row editing or filtering.
+  - Redesigned `.cell-copy-group` + `.btn-inline-copy` into a full-width **split-pill** control sharing a unified hover outline: value text uses the full pill width with `white-space: nowrap` on code pills (preventing 3-digit Yard # wrapping like `340`), while `.btn-inline-copy` overlays the right edge transparently until hovered; clicking the left segment filters Like-Items and clicking the copy overlay copies to clipboard.
   - Enabled split-pill copy buttons across **Email Subject, Ticket #, Master #, Bidder #, Yard #, and Lot #** (each lot token individually filterable and copyable) on the Standard Daily Tracker and `#ticketDetailsModal`—excluding Broker Name, Requested Action, Action Notes, Status, and Tracking ID/UUID.
   - Added per-column **`📋 Copy`** checkboxes inside **Configure Column Mapping (`#schemaMapperModal`)** (`inferDefaultCopyableForCustomColumn`, persisted per workbook/profile via `copyCols`) so users can customize which columns display inline copy pills on Custom Department Trackers.
 - **🔀 Unified Feature Merge (`main` + `meerkat`) (`index.html`, `css/styles.css`, `js/*`)**:
@@ -20,7 +20,7 @@ This document records the version release history, major feature rollouts, bug f
 - **📐 Reclaimed Vertical Screen Space (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**:
   - Removed the redundant `#filePathsBar` strip beneath `#trackerProfilesBar` (paths and `Auto-Reconnect Folders on Startup` remain accessible inside `⚙️ Tools & Setup ▾` with full-path hover tooltips and in the bottom status bar) to give the tracker table more vertical room.
 - **PWA Cache Bump**:
-  - Incremented `CACHE_NAME` to `'tracker-ui-v32'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+  - Incremented `CACHE_NAME` to `'tracker-ui-v33'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
 
 ### `v1.18.2`
 - **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
