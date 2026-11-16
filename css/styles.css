@@ -895,88 +895,8 @@ button:disabled {
 }
 
 /* ==========================================================================
-   File Paths Strip & Workspace Controls Bar
+   Workspace Controls Bar
    ========================================================================== */
-.file-paths-bar {
-  flex-shrink: 0;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
-  padding: 0.3rem 1.25rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.75rem;
-}
-
-.file-paths-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.file-path-item {
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.32rem;
-}
-
-.file-path-label {
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.file-path-item code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.71rem;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 0.08rem 0.42rem;
-  border-radius: 0.3rem;
-}
-
-.file-path-sep {
-  color: var(--border-strong);
-}
-
-.file-paths-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.auto-reconnect-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.71rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 0.16rem 0.55rem;
-  border-radius: 999px;
-  cursor: pointer;
-  user-select: none;
-  transition: border-color 0.14s ease, color 0.14s ease;
-}
-
-.auto-reconnect-pill:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.auto-reconnect-pill input[type="checkbox"] {
-  width: 0.8rem;
-  height: 0.8rem;
-  cursor: pointer;
-  accent-color: var(--accent);
-}
-
 /* Controls Toolbar */
 .controls {
   flex-shrink: 0;

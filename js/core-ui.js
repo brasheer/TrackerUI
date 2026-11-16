@@ -478,7 +478,6 @@ const menuOpenViewOnly = document.getElementById('menuOpenViewOnly');
 const menuOpenMasterRollup = document.getElementById('menuOpenMasterRollup');
 const chkEnableMirrorCopy = document.getElementById('chkEnableMirrorCopy');
 const chkAutoReconnect = document.getElementById('chkAutoReconnect');
-const chkAutoReconnectBar = document.getElementById('chkAutoReconnectBar');
 const btnNewWorkbook = document.getElementById('btnNewWorkbook');
 const btnRepairSchema = document.getElementById('btnRepairSchema');
 const btnOpenSchemaMapper = document.getElementById('btnOpenSchemaMapper');
@@ -634,13 +633,6 @@ if (btnResetFontSize) {
     applyFontScaleToDOM(100, { persist: true });
   });
 }
-
-// File Paths Bar Elements
-const pathTrackerText = document.getElementById('pathTrackerText');
-const pathViewOnlyText = document.getElementById('pathViewOnlyText');
-const pathTemplatesSep = document.getElementById('pathTemplatesSep');
-const pathTemplatesItem = document.getElementById('pathTemplatesItem');
-const pathTemplatesText = document.getElementById('pathTemplatesText');
 
 // Sheet Navigation & Controls
 const btnPrevSheet = document.getElementById('btnPrevSheet');

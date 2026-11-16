@@ -145,25 +145,11 @@ function setAutoReconnectPreference(enabled) {
   autoReconnectEnabled = Boolean(enabled);
   localStorage.setItem(AUTO_RECONNECT_STORAGE_KEY, autoReconnectEnabled ? 'true' : 'false');
   if (chkAutoReconnect) chkAutoReconnect.checked = autoReconnectEnabled;
-  if (chkAutoReconnectBar) chkAutoReconnectBar.checked = autoReconnectEnabled;
 }
 
 if (chkAutoReconnect) {
   chkAutoReconnect.checked = autoReconnectEnabled;
   chkAutoReconnect.addEventListener('change', (e) => {
-    setAutoReconnectPreference(e.target.checked);
-    showToast(
-      autoReconnectEnabled
-        ? '⚡ Auto-Reconnect on Startup enabled.'
-        : 'Auto-Reconnect on Startup disabled.',
-      'info'
-    );
-  });
-}
-
-if (chkAutoReconnectBar) {
-  chkAutoReconnectBar.checked = autoReconnectEnabled;
-  chkAutoReconnectBar.addEventListener('change', (e) => {
     setAutoReconnectPreference(e.target.checked);
     showToast(
       autoReconnectEnabled
@@ -270,51 +256,30 @@ function updateFilePathsBarUI() {
     ? workingFileHandle.name
     : (lastSavedWorkbookName || null);
 
-  if (pathTrackerText) {
+  const mirrorEnabled = isActiveProfileMirrorEnabled();
+
+  if (menuSelectAgentFolder) {
     if (parentDirHandle && workingFileHandle) {
-      pathTrackerText.textContent = `${parentDirHandle.name}\\${workingFileHandle.name}`;
-    } else if (parentDirHandle) {
-      pathTrackerText.textContent = `${parentDirHandle.name}\\(No workbook selected)`;
+      menuSelectAgentFolder.title = `Active Tracker: ${parentDirHandle.name}\\${workingFileHandle.name}`;
     } else if (agentFolderName && wbName) {
-      pathTrackerText.textContent = `${agentFolderName}\\${wbName}`;
-    } else if (agentFolderName) {
-      pathTrackerText.textContent = `${agentFolderName}\\`;
+      menuSelectAgentFolder.title = `Tracker: ${agentFolderName}\\${wbName}`;
     } else {
-      pathTrackerText.textContent = 'Not connected';
+      menuSelectAgentFolder.title = 'Select folder containing current monthly tracker workbooks';
     }
   }
 
-  const mirrorEnabled = isActiveProfileMirrorEnabled();
-
-  if (pathViewOnlyText) {
+  if (btnSupervisorDir) {
     if (!mirrorEnabled) {
-      pathViewOnlyText.textContent = 'Disabled for this tracker tab';
+      btnSupervisorDir.title = 'View-Only mirror disabled for this tracker tab';
     } else if ((supervisorDirHandle || parentDirHandle) && workingFileHandle) {
       const mirrorDir = supervisorDirHandle ? supervisorDirHandle.name : parentDirHandle.name;
       const mirrorFile = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
-      pathViewOnlyText.textContent = `${mirrorDir}\\${mirrorFile}`;
+      btnSupervisorDir.title = `View-Only Mirror: ${mirrorDir}\\${mirrorFile}`;
     } else if (supFolderName && wbName) {
       const mirrorFile = wbName.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
-      pathViewOnlyText.textContent = `${supFolderName}\\${mirrorFile}`;
-    } else if (supFolderName) {
-      pathViewOnlyText.textContent = `${supFolderName}\\*(VIEW ONLY).xlsx`;
+      btnSupervisorDir.title = `View-Only Mirror: ${supFolderName}\\${mirrorFile}`;
     } else {
-      pathViewOnlyText.textContent = 'Not connected';
-    }
-  }
-
-  const tplName = templatesDirHandle
-    ? `${templatesDirHandle.name}\\ (${availableTemplates.length} template${availableTemplates.length === 1 ? '' : 's'})`
-    : (cachedTemplatesDirHandle ? `${cachedTemplatesDirHandle.name}\\ (cached)` : null);
-
-  if (pathTemplatesItem && pathTemplatesSep && pathTemplatesText) {
-    if (tplName) {
-      pathTemplatesSep.style.display = 'inline';
-      pathTemplatesItem.style.display = 'inline-flex';
-      pathTemplatesText.textContent = tplName;
-    } else {
-      pathTemplatesSep.style.display = 'none';
-      pathTemplatesItem.style.display = 'none';
+      btnSupervisorDir.title = 'Select folder where (VIEW ONLY).xlsx copies are saved';
     }
   }
 
@@ -471,7 +436,6 @@ async function initCachedDirectoryHandles() {
         // Ignore if user is explicitly unchecking the auto-reconnect toggle, changing theme/font, or picking a new folder
         if (
           evt.target.closest('#chkAutoReconnect') ||
-          evt.target.closest('#chkAutoReconnectBar') ||
           evt.target.closest('#btnLinkFile') ||
           evt.target.closest('#menuSelectAgentFolder') ||
           evt.target.closest('#btnResetAgentDir') ||

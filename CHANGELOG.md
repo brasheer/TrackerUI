@@ -17,8 +17,10 @@ This document records the version release history, major feature rollouts, bug f
   - Merged all `main` (`v1.18.1`–`v1.18.2`) enhancements—**Manual Row Copy & Paste**, **Optional Primary Field on Custom Schemas**, **Chronological Left-to-Right Daily Tab Ordering**, **Mid-Month Status vs. Retroactive UUIDv4 Auto-Healing**, and **Clean Validation List Dropdown Sync**—with all `meerkat` enhancements (**Smart Overdue Mutation & `.overdue-outline-red` Alerting**, **`Waiting` & `On Hold` Rollover Whitelist**, **Inline Copy Buttons**, **Multi-Tab Instance Locking & Save Mutex**, and **Template Sort Deprioritization**).
 - **🔢 Left-Hand Row Numbers (`index.html`, `js/tracker-table.js`, `js/workbook-io.js`, `css/styles.css`)**:
   - Added read-only Excel-style left-hand line/row numbers (`#` header `.tracker-row-num-th` and `<th scope="row" class="tracker-row-num-cell">`) showing sequential row index `1..N` (with a tooltip displaying the underlying Excel sheet and row number) across both Standard and Custom Department tracker tables, preserving checkbox batch selection, Like-Item filtering, and click-to-edit row behavior.
+- **📐 Reclaimed Vertical Screen Space (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**:
+  - Removed the redundant `#filePathsBar` strip beneath `#trackerProfilesBar` (paths and `Auto-Reconnect Folders on Startup` remain accessible inside `⚙️ Tools & Setup ▾` with full-path hover tooltips and in the bottom status bar) to give the tracker table more vertical room.
 - **PWA Cache Bump**:
-  - Incremented `CACHE_NAME` to `'tracker-ui-v31'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
+  - Incremented `CACHE_NAME` to `'tracker-ui-v32'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.18.3` in [`index.html`](index.html).
 
 ### `v1.18.2`
 - **🔧 Secondary / Custom Tracker Bug Fixes (`main` — `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
