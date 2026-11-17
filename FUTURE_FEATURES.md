@@ -32,12 +32,23 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 |---|---|---|---|
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
-| **Action Queue Array Routing** | *Scratch Sheets* | 📋 Planned | Quick-filter toggle buttons (e.g., Missing Tracking, Available Tracking, Duplicates by Lot) that instantly filter `mainList` and re-render the view without complex formulas. |
+| **Charts & Visual Analytics Panel (Phase 1 & 2)** | *Daily Tracker / Scratch Sheets / Supervisor Rollup* | 📋 Planned | Native SVG (zero-dependency) or offline-cached Chart.js visual cards for Daily Request Volume/Status breakdown, Title Tracking Red/Yellow/Green bucket progress, and Multi-Workbook Supervisor Category trends, with optional image/HTML export. |
 | **Supervisor Dashboard Auto-Refresh** | *Supervisor View* | 📋 Planned | A 3-to-5-minute active polling loop (`setInterval`) to traverse the directory and re-parse the master aggregated list, keeping the dashboard current. |
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.18.4`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.1`)
+
+### 📐 1080p Screen-Space Optimization & Overdue / Waiting Row Backgrounds (`v1.19.1`)
+- **Status**: ✅ Implemented in `v1.19.1`
+- **Delivered**: Added `@media (max-width: 1920px), (max-height: 1080px)` CSS rules hiding `#sheetTabsBar` and compacting vertical toolbar/table/dock spacing on 1080p and smaller screens (while retaining `#sheetTabsBar` on ultrawide monitors), updated `overdue-outline-red` table rows with `var(--danger-soft)` red fills, and added `waiting-outline-purple` (`var(--waiting-soft)` + `var(--waiting)`) styling for **Waiting / Waiting on Buyer / On Hold** rows in both the main table and Rollover preview pane.
+
+### ⚡ Scratch Sheet Excel Fill Handle, Cell Types, Copy+Enter Paste & Live `=FILTER` Array Lists (`v1.19.0`)
+- **Status**: ✅ Implemented in `v1.19.0`
+- **Delivered**:
+  - **Copy + `Enter` to Paste**: `Ctrl+C` → move to destination → `Enter` pastes and clears the copy marquee (`Ctrl+V` retains marquee for repeated pasting), with relative formula reference shifting.
+  - **Cell Data Types / Formats (`#scratchCellFormatSelect`) & Corner Fill Handle (`.scratch-fill-handle`)**: Supports `Auto`, `Text (@)`, `Date (MM/DD/YYYY)`, `Number (123)`, and `Currency ($)` (`numFmt`), dragging or double-clicking the corner fill square to copy or auto-increment Dates & Numbers (`+1` or multi-cell delta; `Ctrl` or `Text (@)` skips incrementing).
+  - **Live `=FILTER` Dynamic Array Engine & Auto-Filter Side Lists (`#scratchAutoFilterModal`)**: Evaluates `=FILTER`, `=UNIQUE`, `=SORT`, `=IF`, `=COUNTIF`, `=COUNTA`, `=SUM`, etc. live in-app with spill bounds and 1-click Red (Empty) / Yellow (`"Duplicate"`) / Green (Occupied) Title Tracking side lists.
 
 ### 🔢 Left-Hand Row Numbers (`v1.18.3` on `meerkat`)
 - **Status**: ✅ Implemented in `v1.18.3`
@@ -138,7 +149,7 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 | **Nested Agent JSON Config Storage** | ⏸️ Parked | Saving a `settings.json` file inside a nested agent directory for state persistence. Parked for now. |
 | **Mass Report Filter (380,000-Row Client-Side `Set` Filter)** | ⏸️ Parked | Explicitly parked. High memory overhead; requires `{ header: 1 }` stream parsing to avoid V8 memory crashes. |
 | **Smart Scratchpad (Real-Time Regex Lot # & Title Extractor)** | ⏸️ Parked | Split-pane scratchpad with automated regex scraping for 8-digit lot numbers. Parked in favor of Excel-like in-app scratch sheet tabs (`v1.15.0`). |
-| **Chart.js Metric View for Current Data** | ⏸️ On Hold | Deferred to prioritize agent daily workflow, table responsiveness, and scratch sheet capabilities. |
+| **Chart.js Metric View for Current Data** | 📋 Promoted to Section 1 | Superseded by the **Charts & Visual Analytics Panel (Phase 1 & 2)** proposal in Section 1 above (preferring lightweight zero-dependency SVG charts first, with optional Chart.js UMD if needed). |
 
 ---
 

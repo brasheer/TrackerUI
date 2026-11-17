@@ -8,7 +8,30 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.18.4` (Current — `main` / `meerkat`)
+### `v1.19.1` (Current — `main` / `meerkat`)
+- **📐 1920x1080 Screen-Space Optimization (`css/styles.css`)**:
+  - Added `@media (max-width: 1920px), (max-height: 1080px)` rules that hide `#sheetTabsBar` (`.sheet-tabs-bar`) and tighten vertical padding across the header, profile/sheet bars, controls toolbar, table cells, bottom editor dock, and status bar on `1920x1080` and smaller displays while keeping the quick tab strip visible on ultrawide monitors (e.g., `3440x1440`).
+- **🚨 Overdue & Waiting / On Hold Row Backgrounds + Outlines (`css/styles.css`, `js/tracker-table.js`, `js/rollover.js`)**:
+  - Updated `tbody#listBody tr.overdue-outline-red` to render a red background tint (`var(--danger-soft)`, deepening to `var(--danger-soft-hover)` on hover) alongside its red outline, matching `.preview-item.overdue-outline-red` in the Rollover modal.
+  - Added matching purple/violet background + outline styling (`.waiting-outline-purple` using `var(--waiting)` / `var(--waiting-soft)` / `var(--waiting-soft-hover)`) for **Waiting**, **Waiting on Buyer**, and **On Hold** rows in both the main tracker table and the Rollover preview pane.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v38'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.19.1` in [`index.html`](index.html).
+
+### `v1.19.0` (`main` / `meerkat`)
+- **📋 Excel Copy + `Enter` to Paste & Relative Formula Shifting (`js/scratch-sheets.js`, `index.html`)**:
+  - Pressing `Ctrl+C`, navigating to a destination cell, and pressing **`Enter`** now immediately pastes the copied cell/range and clears the dashed copy marquee (while `Ctrl+V` keeps the copy marquee active for repeated pasting).
+  - Internal Scratch Sheet copy/paste now carries raw formulas (`rawEditMatrix`) and automatically shifts relative cell references (e.g., `A2` → `A3`, respecting `$A$2` / `$A2` / `A$2` anchors).
+- **🟦 Corner Fill Handle Square, Cell Data Types & Date/Number Auto-Increment (`js/scratch-sheets.js`, `js/core-ui.js`, `css/styles.css`, `index.html`)**:
+  - Added an interactive Excel-style bottom-right **Fill Handle** square (`.scratch-fill-handle`) on the active selection: drag down/up/left/right (or double-click to auto-fill down adjacent data columns) to copy or extrapolate values and styles across cells.
+  - Added a **Cell Data Type / Format** selector (`#scratchCellFormatSelect`: `Type: Auto`, `Type: Text (@)`, `Type: Date (MM/DD/YYYY)`, `Type: Number (123)`, `Type: Currency ($)`) persisted via OpenXML `numFmt`.
+  - Dates (`MM/DD/YYYY` / `YYYY-MM-DD`) and Numbers (`<= 10` digits) automatically increment by `+1` day / `+1` (or by the step delta across 2+ selected source cells); explicit **`Type: Text (@)`** cells and `11+` digit tracking numbers never increment, and holding `Ctrl` while dragging forces exact copy without incrementing.
+- **⚡ Live `=FILTER` Array Functions & 1-Click Auto-Filter Side Lists (`js/scratch-sheets.js`, `js/core-ui.js`, `css/styles.css`, `index.html`)**:
+  - Added an in-app Scratch Sheet formula & dynamic array spill engine (`recalculateScratchWorksheetFormulas`) supporting **`=FILTER`**, **`=UNIQUE`**, **`=SORT`**, **`=IF`**, **`=COUNTIF`**, **`=COUNTA`**, **`=COUNTBLANK`**, **`=SUM`**, **`=AVERAGE`**, **`=MIN`**, **`=MAX`**, **`=ISBLANK`**, **`=ISNUMBER`**, **`=SEARCH`**, **`=FIND`**, **`=TRIM`**, **`=UPPER`**, **`=LOWER`**, **`=LEN`**, **`=LEFT`**, **`=RIGHT`**, **`=MID`**, and **`=TODAY()`** with element-wise boolean `*` (AND) / `+` (OR) broadcasting.
+  - Added the **`⚡ Auto-Filter Lists`** toolbar button (`#btnScratchAutoFilter`), context menu action, and **`#scratchAutoFilterModal`** builder (plus a `Title Tracking + Auto-Filtered Red / Yellow / Green Side Lists` starter layout in `Create New Scratch Sheet...`) to generate color-coded **Red** (Empty tracking), **Yellow** (`"Duplicate"`), and **Green** (Occupied / Available tracking) side lists ready for 1-click Outlook/Gmail copy & paste.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v37'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.19.0` in [`index.html`](index.html).
+
+### `v1.18.4` (`main` / `meerkat`)
 - **🏷️ Centralized App Version Management (`index.html`, `js/core-ui.js`)**:
   - Added `syncAppVersionDOM()` in `js/core-ui.js` wired to `data-app-version` attributes so `APP_VERSION` (`v1.18.4`) serves as the single source of truth for `document.title`, `#appVersionTag` (text & tooltip), the `Check for Updates & Clear Cache` menu item, User Manual badge, and status bar footer.
 - **📊 Excel-Styled HTML Table & Color-Preserving Scratch Sheet Copy/Paste (`js/scratch-sheets.js`, `css/styles.css`)**:

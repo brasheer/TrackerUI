@@ -828,7 +828,9 @@ const scratchFillDropdown = document.getElementById('scratchFillDropdown');
 const btnScratchNoFill = document.getElementById('btnScratchNoFill');
 const scratchFillPastelGrid = document.getElementById('scratchFillPastelGrid');
 const scratchFillStandardGrid = document.getElementById('scratchFillStandardGrid');
+const scratchCellFormatSelect = document.getElementById('scratchCellFormatSelect');
 const btnScratchTextToColumns = document.getElementById('btnScratchTextToColumns');
+const btnScratchAutoFilter = document.getElementById('btnScratchAutoFilter');
 const btnScratchUndo = document.getElementById('btnScratchUndo');
 const btnScratchRedo = document.getElementById('btnScratchRedo');
 const btnScratchAddRows = document.getElementById('btnScratchAddRows');
@@ -867,6 +869,26 @@ const ttcPreviewTitle = document.getElementById('ttcPreviewTitle');
 const ttcPreviewBox = document.getElementById('ttcPreviewBox');
 const btnCancelTextToColumns = document.getElementById('btnCancelTextToColumns');
 const btnConfirmTextToColumns = document.getElementById('btnConfirmTextToColumns');
+const scratchAutoFilterModal = document.getElementById('scratchAutoFilterModal');
+const scratchAutoFilterForm = document.getElementById('scratchAutoFilterForm');
+const afSheetBadge = document.getElementById('afSheetBadge');
+const afPresetModeSelect = document.getElementById('afPresetModeSelect');
+const afReturnStartCol = document.getElementById('afReturnStartCol');
+const afReturnEndCol = document.getElementById('afReturnEndCol');
+const afCriteriaCol = document.getElementById('afCriteriaCol');
+const afDestStartCol = document.getElementById('afDestStartCol');
+const afStartRowInput = document.getElementById('afStartRowInput');
+const afMaxRowInput = document.getElementById('afMaxRowInput');
+const afThreeBucketWrap = document.getElementById('afThreeBucketWrap');
+const afYellowKeywordInput = document.getElementById('afYellowKeywordInput');
+const afIncludeCriteriaInGreen = document.getElementById('afIncludeCriteriaInGreen');
+const afSingleCustomWrap = document.getElementById('afSingleCustomWrap');
+const afCustomOperatorSelect = document.getElementById('afCustomOperatorSelect');
+const afCustomValueInput = document.getElementById('afCustomValueInput');
+const afCustomColorSelect = document.getElementById('afCustomColorSelect');
+const afFormulaPreviewBox = document.getElementById('afFormulaPreviewBox');
+const btnCancelAutoFilter = document.getElementById('btnCancelAutoFilter');
+const btnConfirmAutoFilter = document.getElementById('btnConfirmAutoFilter');
 
 // Dynamic Column Role Mapper Modal DOM Elements (v1.17.0)
 const schemaMapperModal = document.getElementById('schemaMapperModal');
@@ -1588,7 +1610,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.18.4';
+const APP_VERSION = 'v1.19.1';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;

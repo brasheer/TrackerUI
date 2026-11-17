@@ -4,20 +4,30 @@
 //                     Excel Cell Fill Colors, Striped Rows, Data to Columns & Grid
 // ============================================================================
 
-// --- SCRATCH SHEET EXTENDED INTERACTION STATE (v1.16.0) ---
+// --- SCRATCH SHEET EXTENDED INTERACTION STATE (v1.16.0 - v1.19.0) ---
 const SCRATCH_MAX_UNDO_STEPS = 50;
 const SCRATCH_STRIPED_STORAGE_KEY = 'trackerui_scratch_striped_rows';
 const SCRATCH_LAST_FILL_STORAGE_KEY = 'trackerui_scratch_last_fill_id';
+
+const SCRATCH_FORMAT_DEFS = {
+  auto: { id: 'auto', label: 'Auto', numFmt: null },
+  text: { id: 'text', label: 'Text (@)', numFmt: '@' },
+  date: { id: 'date', label: 'Date (MM/DD/YYYY)', numFmt: 'mm/dd/yyyy' },
+  number: { id: 'number', label: 'Number (123)', numFmt: '0' },
+  currency: { id: 'currency', label: 'Currency ($)', numFmt: '$#,##0.00' }
+};
 
 const scratchSelectionRangeMap = new Map(); // sheetName -> { anchorRow, anchorCol, focusRow, focusCol }
 const scratchUndoStackMap = new Map(); // sheetName -> Array<{ changes, selectionBefore, selectionAfter, coalesceKey? }>
 const scratchRedoStackMap = new Map(); // sheetName -> Array<{ changes, selectionBefore, selectionAfter }>
 const scratchPendingColWidths = new Map(); // sheetName -> Map<colNumber, excelWidth>
-const scratchPendingFills = new Map(); // sheetName -> Map<'row::col', { fill, font }>
+const scratchPendingFills = new Map(); // sheetName -> Map<'row::col', { fill, font, numFmt? }>
+const scratchSpillStateMap = new Map(); // sheetName -> Map<'anchorR::anchorC', Array<{ r, c }>>
+const scratchSpilledCellsMap = new Map(); // sheetName -> Map<'r::c', { display, rawVal, anchorR, anchorC, formula, isError? }>
 let scratchClipboardRangeState = null; // { sheetName, minRow, maxRow, minCol, maxCol } | null
 let scratchInternalClipboardText = '';
-let scratchInternalClipboardState = null; // { tsv, html, styleMatrix } | null
-let scratchDragState = null; // { mode: 'cells'|'rows'|'cols', sheetName, clientX, clientY, rafId, lastExpandAt } | null
+let scratchInternalClipboardState = null; // { tsv, html, styleMatrix, rawEditMatrix, sourceRange } | null
+let scratchDragState = null; // { mode: 'cells'|'rows'|'cols'|'fill', sheetName, clientX, clientY, rafId, lastExpandAt, sourceRange?, fillTargetRange? } | null
 let scratchColResizeState = null; // { sheetName, col, thEl, resizerEl, startX, startWidthPx, currentWidthPx } | null
 let lastScratchNativeCopyAt = 0;
 let lastFormulaCoalesceMeta = null; // { key, at }
@@ -25,6 +35,7 @@ let scratchMutationVersion = 0;
 let scratchStripedRowsEnabled = localStorage.getItem(SCRATCH_STRIPED_STORAGE_KEY) !== 'false';
 let activeScratchFillPresetId = localStorage.getItem(SCRATCH_LAST_FILL_STORAGE_KEY) || 'gold_80';
 let activeTextToColumnsState = null; // { sheetName, col, minRow, maxRow, sourceRows: [{ r, raw }] } | null
+let activeScratchAutoFilterState = null; // { sheetName, headers: [{ col, letter, label }] } | null
 
 // Standard Microsoft Excel Default Fill Colors (Cell Styles, Theme Accents & Standard Palette)
 const EXCEL_DEFAULT_FILL_PALETTE = [
@@ -142,24 +153,31 @@ function extractScratchCellVisualStyle(ws, rNum, cNum) {
 }
 
 function captureCellStyleSnapshot(ws, rNum, cNum) {
-  if (!ws) return { fill: null, font: null };
+  if (!ws) return { fill: null, font: null, numFmt: null };
   const row = ws.findRow ? ws.findRow(rNum) : null;
   const cell = row && row.findCell ? row.findCell(cNum) : null;
-  if (!cell || !cell.style) return { fill: null, font: null };
+  const numFmt = (cell && typeof cell.numFmt === 'string' && cell.numFmt.trim() !== '')
+    ? cell.numFmt.trim()
+    : ((cell && cell.style && typeof cell.style.numFmt === 'string' && cell.style.numFmt.trim() !== '')
+        ? cell.style.numFmt.trim()
+        : null);
+  if (!cell || !cell.style) return { fill: null, font: null, numFmt };
   return {
     fill: cell.style.fill ? JSON.parse(JSON.stringify(cell.style.fill)) : null,
-    font: cell.style.font ? JSON.parse(JSON.stringify(cell.style.font)) : null
+    font: cell.style.font ? JSON.parse(JSON.stringify(cell.style.font)) : null,
+    numFmt
   };
 }
 
 function buildStyleSnapshotForFillPreset(beforeSnap, presetId) {
   const baseFont = beforeSnap && beforeSnap.font ? JSON.parse(JSON.stringify(beforeSnap.font)) : null;
+  const baseNumFmt = beforeSnap && beforeSnap.numFmt ? beforeSnap.numFmt : null;
   if (!presetId || presetId === 'none') {
     if (baseFont && baseFont.color) {
       delete baseFont.color;
     }
     const cleanFont = baseFont && Object.keys(baseFont).length > 0 ? baseFont : null;
-    return { fill: null, font: cleanFont };
+    return { fill: null, font: cleanFont, numFmt: baseNumFmt };
   }
 
   const preset = EXCEL_DEFAULT_FILL_PALETTE.find(p => p.id === presetId);
@@ -173,7 +191,8 @@ function buildStyleSnapshotForFillPreset(beforeSnap, presetId) {
       pattern: 'solid',
       fgColor: { argb: preset.fillArgb }
     },
-    font: nextFont
+    font: nextFont,
+    numFmt: baseNumFmt
   };
 }
 
@@ -193,6 +212,12 @@ function applyCellStyleSnapshotToExcelCell(ws, rNum, cNum, snap) {
     nextStyle.font = JSON.parse(JSON.stringify(snap.font));
   } else {
     delete nextStyle.font;
+  }
+
+  if (snap && typeof snap.numFmt === 'string' && snap.numFmt.trim() !== '') {
+    nextStyle.numFmt = snap.numFmt.trim();
+  } else {
+    delete nextStyle.numFmt;
   }
 
   cell.style = nextStyle;
@@ -244,28 +269,207 @@ function getRangeCoordString(range) {
   return `${getCellCoordString(range.minRow, range.minCol)}:${getCellCoordString(range.maxRow, range.maxCol)}`;
 }
 
+function isDateLikeValue(val) {
+  return Boolean(val && typeof val === 'object' && (val instanceof Date || Object.prototype.toString.call(val) === '[object Date]'));
+}
+
 function formatExcelDateDisplay(dateObj) {
-  if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return '';
+  if (!isDateLikeValue(dateObj) || isNaN(dateObj.getTime())) return '';
   const yyyy = dateObj.getUTCFullYear();
   const mm = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(dateObj.getUTCDate()).padStart(2, '0');
   return `${mm}/${dd}/${yyyy}`;
 }
 
-function extractScratchCellInfo(ws, rNum, cNum) {
-  if (!ws) return { display: '', rawEdit: '', isFormula: false };
-  const row = ws.findRow ? ws.findRow(rNum) : ws.getRow(rNum);
-  if (!row) return { display: '', rawEdit: '', isFormula: false };
-  const cell = row.findCell ? row.findCell(cNum) : row.getCell(cNum);
-  if (!cell) return { display: '', rawEdit: '', isFormula: false };
+function parseFlexibleScratchDate(rawVal, { allowTwoDigitHyphen = false } = {}) {
+  if (isDateLikeValue(rawVal) && !isNaN(rawVal.getTime())) {
+    const year = rawVal.getUTCFullYear();
+    const month = rawVal.getUTCMonth() + 1;
+    const day = rawVal.getUTCDate();
+    const dateUtc = new Date(Date.UTC(year, month - 1, day));
+    return {
+      __isDate: true,
+      dateUtc,
+      display: formatExcelDateDisplay(dateUtc),
+      year,
+      month,
+      day,
+      dayEpoch: Math.floor(dateUtc.getTime() / 86400000)
+    };
+  }
+  if (typeof rawVal !== 'string') return null;
+  const s = rawVal.trim();
+  if (!s) return null;
 
-  const val = cell.value;
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  const isoMatch = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (isoMatch) {
+    year = parseInt(isoMatch[1], 10);
+    month = parseInt(isoMatch[2], 10);
+    day = parseInt(isoMatch[3], 10);
+  } else {
+    const usMatch = s.match(/^(\d{1,2})([\/\-])(\d{1,2})\2(\d{2}|\d{4})$/);
+    if (!usMatch) return null;
+    const sep = usMatch[2];
+    const yStr = usMatch[4];
+    if (sep === '-' && yStr.length === 2 && !allowTwoDigitHyphen) {
+      return null;
+    }
+    month = parseInt(usMatch[1], 10);
+    day = parseInt(usMatch[3], 10);
+    const yNum = parseInt(yStr, 10);
+    year = yStr.length === 2 ? (yNum <= 69 ? 2000 + yNum : 1900 + yNum) : yNum;
+  }
+
+  if (year < 1900 || year > 2199 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  if (dt.getUTCFullYear() !== year || dt.getUTCMonth() !== month - 1 || dt.getUTCDate() !== day) {
+    return null;
+  }
+  return {
+    __isDate: true,
+    dateUtc: dt,
+    display: formatExcelDateDisplay(dt),
+    year,
+    month,
+    day,
+    dayEpoch: Math.floor(dt.getTime() / 86400000)
+  };
+}
+
+function detectScratchFormatIdFromNumFmt(numFmt) {
+  const fmt = String(numFmt || '').trim();
+  if (!fmt || fmt.toLowerCase() === 'general') return 'auto';
+  if (fmt === '@') return 'text';
+  const clean = fmt.replace(/"[^"]*"/g, '');
+  if (/\$|currency/i.test(fmt)) return 'currency';
+  if (/(?:^|[^a-z\\])(mm?|dd?|yy(?:yy)?)(?:[^a-z]|$)/i.test(clean)) return 'date';
+  if (/^[#0.,;%?+\-()\s]+$/.test(clean)) return 'number';
+  return 'auto';
+}
+
+function getScratchCellFormatId(ws, rNum, cNum) {
+  if (!ws) return 'auto';
+  const row = ws.findRow ? ws.findRow(rNum) : null;
+  const cell = row && row.findCell ? row.findCell(cNum) : null;
+  if (!cell) return 'auto';
+  const fmt = (typeof cell.numFmt === 'string' && cell.numFmt.trim() !== '')
+    ? cell.numFmt.trim()
+    : ((cell.style && typeof cell.style.numFmt === 'string') ? cell.style.numFmt.trim() : '');
+  const detected = detectScratchFormatIdFromNumFmt(fmt);
+  if (detected !== 'auto') return detected;
+  if (cell.value instanceof Date) return 'date';
+  return 'auto';
+}
+
+function mapFormulaOutsideQuotes(formulaBody, transformFn) {
+  const str = String(formulaBody || '');
+  let out = '';
+  let inQuotes = false;
+  let chunkStart = 0;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === '"') {
+      if (inQuotes) {
+        if (str[i + 1] === '"') {
+          i++;
+          continue;
+        }
+        out += str.slice(chunkStart, i + 1);
+        chunkStart = i + 1;
+        inQuotes = false;
+      } else {
+        out += transformFn(str.slice(chunkStart, i));
+        chunkStart = i;
+        inQuotes = true;
+      }
+    }
+  }
+  if (chunkStart < str.length) {
+    out += inQuotes ? str.slice(chunkStart) : transformFn(str.slice(chunkStart));
+  }
+  return out;
+}
+
+function toHumanReadableFormula(formulaBody) {
+  return mapFormulaOutsideQuotes(formulaBody, (seg) =>
+    seg
+      .replace(/_xlfn\._xlws\./gi, '')
+      .replace(/_xlfn\./gi, '')
+      .replace(/_xlpm\./gi, '')
+  );
+}
+
+function toExcelOpenXmlFormula(formulaBody) {
+  const clean = toHumanReadableFormula(formulaBody);
+  return mapFormulaOutsideQuotes(clean, (seg) =>
+    seg
+      .replace(/\b(FILTER|SORT)\s*\(/gi, (_m, fn) => `_xlfn._xlws.${fn.toUpperCase()}(`)
+      .replace(/\b(UNIQUE)\s*\(/gi, (_m, fn) => `_xlfn.${fn.toUpperCase()}(`)
+  );
+}
+
+function formatScratchScalarValue(val, fmtId = 'auto') {
+  if (val === null || val === undefined) return '';
+  if (val && typeof val === 'object' && val.__isDate && val.display) return val.display;
+  if (isDateLikeValue(val)) return formatExcelDateDisplay(val);
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) return String(val);
+    if (fmtId === 'currency') {
+      const sign = val < 0 ? '-' : '';
+      return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return String(val);
+  }
+  if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+  return String(val);
+}
+
+function extractScratchCellInfo(ws, rNum, cNum, { skipSpillLookup = false } = {}) {
+  if (!ws) return { display: '', rawEdit: '', isFormula: false, isSpilled: false, formatId: 'auto' };
+  const sheetName = ws.name || '';
+  const coordKey = `${rNum}::${cNum}`;
+  const spillMap = !skipSpillLookup && sheetName ? scratchSpilledCellsMap.get(sheetName) : null;
+  const spilledEntry = spillMap ? spillMap.get(coordKey) : null;
+
+  const row = ws.findRow ? ws.findRow(rNum) : ws.getRow(rNum);
+  const cell = row ? (row.findCell ? row.findCell(cNum) : row.getCell(cNum)) : null;
+  const fmtStr = cell
+    ? ((typeof cell.numFmt === 'string' && cell.numFmt.trim() !== '')
+        ? cell.numFmt.trim()
+        : ((cell.style && typeof cell.style.numFmt === 'string') ? cell.style.numFmt.trim() : ''))
+    : '';
+  let formatId = detectScratchFormatIdFromNumFmt(fmtStr);
+  const val = cell ? cell.value : null;
+
+  if (val instanceof Date && formatId === 'auto') {
+    formatId = 'date';
+  }
+
+  // If this cell belongs to an active dynamic array spill (or cleared Excel cached spill), render live spill output
+  if (spilledEntry && !(val && typeof val === 'object' && (val.formula !== undefined || val.sharedFormula !== undefined))) {
+    const disp = formatScratchScalarValue(spilledEntry.rawVal, formatId);
+    return {
+      display: disp,
+      rawEdit: disp,
+      isFormula: false,
+      isSpilled: true,
+      anchorR: spilledEntry.anchorR,
+      anchorC: spilledEntry.anchorC,
+      formatId
+    };
+  }
+
   if (val === null || val === undefined) {
-    return { display: '', rawEdit: '', isFormula: false };
+    return { display: '', rawEdit: '', isFormula: false, isSpilled: false, formatId };
   }
   if (val instanceof Date) {
     const dStr = formatExcelDateDisplay(val);
-    return { display: dStr, rawEdit: dStr, isFormula: false };
+    return { display: dStr, rawEdit: dStr, isFormula: false, isSpilled: false, formatId };
   }
   if (typeof val === 'object') {
     if (val.formula !== undefined || val.sharedFormula !== undefined) {
@@ -273,47 +477,57 @@ function extractScratchCellInfo(ws, rNum, cNum) {
       if (val.result instanceof Date) {
         resStr = formatExcelDateDisplay(val.result);
       } else if (val.result !== undefined && val.result !== null && typeof val.result !== 'object') {
-        resStr = String(val.result);
+        resStr = formatScratchScalarValue(val.result, formatId);
       } else if (val.result && typeof val.result === 'object' && val.result.error) {
         resStr = String(val.result.error);
       }
       const rawFormula = val.formula
-        ? `=${String(val.formula)}`
+        ? `=${toHumanReadableFormula(val.formula)}`
         : resStr;
-      return { display: resStr, rawEdit: rawFormula, isFormula: true };
+      return { display: resStr, rawEdit: rawFormula, isFormula: true, isSpilled: false, formatId };
     }
     if (Array.isArray(val.richText)) {
       const joined = val.richText.map(t => t.text || '').join('');
-      return { display: joined, rawEdit: joined, isFormula: false };
+      return { display: joined, rawEdit: joined, isFormula: false, isSpilled: false, formatId };
     }
     if (val.text !== undefined && val.text !== null) {
       const s = String(val.text);
-      return { display: s, rawEdit: s, isFormula: false };
+      return { display: s, rawEdit: s, isFormula: false, isSpilled: false, formatId };
     }
     if (val.error) {
       const eStr = String(val.error);
-      return { display: eStr, rawEdit: eStr, isFormula: false };
+      return { display: eStr, rawEdit: eStr, isFormula: false, isSpilled: false, formatId };
     }
-    return { display: '', rawEdit: '', isFormula: false };
+    return { display: '', rawEdit: '', isFormula: false, isSpilled: false, formatId };
+  }
+
+  if (typeof val === 'number') {
+    return {
+      display: formatScratchScalarValue(val, formatId),
+      rawEdit: String(val),
+      isFormula: false,
+      isSpilled: false,
+      formatId
+    };
   }
 
   const str = String(val);
-  return { display: str, rawEdit: str, isFormula: false };
+  return { display: str, rawEdit: str, isFormula: false, isSpilled: false, formatId };
 }
 
 function measureScratchWorksheetBounds(ws) {
-  let nonEmptyRows = 0;
   let maxRow = 0;
   let maxCol = 0;
   if (!ws) return { nonEmptyRows: 0, maxRow: 0, maxCol: 0 };
 
+  const nonEmptyRowSet = new Set();
+
   ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    let rowHasValue = false;
     row.eachCell({ includeEmpty: false }, (_cell, colNumber) => {
       const info = extractScratchCellInfo(ws, rowNumber, colNumber);
       const visual = extractScratchCellVisualStyle(ws, rowNumber, colNumber);
       if (info.display.trim() !== '' || info.isFormula) {
-        rowHasValue = true;
+        nonEmptyRowSet.add(rowNumber);
         if (rowNumber > maxRow) maxRow = rowNumber;
         if (colNumber > maxCol) maxCol = colNumber;
       } else if (visual.bgHex) {
@@ -321,12 +535,24 @@ function measureScratchWorksheetBounds(ws) {
         if (colNumber > maxCol) maxCol = colNumber;
       }
     });
-    if (rowHasValue) {
-      nonEmptyRows++;
-    }
   });
 
-  return { nonEmptyRows, maxRow, maxCol };
+  const spillMap = ws.name ? scratchSpilledCellsMap.get(ws.name) : null;
+  if (spillMap && spillMap.size > 0) {
+    for (const [coordKey, entry] of spillMap.entries()) {
+      const disp = formatScratchScalarValue(entry.rawVal);
+      if (disp.trim() !== '') {
+        const [rStr, cStr] = coordKey.split('::');
+        const r = parseInt(rStr, 10);
+        const c = parseInt(cStr, 10);
+        nonEmptyRowSet.add(r);
+        if (r > maxRow) maxRow = r;
+        if (c > maxCol) maxCol = c;
+      }
+    }
+  }
+
+  return { nonEmptyRows: nonEmptyRowSet.size, maxRow, maxCol };
 }
 
 function applyRawEditToExcelCell(ws, rNum, cNum, rawText) {
@@ -334,19 +560,49 @@ function applyRawEditToExcelCell(ws, rNum, cNum, rawText) {
   const normalized = String(rawText ?? '').replace(/\r/g, '');
   const row = ws.getRow(rNum);
   const cell = row.getCell(cNum);
+  const fmtStr = (typeof cell.numFmt === 'string' && cell.numFmt.trim() !== '')
+    ? cell.numFmt.trim()
+    : ((cell.style && typeof cell.style.numFmt === 'string') ? cell.style.numFmt.trim() : '');
+  const formatId = detectScratchFormatIdFromNumFmt(fmtStr);
 
   if (normalized === '') {
     cell.value = null;
   } else if (normalized.startsWith('=') && normalized.length > 1) {
-    cell.value = { formula: normalized.slice(1) };
+    cell.value = { formula: toExcelOpenXmlFormula(normalized.slice(1)) };
+  } else if (formatId === 'text') {
+    cell.value = normalized;
+  } else if (formatId === 'date') {
+    const parsed = parseFlexibleScratchDate(normalized, { allowTwoDigitHyphen: true });
+    if (parsed) {
+      cell.value = parsed.dateUtc;
+      if (!fmtStr || fmtStr.toLowerCase() === 'general') {
+        cell.numFmt = 'mm/dd/yyyy';
+      }
+    } else {
+      cell.value = normalized;
+    }
+  } else if (formatId === 'number' || formatId === 'currency') {
+    const stripped = normalized.trim().replace(/^\$/, '').replace(/,/g, '');
+    const isNum =
+      /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(stripped) &&
+      stripped.replace(/[-.]/g, '').length <= 12;
+    cell.value = isNum ? Number(stripped) : normalized;
   } else {
     const trimmed = normalized.trim();
-    // Preserve leading-zero codes and 11+ digit carrier tracking numbers (FedEx/UPS/USPS) as exact strings
-    // so Excel never formats them into floating-point scientific notation (e.g., 7.74829E+11).
-    const isSafeNumber =
-      /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed) &&
-      trimmed.replace(/[-.]/g, '').length <= 10;
-    cell.value = isSafeNumber ? Number(trimmed) : normalized;
+    const parsedDate = parseFlexibleScratchDate(trimmed, { allowTwoDigitHyphen: false });
+    if (parsedDate) {
+      cell.value = parsedDate.dateUtc;
+      if (!fmtStr || fmtStr.toLowerCase() === 'general') {
+        cell.numFmt = 'mm/dd/yyyy';
+      }
+    } else {
+      // Preserve leading-zero codes and 11+ digit carrier tracking numbers (FedEx/UPS/USPS) as exact strings
+      // so Excel never formats them into floating-point scientific notation (e.g., 7.74829E+11).
+      const isSafeNumber =
+        /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed) &&
+        trimmed.replace(/[-.]/g, '').length <= 10;
+      cell.value = isSafeNumber ? Number(trimmed) : normalized;
+    }
   }
   row.commit();
 }
@@ -379,20 +635,7 @@ function getPendingScratchMutationCount(sheetName) {
 
 function reapplyPendingScratchEditsToWorkbook(wb) {
   if (!wb) return;
-  if (scratchPendingEdits.size > 0) {
-    for (const [sheetName, cellMap] of scratchPendingEdits.entries()) {
-      const ws = wb.getWorksheet(sheetName);
-      if (!ws) continue;
-      for (const [coordKey, rawVal] of cellMap.entries()) {
-        const [rStr, cStr] = coordKey.split('::');
-        const r = parseInt(rStr, 10);
-        const c = parseInt(cStr, 10);
-        if (r >= 1 && c >= 1) {
-          applyRawEditToExcelCell(ws, r, c, rawVal);
-        }
-      }
-    }
-  }
+  // Apply style/format snapshots first so applyRawEditToExcelCell sees each cell's numFmt
   if (scratchPendingFills.size > 0) {
     for (const [sheetName, fillMap] of scratchPendingFills.entries()) {
       const ws = wb.getWorksheet(sheetName);
@@ -403,6 +646,20 @@ function reapplyPendingScratchEditsToWorkbook(wb) {
         const c = parseInt(cStr, 10);
         if (r >= 1 && c >= 1) {
           applyCellStyleSnapshotToExcelCell(ws, r, c, styleSnap);
+        }
+      }
+    }
+  }
+  if (scratchPendingEdits.size > 0) {
+    for (const [sheetName, cellMap] of scratchPendingEdits.entries()) {
+      const ws = wb.getWorksheet(sheetName);
+      if (!ws) continue;
+      for (const [coordKey, rawVal] of cellMap.entries()) {
+        const [rStr, cStr] = coordKey.split('::');
+        const r = parseInt(rStr, 10);
+        const c = parseInt(cStr, 10);
+        if (r >= 1 && c >= 1) {
+          applyRawEditToExcelCell(ws, r, c, rawVal);
         }
       }
     }
@@ -959,6 +1216,1307 @@ function updateScratchSelectionStatsUI() {
   scratchSelectionStats.style.display = 'inline-block';
 }
 
+// --- CELL DATA TYPE / FORMAT SELECTOR & LIVE FORMULA / SPILL ENGINE (v1.19.0) ---
+function syncScratchFormatSelectUI() {
+  if (!scratchCellFormatSelect || activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
+  const ws = workbook.getWorksheet(activeWorkspaceTab);
+  if (!ws) return;
+  const range = getScratchSelectionRange(activeWorkspaceTab);
+  const fmtId = getScratchCellFormatId(ws, range.anchorRow, range.anchorCol);
+  scratchCellFormatSelect.value = SCRATCH_FORMAT_DEFS[fmtId] ? fmtId : 'auto';
+}
+
+function applyScratchFormatToSelection(sheetName, fmtId) {
+  if (!workbook || !sheetName || sheetName === DAILY_TRACKER_WS_TAB) return 0;
+  const def = SCRATCH_FORMAT_DEFS[fmtId] || SCRATCH_FORMAT_DEFS.auto;
+  commitActiveScratchInlineEdit();
+  const ws = workbook.getWorksheet(sheetName);
+  if (!ws) return 0;
+
+  const range = getScratchSelectionRange(sheetName);
+  const dims = getScratchSheetGridDimensions(ws, sheetName);
+  const isFullColumnSelection = range.minRow === 1 && range.maxRow >= dims.rows && range.colCount < dims.cols;
+  const effectiveMaxRow = isFullColumnSelection ? Math.max(dims.dataMaxRow, dims.rows) : range.maxRow;
+
+  if (isFullColumnSelection) {
+    for (let c = range.minCol; c <= range.maxCol; c++) {
+      ws.getColumn(c).numFmt = def.numFmt || undefined;
+    }
+  }
+
+  const edits = [];
+  for (let r = range.minRow; r <= effectiveMaxRow; r++) {
+    for (let c = range.minCol; c <= range.maxCol; c++) {
+      const beforeSnap = captureCellStyleSnapshot(ws, r, c);
+      const nextSnap = {
+        fill: beforeSnap.fill,
+        font: beforeSnap.font,
+        numFmt: def.numFmt
+      };
+      const info = extractScratchCellInfo(ws, r, c, { skipSpillLookup: true });
+      const editObj = { r, c, styleSnap: nextSnap };
+      if (!info.isFormula && info.rawEdit !== '' && !(isFullColumnSelection && r === 1)) {
+        editObj.rawText = info.rawEdit;
+      }
+      edits.push(editObj);
+    }
+  }
+
+  const count = applyScratchCellChanges(sheetName, edits, { recordUndo: true });
+  syncScratchFormatSelectUI();
+  if (count > 0) {
+    showToast(`Set cell type to ${def.label} on ${count} cell${count === 1 ? '' : 's'}.`, 'info');
+  }
+  return count;
+}
+
+function excelLetterToColIndex(letters) {
+  const clean = String(letters || '').trim().toUpperCase();
+  if (!clean) return 0;
+  let col = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const code = clean.charCodeAt(i);
+    if (code < 65 || code > 90) return 0;
+    col = col * 26 + (code - 64);
+  }
+  return col;
+}
+
+function shiftFormulaCellReferences(formulaStr, rowDelta, colDelta) {
+  if (!formulaStr || (rowDelta === 0 && colDelta === 0)) return formulaStr;
+  return mapFormulaOutsideQuotes(formulaStr, (seg) =>
+    seg.replace(/(^|[^A-Za-z0-9_])(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![A-Za-z0-9_(])/g, (full, prefix, absCol, colLetters, absRow, rowStr) => {
+      const cNum = excelLetterToColIndex(colLetters);
+      const rNum = parseInt(rowStr, 10);
+      if (cNum < 1 || cNum > 16384 || rNum < 1 || rNum > 1048576) return full;
+      const nextCol = absCol ? cNum : Math.max(1, cNum + colDelta);
+      const nextRow = absRow ? rNum : Math.max(1, rNum + rowDelta);
+      return `${prefix}${absCol}${colIndexToExcelLetter(nextCol)}${absRow}${nextRow}`;
+    })
+  );
+}
+
+function makeFormulaMatrix(rows) {
+  return { __isMatrix: true, rows };
+}
+
+function isFormulaMatrix(val) {
+  return Boolean(val && typeof val === 'object' && val.__isMatrix === true && Array.isArray(val.rows));
+}
+
+function makeFormulaError(code) {
+  return { __isError: true, error: code };
+}
+
+function isFormulaError(val) {
+  return Boolean(val && typeof val === 'object' && val.__isError === true);
+}
+
+function isEmptyFormulaVal(val) {
+  return val === null || val === undefined || val === '';
+}
+
+function unwrapFormulaDate(val) {
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return parseFlexibleScratchDate(val);
+  }
+  if (val && typeof val === 'object' && val.__isDate) {
+    return val;
+  }
+  return null;
+}
+
+function formulaValToString(val) {
+  if (isFormulaError(val)) return val.error;
+  if (val === null || val === undefined) return '';
+  if (val instanceof Date) return formatExcelDateDisplay(val);
+  if (typeof val === 'object' && val.__isDate) return val.display;
+  if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+  return String(val);
+}
+
+function formulaValToNumber(val) {
+  if (isFormulaError(val)) return val;
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'boolean') return val ? 1 : 0;
+  if (val instanceof Date) return Math.floor(val.getTime() / 86400000);
+  if (typeof val === 'object' && val.__isDate) return val.dayEpoch;
+  const s = String(val).trim().replace(/^\$/, '').replace(/,/g, '');
+  if (s !== '' && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(s)) {
+    return Number(s);
+  }
+  return makeFormulaError('#VALUE!');
+}
+
+function formulaValToBool(val) {
+  if (isFormulaError(val)) return false;
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'number') return val !== 0;
+  if (typeof val === 'string') {
+    const up = val.trim().toUpperCase();
+    if (up === 'TRUE') return true;
+    if (up === 'FALSE' || up === '') return false;
+    return false;
+  }
+  return Boolean(val);
+}
+
+function compareFormulaScalars(a, b, op) {
+  if (isFormulaError(a)) return a;
+  if (isFormulaError(b)) return b;
+
+  const dA = unwrapFormulaDate(a);
+  const dB = unwrapFormulaDate(b);
+  if (dA && dB) {
+    const cmp = dA.dayEpoch - dB.dayEpoch;
+    return evalCmpOp(cmp, op);
+  }
+
+  const aNull = a === null || a === undefined;
+  const bNull = b === null || b === undefined;
+  if (aNull && bNull) return evalCmpOp(0, op);
+  if (aNull) {
+    if (b === '') return evalCmpOp(0, op);
+    if (typeof b === 'number') return evalCmpOp(0 - b, op);
+    if (typeof b === 'boolean') return evalCmpOp(0 - (b ? 1 : 0), op);
+    return evalCmpOp(''.localeCompare(formulaValToString(b).toLowerCase()), op);
+  }
+  if (bNull) {
+    if (a === '') return evalCmpOp(0, op);
+    if (typeof a === 'number') return evalCmpOp(a - 0, op);
+    if (typeof a === 'boolean') return evalCmpOp((a ? 1 : 0) - 0, op);
+    return evalCmpOp(formulaValToString(a).toLowerCase().localeCompare(''), op);
+  }
+
+  if (typeof a === 'number' && typeof b === 'number') {
+    return evalCmpOp(a - b, op);
+  }
+  if (typeof a === 'boolean' && typeof b === 'boolean') {
+    return evalCmpOp((a ? 1 : 0) - (b ? 1 : 0), op);
+  }
+  const sA = formulaValToString(a).toLowerCase();
+  const sB = formulaValToString(b).toLowerCase();
+  if (typeof a !== typeof b) {
+    if (op === '=' || op === '==' || op === '<>' || op === '!=') {
+      // Numbers vs non-matching strings are unequal in Excel (e.g., 123 <> "Duplicate" -> TRUE)
+      return (op === '<>' || op === '!=') ? true : false;
+    }
+  }
+  return evalCmpOp(sA === sB ? 0 : (sA < sB ? -1 : 1), op);
+}
+
+function evalCmpOp(cmp, op) {
+  switch (op) {
+    case '=':
+    case '==': return cmp === 0;
+    case '<>':
+    case '!=': return cmp !== 0;
+    case '<': return cmp < 0;
+    case '<=': return cmp <= 0;
+    case '>': return cmp > 0;
+    case '>=': return cmp >= 0;
+    default: return false;
+  }
+}
+
+function broadcastBinaryOp(left, right, fn) {
+  const lMat = isFormulaMatrix(left);
+  const rMat = isFormulaMatrix(right);
+  if (!lMat && !rMat) {
+    return fn(left, right);
+  }
+  const lRows = lMat ? left.rows : [[left]];
+  const rRows = rMat ? right.rows : [[right]];
+  const rowCount = Math.max(lRows.length, rRows.length);
+  const colCount = Math.max(lRows[0] ? lRows[0].length : 1, rRows[0] ? rRows[0].length : 1);
+  const out = [];
+  for (let r = 0; r < rowCount; r++) {
+    const lr = lRows[r % lRows.length];
+    const rr = rRows[r % rRows.length];
+    const rowOut = [];
+    for (let c = 0; c < colCount; c++) {
+      const lv = lr[c % lr.length];
+      const rv = rr[c % rr.length];
+      rowOut.push(fn(lv, rv));
+    }
+    out.push(rowOut);
+  }
+  return makeFormulaMatrix(out);
+}
+
+function broadcastUnaryOp(val, fn) {
+  if (!isFormulaMatrix(val)) return fn(val);
+  return makeFormulaMatrix(val.rows.map(row => row.map(cell => fn(cell))));
+}
+
+function tokenizeScratchFormula(expr) {
+  const tokens = [];
+  const s = String(expr || '').trim();
+  let i = 0;
+  const len = s.length;
+
+  while (i < len) {
+    const ch = s[i];
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+
+    // String literal "..."
+    if (ch === '"') {
+      let str = '';
+      i++;
+      while (i < len) {
+        if (s[i] === '"') {
+          if (s[i + 1] === '"') {
+            str += '"';
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        str += s[i];
+        i++;
+      }
+      tokens.push({ type: 'STRING', value: str });
+      continue;
+    }
+
+    // Sheet-quoted prefix 'Sheet Name'!
+    if (ch === "'") {
+      let sheet = '';
+      let j = i + 1;
+      while (j < len) {
+        if (s[j] === "'") {
+          if (s[j + 1] === "'") {
+            sheet += "'";
+            j += 2;
+            continue;
+          }
+          j++;
+          break;
+        }
+        sheet += s[j];
+        j++;
+      }
+      if (s[j] === '!') {
+        i = j + 1;
+        tokens.push({ type: 'SHEET_PREFIX', value: sheet });
+        continue;
+      }
+    }
+
+    // Two-character comparison operators
+    const two = s.slice(i, i + 2);
+    if (two === '<>' || two === '!=' || two === '<=' || two === '>=') {
+      tokens.push({ type: 'OP', value: two });
+      i += 2;
+      continue;
+    }
+
+    if ('=<>+-*/&'.includes(ch)) {
+      tokens.push({ type: 'OP', value: ch });
+      i++;
+      continue;
+    }
+
+    if (ch === '(' || ch === ')' || ch === ',' || ch === ':') {
+      tokens.push({ type: ch, value: ch });
+      i++;
+      continue;
+    }
+
+    // Number literal
+    if (/\d/.test(ch) || (ch === '.' && /\d/.test(s[i + 1] || ''))) {
+      let numStr = '';
+      while (i < len && /[\d.]/.test(s[i])) {
+        numStr += s[i++];
+      }
+      tokens.push({ type: 'NUMBER', value: Number(numStr) });
+      continue;
+    }
+
+    // Identifier, function name, or cell reference ($A$1 / Sheet1!A1)
+    if (/[A-Za-z_$]/.test(ch)) {
+      let ident = '';
+      while (i < len && /[A-Za-z0-9_.$]/.test(s[i])) {
+        ident += s[i++];
+      }
+      if (s[i] === '!') {
+        i++;
+        tokens.push({ type: 'SHEET_PREFIX', value: ident });
+        continue;
+      }
+      tokens.push({ type: 'IDENT', value: ident });
+      continue;
+    }
+
+    // Unknown char: emit as error token
+    tokens.push({ type: 'ERR', value: ch });
+    i++;
+  }
+
+  return tokens;
+}
+
+function parseCellRefParts(tokenStr) {
+  const m = String(tokenStr || '').match(/^\$?([A-Za-z]{1,3})\$?(\d+)$/);
+  if (!m) return null;
+  const col = excelLetterToColIndex(m[1]);
+  const row = parseInt(m[2], 10);
+  if (col < 1 || col > 16384 || row < 1 || row > 1048576) return null;
+  return { row, col };
+}
+
+function readCellValueForFormula(ws, rNum, cNum, ctx) {
+  if (!ws) return null;
+  const sheetName = ws.name || '';
+  const coordKey = `${sheetName}::${rNum}::${cNum}`;
+
+  // Avoid infinite circular reference loops
+  if (ctx.visited.has(coordKey)) {
+    return makeFormulaError('#CIRC!');
+  }
+
+  // If already computed in spill cache for this sheet pass, return it
+  const sheetSpills = ctx.spillBySheet.get(sheetName);
+  if (sheetSpills && sheetSpills.has(`${rNum}::${cNum}`)) {
+    return sheetSpills.get(`${rNum}::${cNum}`).rawVal;
+  }
+
+  // If this cell was a stale Excel cached spill cell cleared by an array formula on this sheet, return null
+  const origSpillSet = ctx.origSpillBySheet.get(sheetName);
+  if (origSpillSet && origSpillSet.has(`${rNum}::${cNum}`)) {
+    return null;
+  }
+
+  const row = ws.findRow ? ws.findRow(rNum) : null;
+  const cell = row && row.findCell ? row.findCell(cNum) : null;
+  if (!cell || cell.value === null || cell.value === undefined) return null;
+
+  const val = cell.value;
+  if (val instanceof Date) {
+    return parseFlexibleScratchDate(val);
+  }
+  if (typeof val === 'object') {
+    if (val.formula !== undefined) {
+      return evaluateWorksheetCellFormula(ws, rNum, cNum, ctx);
+    }
+    if (Array.isArray(val.richText)) {
+      return val.richText.map(t => t.text || '').join('');
+    }
+    if (val.text !== undefined && val.text !== null) return String(val.text);
+    if (val.error) return makeFormulaError(String(val.error));
+    return null;
+  }
+  return val;
+}
+
+function evalFormulaTokens(tokens, ctx) {
+  let pos = 0;
+
+  const peek = () => tokens[pos] || null;
+  const consume = () => tokens[pos++] || null;
+
+  function parseComparison() {
+    let left = parseConcat();
+    while (peek() && peek().type === 'OP' && ['=', '<>', '!=', '<', '<=', '>', '>='].includes(peek().value)) {
+      const op = consume().value;
+      const right = parseConcat();
+      left = broadcastBinaryOp(left, right, (a, b) => compareFormulaScalars(a, b, op));
+    }
+    return left;
+  }
+
+  function parseConcat() {
+    let left = parseAddSub();
+    while (peek() && peek().type === 'OP' && peek().value === '&') {
+      consume();
+      const right = parseAddSub();
+      left = broadcastBinaryOp(left, right, (a, b) => {
+        if (isFormulaError(a)) return a;
+        if (isFormulaError(b)) return b;
+        return formulaValToString(a) + formulaValToString(b);
+      });
+    }
+    return left;
+  }
+
+  function parseAddSub() {
+    let left = parseMulDiv();
+    while (peek() && peek().type === 'OP' && (peek().value === '+' || peek().value === '-')) {
+      const op = consume().value;
+      const right = parseMulDiv();
+      left = broadcastBinaryOp(left, right, (a, b) => {
+        const na = formulaValToNumber(a);
+        const nb = formulaValToNumber(b);
+        if (isFormulaError(na)) return na;
+        if (isFormulaError(nb)) return nb;
+        return op === '+' ? na + nb : na - nb;
+      });
+    }
+    return left;
+  }
+
+  function parseMulDiv() {
+    let left = parseUnary();
+    while (peek() && peek().type === 'OP' && (peek().value === '*' || peek().value === '/')) {
+      const op = consume().value;
+      const right = parseUnary();
+      left = broadcastBinaryOp(left, right, (a, b) => {
+        const na = formulaValToNumber(a);
+        const nb = formulaValToNumber(b);
+        if (isFormulaError(na)) return na;
+        if (isFormulaError(nb)) return nb;
+        if (op === '/') return nb === 0 ? makeFormulaError('#DIV/0!') : na / nb;
+        return na * nb;
+      });
+    }
+    return left;
+  }
+
+  function parseUnary() {
+    if (peek() && peek().type === 'OP' && (peek().value === '+' || peek().value === '-')) {
+      const op = consume().value;
+      const val = parseUnary();
+      if (op === '+') return val;
+      return broadcastUnaryOp(val, (v) => {
+        const n = formulaValToNumber(v);
+        return isFormulaError(n) ? n : -n;
+      });
+    }
+    return parsePrimary();
+  }
+
+  function parseArgExpressions() {
+    const args = [];
+    if (peek() && peek().type === ')') {
+      consume();
+      return args;
+    }
+    while (pos < tokens.length) {
+      args.push(parseComparison());
+      if (peek() && peek().type === ',') {
+        consume();
+        continue;
+      }
+      if (peek() && peek().type === ')') {
+        consume();
+        break;
+      }
+      break;
+    }
+    return args;
+  }
+
+  function flattenMatrixValues(argVal) {
+    if (!isFormulaMatrix(argVal)) return [argVal];
+    const flat = [];
+    argVal.rows.forEach(r => r.forEach(c => flat.push(c)));
+    return flat;
+  }
+
+  function evalBuiltInFunction(fnNameUpper, args) {
+    switch (fnNameUpper) {
+      case 'FILTER': {
+        if (args.length < 2) return makeFormulaError('#VALUE!');
+        const arrArg = args[0];
+        const incArg = args[1];
+        const ifEmptyArg = args.length >= 3 ? args[2] : undefined;
+        const arrRows = isFormulaMatrix(arrArg) ? arrArg.rows : [[arrArg]];
+        const incRows = isFormulaMatrix(incArg) ? incArg.rows : [[incArg]];
+
+        const matchedRows = [];
+        // Row-wise filter (standard N x M array with N x 1 include mask)
+        if (incRows.length === arrRows.length || incRows.length === 1) {
+          for (let r = 0; r < arrRows.length; r++) {
+            const condCell = incRows.length === 1 ? incRows[0][r % incRows[0].length] : incRows[r][0];
+            if (formulaValToBool(condCell)) {
+              // Skip completely blank trailing rows in A2:C200 when all columns of the source row are blank
+              const rowHasContent = arrRows[r].some(cell => !isEmptyFormulaVal(cell));
+              if (rowHasContent) {
+                matchedRows.push([...arrRows[r]]);
+              }
+            }
+          }
+        } else if (arrRows.length === 1 && incRows.length === 1 && incRows[0].length === arrRows[0].length) {
+          const filteredRow = [];
+          for (let c = 0; c < arrRows[0].length; c++) {
+            if (formulaValToBool(incRows[0][c])) {
+              filteredRow.push(arrRows[0][c]);
+            }
+          }
+          if (filteredRow.length > 0) matchedRows.push(filteredRow);
+        }
+
+        if (matchedRows.length === 0) {
+          if (ifEmptyArg !== undefined) {
+            return isFormulaMatrix(ifEmptyArg) ? ifEmptyArg : makeFormulaMatrix([[ifEmptyArg]]);
+          }
+          return makeFormulaMatrix([[makeFormulaError('#CALC!')]]);
+        }
+        return makeFormulaMatrix(matchedRows);
+      }
+
+      case 'UNIQUE': {
+        if (args.length < 1) return makeFormulaError('#VALUE!');
+        const rows = isFormulaMatrix(args[0]) ? args[0].rows : [[args[0]]];
+        const seen = new Set();
+        const out = [];
+        rows.forEach(r => {
+          const key = r.map(v => formulaValToString(v).toLowerCase()).join('\u0001');
+          if (!seen.has(key)) {
+            seen.add(key);
+            out.push([...r]);
+          }
+        });
+        return makeFormulaMatrix(out.length > 0 ? out : [['']]);
+      }
+
+      case 'SORT': {
+        if (args.length < 1) return makeFormulaError('#VALUE!');
+        const rows = (isFormulaMatrix(args[0]) ? args[0].rows : [[args[0]]]).map(r => [...r]);
+        const sortIdx = args.length >= 2 ? Math.max(1, Math.floor(Number(formulaValToNumber(args[1])) || 1)) : 1;
+        const sortOrder = args.length >= 3 ? (Number(formulaValToNumber(args[2])) < 0 ? -1 : 1) : 1;
+        const colIdx = sortIdx - 1;
+        rows.sort((rA, rB) => {
+          const a = rA[colIdx];
+          const b = rB[colIdx];
+          const eA = isEmptyFormulaVal(a);
+          const eB = isEmptyFormulaVal(b);
+          if (eA && eB) return 0;
+          if (eA) return 1;
+          if (eB) return -1;
+          const dA = unwrapFormulaDate(a);
+          const dB = unwrapFormulaDate(b);
+          if (dA && dB) return (dA.dayEpoch - dB.dayEpoch) * sortOrder;
+          if (typeof a === 'number' && typeof b === 'number') return (a - b) * sortOrder;
+          return formulaValToString(a).localeCompare(formulaValToString(b), undefined, { numeric: true, sensitivity: 'base' }) * sortOrder;
+        });
+        return makeFormulaMatrix(rows);
+      }
+
+      case 'IF': {
+        if (args.length < 2) return makeFormulaError('#VALUE!');
+        const cond = args[0];
+        const tVal = args[1];
+        const fVal = args.length >= 3 ? args[2] : false;
+        if (!isFormulaMatrix(cond) && !isFormulaMatrix(tVal) && !isFormulaMatrix(fVal)) {
+          return formulaValToBool(cond) ? tVal : fVal;
+        }
+        return broadcastBinaryOp(cond, tVal, (cVal, tv) => (formulaValToBool(cVal) ? tv : (!isFormulaMatrix(fVal) ? fVal : '')));
+      }
+
+      case 'ISBLANK':
+      case 'ISEMPTY': {
+        if (args.length < 1) return makeFormulaError('#VALUE!');
+        return broadcastUnaryOp(args[0], (v) => isEmptyFormulaVal(v));
+      }
+
+      case 'ISNUMBER': {
+        if (args.length < 1) return makeFormulaError('#VALUE!');
+        return broadcastUnaryOp(args[0], (v) => typeof v === 'number' && Number.isFinite(v));
+      }
+
+      case 'ISTEXT': {
+        if (args.length < 1) return makeFormulaError('#VALUE!');
+        return broadcastUnaryOp(args[0], (v) => typeof v === 'string' && v !== '');
+      }
+
+      case 'NOT': {
+        if (args.length < 1) return makeFormulaError('#VALUE!');
+        return broadcastUnaryOp(args[0], (v) => !formulaValToBool(v));
+      }
+
+      case 'AND': {
+        for (const arg of args) {
+          const vals = flattenMatrixValues(arg);
+          if (vals.some(v => !formulaValToBool(v))) return false;
+        }
+        return args.length > 0;
+      }
+
+      case 'OR': {
+        for (const arg of args) {
+          const vals = flattenMatrixValues(arg);
+          if (vals.some(v => formulaValToBool(v))) return true;
+        }
+        return false;
+      }
+
+      case 'TRIM': {
+        if (args.length < 1) return '';
+        return broadcastUnaryOp(args[0], (v) => formulaValToString(v).trim().replace(/\s+/g, ' '));
+      }
+
+      case 'UPPER': {
+        if (args.length < 1) return '';
+        return broadcastUnaryOp(args[0], (v) => formulaValToString(v).toUpperCase());
+      }
+
+      case 'LOWER': {
+        if (args.length < 1) return '';
+        return broadcastUnaryOp(args[0], (v) => formulaValToString(v).toLowerCase());
+      }
+
+      case 'LEN': {
+        if (args.length < 1) return 0;
+        return broadcastUnaryOp(args[0], (v) => formulaValToString(v).length);
+      }
+
+      case 'LEFT': {
+        if (args.length < 1) return '';
+        const n = args.length >= 2 ? Math.max(0, Math.floor(Number(formulaValToNumber(args[1])) || 0)) : 1;
+        return broadcastUnaryOp(args[0], (v) => formulaValToString(v).slice(0, n));
+      }
+
+      case 'RIGHT': {
+        if (args.length < 1) return '';
+        const n = args.length >= 2 ? Math.max(0, Math.floor(Number(formulaValToNumber(args[1])) || 0)) : 1;
+        return broadcastUnaryOp(args[0], (v) => {
+          const s = formulaValToString(v);
+          return n === 0 ? '' : s.slice(-n);
+        });
+      }
+
+      case 'MID': {
+        if (args.length < 3) return '';
+        const start = Math.max(1, Math.floor(Number(formulaValToNumber(args[1])) || 1));
+        const len = Math.max(0, Math.floor(Number(formulaValToNumber(args[2])) || 0));
+        return broadcastUnaryOp(args[0], (v) => formulaValToString(v).slice(start - 1, start - 1 + len));
+      }
+
+      case 'SEARCH':
+      case 'FIND': {
+        if (args.length < 2) return makeFormulaError('#VALUE!');
+        const caseSensitive = fnNameUpper === 'FIND';
+        const startAt = args.length >= 3 ? Math.max(1, Math.floor(Number(formulaValToNumber(args[2])) || 1)) - 1 : 0;
+        return broadcastBinaryOp(args[0], args[1], (needle, haystack) => {
+          const nStr = formulaValToString(needle);
+          const hStr = formulaValToString(haystack);
+          const idx = caseSensitive
+            ? hStr.indexOf(nStr, startAt)
+            : hStr.toLowerCase().indexOf(nStr.toLowerCase(), startAt);
+          return idx === -1 ? makeFormulaError('#VALUE!') : idx + 1;
+        });
+      }
+
+      case 'COUNTA': {
+        let cnt = 0;
+        args.forEach(a => {
+          flattenMatrixValues(a).forEach(v => {
+            if (!isEmptyFormulaVal(v)) cnt++;
+          });
+        });
+        return cnt;
+      }
+
+      case 'COUNTBLANK': {
+        let cnt = 0;
+        args.forEach(a => {
+          flattenMatrixValues(a).forEach(v => {
+            if (isEmptyFormulaVal(v)) cnt++;
+          });
+        });
+        return cnt;
+      }
+
+      case 'COUNTIF': {
+        if (args.length < 2) return 0;
+        const vals = flattenMatrixValues(args[0]);
+        const crit = args[1];
+        const critStr = formulaValToString(crit);
+        const opMatch = critStr.match(/^(<>|!=|<=|>=|=|<|>)(.*)$/);
+        let cnt = 0;
+        vals.forEach(v => {
+          if (opMatch) {
+            const op = opMatch[1];
+            const rhsRaw = opMatch[2];
+            const rhs = rhsRaw !== '' && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(rhsRaw.trim())
+              ? Number(rhsRaw.trim())
+              : rhsRaw;
+            if (compareFormulaScalars(v, rhs, op) === true) cnt++;
+          } else if (typeof crit === 'string' && (crit.includes('*') || crit.includes('?'))) {
+            const escaped = crit.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+            if (new RegExp(`^${escaped}$`, 'i').test(formulaValToString(v))) cnt++;
+          } else {
+            const sV = formulaValToString(v).toLowerCase();
+            const sC = critStr.toLowerCase();
+            if (sV === sC) cnt++;
+          }
+        });
+        return cnt;
+      }
+
+      case 'SUM': {
+        let total = 0;
+        args.forEach(a => {
+          flattenMatrixValues(a).forEach(v => {
+            if (typeof v === 'number' && Number.isFinite(v)) total += v;
+          });
+        });
+        return total;
+      }
+
+      case 'AVERAGE': {
+        let total = 0;
+        let cnt = 0;
+        args.forEach(a => {
+          flattenMatrixValues(a).forEach(v => {
+            if (typeof v === 'number' && Number.isFinite(v)) {
+              total += v;
+              cnt++;
+            }
+          });
+        });
+        return cnt === 0 ? makeFormulaError('#DIV/0!') : total / cnt;
+      }
+
+      case 'MIN':
+      case 'MAX': {
+        const nums = [];
+        args.forEach(a => {
+          flattenMatrixValues(a).forEach(v => {
+            if (typeof v === 'number' && Number.isFinite(v)) nums.push(v);
+          });
+        });
+        if (nums.length === 0) return 0;
+        return fnNameUpper === 'MIN' ? Math.min(...nums) : Math.max(...nums);
+      }
+
+      case 'TODAY': {
+        const now = new Date();
+        return parseFlexibleScratchDate(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())));
+      }
+
+      default:
+        return makeFormulaError('#NAME?');
+    }
+  }
+
+  function parsePrimary() {
+    const tok = peek();
+    if (!tok) return null;
+
+    if (tok.type === '(') {
+      consume();
+      const inner = parseComparison();
+      if (peek() && peek().type === ')') consume();
+      return inner;
+    }
+
+    if (tok.type === 'NUMBER') {
+      consume();
+      return tok.value;
+    }
+
+    if (tok.type === 'STRING') {
+      consume();
+      return tok.value;
+    }
+
+    if (tok.type === 'SHEET_PREFIX') {
+      const targetSheetName = consume().value;
+      const targetWs = ctx.wb ? ctx.wb.getWorksheet(targetSheetName) : null;
+      const startTok = peek();
+      if (!startTok || startTok.type !== 'IDENT') return makeFormulaError('#REF!');
+      consume();
+      const startCell = parseCellRefParts(startTok.value);
+      if (!startCell) return makeFormulaError('#REF!');
+      if (peek() && peek().type === ':') {
+        consume();
+        const endTok = peek();
+        if (!endTok || endTok.type !== 'IDENT') return makeFormulaError('#REF!');
+        consume();
+        const endCell = parseCellRefParts(endTok.value);
+        if (!endCell) return makeFormulaError('#REF!');
+        if (!targetWs) return makeFormulaError('#REF!');
+        return readRangeMatrix(targetWs, startCell, endCell, ctx);
+      }
+      if (!targetWs) return makeFormulaError('#REF!');
+      return readCellValueForFormula(targetWs, startCell.row, startCell.col, ctx);
+    }
+
+    if (tok.type === 'IDENT') {
+      consume();
+      const ident = tok.value;
+      const upper = ident.toUpperCase();
+
+      // Function call
+      if (peek() && peek().type === '(') {
+        consume();
+        const args = parseArgExpressions();
+        return evalBuiltInFunction(upper, args);
+      }
+
+      if (upper === 'TRUE') return true;
+      if (upper === 'FALSE') return false;
+
+      // Range ref A2:C200 or single cell ref D2
+      const startCell = parseCellRefParts(ident);
+      if (startCell) {
+        if (peek() && peek().type === ':') {
+          consume();
+          const endTok = peek();
+          if (!endTok || endTok.type !== 'IDENT') return makeFormulaError('#REF!');
+          consume();
+          const endCell = parseCellRefParts(endTok.value);
+          if (!endCell) return makeFormulaError('#REF!');
+          return readRangeMatrix(ctx.ws, startCell, endCell, ctx);
+        }
+        return readCellValueForFormula(ctx.ws, startCell.row, startCell.col, ctx);
+      }
+
+      return makeFormulaError('#NAME?');
+    }
+
+    consume();
+    return makeFormulaError('#VALUE!');
+  }
+
+  return parseComparison();
+}
+
+function readRangeMatrix(ws, startCell, endCell, ctx) {
+  const minR = Math.min(startCell.row, endCell.row);
+  const maxR = Math.max(startCell.row, endCell.row);
+  const minC = Math.min(startCell.col, endCell.col);
+  const maxC = Math.max(startCell.col, endCell.col);
+  // Cap absurd full-sheet scans cleanly to avoid freezing if someone writes A1:A1048576
+  const safeMaxR = Math.min(maxR, minR + 5000);
+  const safeMaxC = Math.min(maxC, minC + 100);
+  const rows = [];
+  for (let r = minR; r <= safeMaxR; r++) {
+    const rowArr = [];
+    for (let c = minC; c <= safeMaxC; c++) {
+      rowArr.push(readCellValueForFormula(ws, r, c, ctx));
+    }
+    rows.push(rowArr);
+  }
+  return makeFormulaMatrix(rows);
+}
+
+function toExcelScalarValue(val) {
+  if (isFormulaError(val)) return { error: val.error };
+  if (val && typeof val === 'object' && val.__isDate) return val.dateUtc;
+  if (val === undefined) return '';
+  return val;
+}
+
+function evaluateWorksheetCellFormula(ws, rNum, cNum, ctx) {
+  const sheetName = ws.name || '';
+  const coordKey = `${sheetName}::${rNum}::${cNum}`;
+  if (ctx.computedAnchors.has(coordKey)) {
+    return ctx.computedAnchors.get(coordKey);
+  }
+
+  const row = ws.findRow ? ws.findRow(rNum) : null;
+  const cell = row && row.findCell ? row.findCell(cNum) : null;
+  if (!cell || !cell.value || typeof cell.value !== 'object' || !cell.value.formula) {
+    return null;
+  }
+
+  ctx.visited.add(coordKey);
+  let evaluated;
+  try {
+    const humanFormula = toHumanReadableFormula(cell.value.formula);
+    const tokens = tokenizeScratchFormula(humanFormula);
+    evaluated = evalFormulaTokens(tokens, ctx);
+  } catch (err) {
+    console.warn(`Scratch formula error at ${getCellCoordString(rNum, cNum)}:`, err);
+    evaluated = makeFormulaError('#VALUE!');
+  } finally {
+    ctx.visited.delete(coordKey);
+  }
+
+  ctx.computedAnchors.set(coordKey, evaluated);
+
+  if (isFormulaMatrix(evaluated)) {
+    const outRows = evaluated.rows;
+    const R = outRows.length;
+    const C = outRows[0] ? outRows[0].length : 1;
+
+    // Check for blocking user values inside the spill rectangle
+    let blocked = false;
+    const origSpillSet = ctx.origSpillBySheet.get(sheetName);
+    for (let dr = 0; dr < R && !blocked; dr++) {
+      for (let dc = 0; dc < C; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const tr = rNum + dr;
+        const tc = cNum + dc;
+        if (origSpillSet && origSpillSet.has(`${tr}::${tc}`)) continue;
+        const targetInfo = extractScratchCellInfo(ws, tr, tc, { skipSpillLookup: true });
+        if (targetInfo.rawEdit.trim() !== '' || targetInfo.isFormula) {
+          blocked = true;
+          break;
+        }
+      }
+    }
+
+    if (blocked) {
+      cell.value = { formula: cell.value.formula, result: { error: '#SPILL!' } };
+      return makeFormulaError('#SPILL!');
+    }
+
+    let sheetSpills = ctx.spillBySheet.get(sheetName);
+    if (!sheetSpills) {
+      sheetSpills = new Map();
+      ctx.spillBySheet.set(sheetName, sheetSpills);
+    }
+
+    const topLeftRaw = outRows[0] ? outRows[0][0] : '';
+    cell.value = { formula: cell.value.formula, result: toExcelScalarValue(topLeftRaw) };
+    const spillCoords = [];
+    for (let dr = 0; dr < R; dr++) {
+      for (let dc = 0; dc < C; dc++) {
+        const tr = rNum + dr;
+        const tc = cNum + dc;
+        const rawVal = outRows[dr][dc];
+        spillCoords.push({ r: tr, c: tc });
+        sheetSpills.set(`${tr}::${tc}`, {
+          rawVal: (rawVal && typeof rawVal === 'object' && rawVal.__isDate) ? rawVal.dateUtc : (isFormulaError(rawVal) ? rawVal.error : rawVal),
+          anchorR: rNum,
+          anchorC: cNum,
+          formula: cell.value.formula
+        });
+      }
+    }
+    let anchorSpillMap = ctx.anchorSpillsBySheet.get(sheetName);
+    if (!anchorSpillMap) {
+      anchorSpillMap = new Map();
+      ctx.anchorSpillsBySheet.set(sheetName, anchorSpillMap);
+    }
+    anchorSpillMap.set(`${rNum}::${cNum}`, spillCoords);
+
+    return topLeftRaw;
+  }
+
+  cell.value = { formula: cell.value.formula, result: toExcelScalarValue(evaluated) };
+  return evaluated;
+}
+
+function getOriginalExcelSpillSetForSheet(sheetName) {
+  const set = new Set();
+  if (typeof originalArchiveState === 'undefined' || !originalArchiveState || !originalArchiveState.arrayFormulasBySheet) {
+    return set;
+  }
+  const cellMap = originalArchiveState.arrayFormulasBySheet.get(String(sheetName || '').toLowerCase());
+  if (!cellMap) return set;
+
+  for (const [anchorRef, info] of cellMap.entries()) {
+    if (!info || !info.fTag) continue;
+    const refMatch = info.fTag.match(/\bref="([A-Z]+\d+)(?::([A-Z]+\d+))?"/i);
+    if (!refMatch || !refMatch[2]) continue;
+    const p1 = parseCellRefParts(refMatch[1]);
+    const p2 = parseCellRefParts(refMatch[2]);
+    const anchorP = parseCellRefParts(anchorRef);
+    if (!p1 || !p2 || !anchorP) continue;
+    const minR = Math.min(p1.row, p2.row);
+    const maxR = Math.max(p1.row, p2.row);
+    const minC = Math.min(p1.col, p2.col);
+    const maxC = Math.max(p1.col, p2.col);
+    for (let r = minR; r <= maxR; r++) {
+      for (let c = minC; c <= maxC; c++) {
+        if (r === anchorP.row && c === anchorP.col) continue;
+        set.add(`${r}::${c}`);
+      }
+    }
+  }
+  return set;
+}
+
+function recalculateScratchWorksheetFormulas(ws, sheetName) {
+  if (!ws || !sheetName) return [];
+  const prevSpills = scratchSpilledCellsMap.get(sheetName) || new Map();
+  const prevSnapshot = new Map();
+  for (const [k, v] of prevSpills.entries()) {
+    prevSnapshot.set(k, formatScratchScalarValue(v.rawVal));
+  }
+
+  // Collect formula cells on this worksheet
+  const formulaCoords = [];
+  const prevAnchorResults = new Map();
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      if (cell && cell.value && typeof cell.value === 'object' && cell.value.formula !== undefined) {
+        formulaCoords.push({ r: rowNumber, c: colNumber });
+        prevAnchorResults.set(`${rowNumber}::${colNumber}`, extractScratchCellInfo(ws, rowNumber, colNumber, { skipSpillLookup: true }).display);
+      }
+    });
+  });
+
+  const origSpillSet = getOriginalExcelSpillSetForSheet(sheetName);
+  if (formulaCoords.length === 0 && prevSpills.size === 0 && origSpillSet.size === 0) {
+    return [];
+  }
+
+  const ctx = {
+    wb: workbook || { getWorksheet: (name) => (name === sheetName ? ws : null) },
+    ws,
+    visited: new Set(),
+    computedAnchors: new Map(),
+    spillBySheet: new Map(),
+    anchorSpillsBySheet: new Map(),
+    origSpillBySheet: new Map([[sheetName, origSpillSet]])
+  };
+
+  formulaCoords.forEach(({ r, c }) => {
+    evaluateWorksheetCellFormula(ws, r, c, ctx);
+  });
+
+  const nextSpills = ctx.spillBySheet.get(sheetName) || new Map();
+  // Mask any original Desktop Excel cached spill cells that were NOT repopulated in this recalculation
+  origSpillSet.forEach(coordKey => {
+    if (!nextSpills.has(coordKey)) {
+      const [rStr, cStr] = coordKey.split('::');
+      nextSpills.set(coordKey, {
+        rawVal: '',
+        anchorR: 0,
+        anchorC: 0,
+        formula: '',
+        clearedOrigSpill: true,
+        r: parseInt(rStr, 10),
+        c: parseInt(cStr, 10)
+      });
+    }
+  });
+
+  scratchSpilledCellsMap.set(sheetName, nextSpills);
+  scratchSpillStateMap.set(sheetName, ctx.anchorSpillsBySheet.get(sheetName) || new Map());
+
+  // Compute all coordinates whose visible display value changed
+  const changedSet = new Map();
+  const addChanged = (r, c) => {
+    changedSet.set(`${r}::${c}`, { r, c });
+  };
+
+  formulaCoords.forEach(({ r, c }) => {
+    const key = `${r}::${c}`;
+    const nextDisp = extractScratchCellInfo(ws, r, c).display;
+    if (prevAnchorResults.get(key) !== nextDisp) {
+      addChanged(r, c);
+    }
+  });
+
+  for (const [k, oldDisp] of prevSnapshot.entries()) {
+    const nextEntry = nextSpills.get(k);
+    const nextDisp = nextEntry ? formatScratchScalarValue(nextEntry.rawVal) : '';
+    if (oldDisp !== nextDisp) {
+      const [rStr, cStr] = k.split('::');
+      addChanged(parseInt(rStr, 10), parseInt(cStr, 10));
+    }
+  }
+  for (const [k, nextEntry] of nextSpills.entries()) {
+    if (!prevSnapshot.has(k)) {
+      const [rStr, cStr] = k.split('::');
+      addChanged(parseInt(rStr, 10), parseInt(cStr, 10));
+    }
+  }
+
+  return Array.from(changedSet.values());
+}
+
+// --- FILL HANDLE AUTO-INCREMENT & SERIES EXTRAPOLATION ---
+function computeScratchFillTargetRange(srcRange, hoverR, hoverC) {
+  if (!srcRange) return null;
+  const dDown = hoverR > srcRange.maxRow ? hoverR - srcRange.maxRow : 0;
+  const dUp = hoverR < srcRange.minRow ? srcRange.minRow - hoverR : 0;
+  const dRight = hoverC > srcRange.maxCol ? hoverC - srcRange.maxCol : 0;
+  const dLeft = hoverC < srcRange.minCol ? srcRange.minCol - hoverC : 0;
+  if (dDown === 0 && dUp === 0 && dRight === 0 && dLeft === 0) return null;
+
+  if (Math.max(dDown, dUp) >= Math.max(dRight, dLeft)) {
+    if (dDown > 0) {
+      return { axis: 'vertical', dir: 1, minRow: srcRange.minRow, maxRow: hoverR, minCol: srcRange.minCol, maxCol: srcRange.maxCol };
+    }
+    return { axis: 'vertical', dir: -1, minRow: hoverR, maxRow: srcRange.maxRow, minCol: srcRange.minCol, maxCol: srcRange.maxCol };
+  }
+  if (dRight > 0) {
+    return { axis: 'horizontal', dir: 1, minRow: srcRange.minRow, maxRow: srcRange.maxRow, minCol: srcRange.minCol, maxCol: hoverC };
+  }
+  return { axis: 'horizontal', dir: -1, minRow: srcRange.minRow, maxRow: srcRange.maxRow, minCol: hoverC, maxCol: srcRange.maxCol };
+}
+
+function buildFillSeriesValues(sourceItems, targetCount, dir, { axis = 'vertical', ctrlKey = false } = {}) {
+  const S = sourceItems.length;
+  if (S === 0 || targetCount <= 0) return [];
+
+  const results = [];
+  const allNonEmpty = sourceItems.every(it => it.rawEdit.trim() !== '');
+  const anyFormula = sourceItems.some(it => it.isFormula && it.rawEdit.startsWith('='));
+  const anyExplicitText = sourceItems.some(it => it.formatId === 'text');
+
+  // 1. Formulas: shift relative references by step offset
+  if (anyFormula) {
+    for (let m = 1; m <= targetCount; m++) {
+      const idx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
+      const src = sourceItems[idx];
+      const deltaUnits = dir > 0
+        ? (S - idx + (m - 1))
+        : -(idx + m);
+      const rDelta = axis === 'vertical' ? deltaUnits : 0;
+      const cDelta = axis === 'horizontal' ? deltaUnits : 0;
+      const nextText = src.isFormula && src.rawEdit.startsWith('=')
+        ? shiftFormulaCellReferences(src.rawEdit, rDelta, cDelta)
+        : src.rawEdit;
+      results.push({ rawText: nextText, styleSnap: src.styleSnap });
+    }
+    return results;
+  }
+
+  // 2. Dates (auto-increment unless explicit Text format or Ctrl held)
+  if (allNonEmpty && !anyExplicitText) {
+    const parsedDates = sourceItems.map(it => {
+      const allowHyphen = it.formatId === 'date';
+      const p = parseFlexibleScratchDate(it.rawEdit || it.display, { allowTwoDigitHyphen: allowHyphen });
+      if (!p) return null;
+      // Only treat as date when cell format is 'date' OR string actually contains a date separator
+      if (it.formatId !== 'date' && !/[\/\-]/.test(it.rawEdit)) return null;
+      return p;
+    });
+    if (parsedDates.every(Boolean)) {
+      if (!ctrlKey) {
+        let stepDays = 1;
+        if (S >= 2) {
+          stepDays = Math.round((parsedDates[S - 1].dayEpoch - parsedDates[0].dayEpoch) / (S - 1));
+        }
+        for (let m = 1; m <= targetCount; m++) {
+          const srcIdx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
+          const baseSnap = sourceItems[srcIdx].styleSnap || { fill: null, font: null, numFmt: null };
+          const epoch = dir > 0
+            ? parsedDates[S - 1].dayEpoch + m * stepDays
+            : parsedDates[0].dayEpoch - m * stepDays;
+          const dt = new Date(epoch * 86400000);
+          results.push({
+            rawText: formatExcelDateDisplay(dt),
+            styleSnap: {
+              fill: baseSnap.fill,
+              font: baseSnap.font,
+              numFmt: baseSnap.numFmt || 'mm/dd/yyyy'
+            }
+          });
+        }
+        return results;
+      }
+    }
+
+    // 3. Numbers / Currency (<= 10 digits, not explicit Text, not Ctrl held)
+    const parsedNums = sourceItems.map(it => {
+      const cleaned = it.rawEdit.trim().replace(/^\$/, '').replace(/,/g, '');
+      const valid = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(cleaned) && cleaned.replace(/[-.]/g, '').length <= 10;
+      if (!valid) return null;
+      const decPart = cleaned.includes('.') ? cleaned.split('.')[1].length : 0;
+      return { num: Number(cleaned), decimals: decPart };
+    });
+    if (parsedNums.every(Boolean) && !ctrlKey) {
+      let stepNum = 1;
+      if (S >= 2) {
+        stepNum = (parsedNums[S - 1].num - parsedNums[0].num) / (S - 1);
+      }
+      const maxDec = parsedNums.reduce((mx, x) => Math.max(mx, x.decimals), 0);
+      const factor = Math.pow(10, Math.min(6, maxDec));
+      for (let m = 1; m <= targetCount; m++) {
+        const srcIdx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
+        const baseSnap = sourceItems[srcIdx].styleSnap || { fill: null, font: null, numFmt: null };
+        const rawVal = dir > 0
+          ? parsedNums[S - 1].num + m * stepNum
+          : parsedNums[0].num - m * stepNum;
+        const rounded = Math.round(rawVal * factor) / factor;
+        results.push({
+          rawText: String(rounded),
+          styleSnap: baseSnap
+        });
+      }
+      return results;
+    }
+  }
+
+  // 4. Plain Text / Explicit Text (@) / Ctrl-copy fallback: cycle values without incrementing
+  for (let m = 1; m <= targetCount; m++) {
+    const srcIdx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
+    const src = sourceItems[srcIdx];
+    results.push({
+      rawText: src.rawEdit,
+      styleSnap: src.styleSnap
+    });
+  }
+  return results;
+}
+
+function executeScratchFillHandleDrag(sheetName, sourceRange, fillTargetRange, { ctrlKey = false } = {}) {
+  if (!workbook || !sheetName || !sourceRange || !fillTargetRange) return 0;
+  const ws = workbook.getWorksheet(sheetName);
+  if (!ws) return 0;
+
+  const edits = [];
+  if (fillTargetRange.axis === 'vertical') {
+    const dir = fillTargetRange.dir;
+    const targetCount = dir > 0
+      ? (fillTargetRange.maxRow - sourceRange.maxRow)
+      : (sourceRange.minRow - fillTargetRange.minRow);
+    if (targetCount <= 0) return 0;
+
+    for (let c = sourceRange.minCol; c <= sourceRange.maxCol; c++) {
+      const sourceItems = [];
+      for (let r = sourceRange.minRow; r <= sourceRange.maxRow; r++) {
+        const info = extractScratchCellInfo(ws, r, c);
+        sourceItems.push({
+          rawEdit: info.rawEdit,
+          display: info.display,
+          isFormula: info.isFormula,
+          formatId: getScratchCellFormatId(ws, r, c),
+          styleSnap: captureCellStyleSnapshot(ws, r, c)
+        });
+      }
+      const generated = buildFillSeriesValues(sourceItems, targetCount, dir, { axis: 'vertical', ctrlKey });
+      for (let m = 0; m < generated.length; m++) {
+        const targetRow = dir > 0 ? (sourceRange.maxRow + 1 + m) : (sourceRange.minRow - 1 - m);
+        edits.push({ r: targetRow, c, rawText: generated[m].rawText, styleSnap: generated[m].styleSnap });
+      }
+    }
+  } else {
+    const dir = fillTargetRange.dir;
+    const targetCount = dir > 0
+      ? (fillTargetRange.maxCol - sourceRange.maxCol)
+      : (sourceRange.minCol - fillTargetRange.minCol);
+    if (targetCount <= 0) return 0;
+
+    for (let r = sourceRange.minRow; r <= sourceRange.maxRow; r++) {
+      const sourceItems = [];
+      for (let c = sourceRange.minCol; c <= sourceRange.maxCol; c++) {
+        const info = extractScratchCellInfo(ws, r, c);
+        sourceItems.push({
+          rawEdit: info.rawEdit,
+          display: info.display,
+          isFormula: info.isFormula,
+          formatId: getScratchCellFormatId(ws, r, c),
+          styleSnap: captureCellStyleSnapshot(ws, r, c)
+        });
+      }
+      const generated = buildFillSeriesValues(sourceItems, targetCount, dir, { axis: 'horizontal', ctrlKey });
+      for (let m = 0; m < generated.length; m++) {
+        const targetCol = dir > 0 ? (sourceRange.maxCol + 1 + m) : (sourceRange.minCol - 1 - m);
+        edits.push({ r, c: targetCol, rawText: generated[m].rawText, styleSnap: generated[m].styleSnap });
+      }
+    }
+  }
+
+  if (edits.length === 0) return 0;
+  scratchClipboardRangeState = null;
+  const nextSelection = {
+    anchorRow: fillTargetRange.minRow,
+    anchorCol: fillTargetRange.minCol,
+    focusRow: fillTargetRange.maxRow,
+    focusCol: fillTargetRange.maxCol
+  };
+  return applyScratchCellChanges(sheetName, edits, {
+    recordUndo: true,
+    selectionAfter: nextSelection
+  });
+}
+
 function applyScratchSelectionDOM() {
   if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook || !scratchGridBody) return;
   const ws = workbook.getWorksheet(activeWorkspaceTab);
@@ -970,10 +2528,15 @@ function applyScratchSelectionDOM() {
     scratchClipboardRangeState && scratchClipboardRangeState.sheetName === activeWorkspaceTab
       ? scratchClipboardRangeState
       : null;
+  const fillPreview =
+    scratchDragState && scratchDragState.mode === 'fill' && scratchDragState.sheetName === activeWorkspaceTab
+      ? scratchDragState.fillTargetRange
+      : null;
 
   const prevClasses = [
     'selected-cell',
     'in-range-cell',
+    'fill-handle-host',
     'range-edge-top',
     'range-edge-bottom',
     'range-edge-left',
@@ -981,12 +2544,18 @@ function applyScratchSelectionDOM() {
     'copied-edge-top',
     'copied-edge-bottom',
     'copied-edge-left',
-    'copied-edge-right'
+    'copied-edge-right',
+    'in-fill-preview-cell',
+    'fill-edge-top',
+    'fill-edge-bottom',
+    'fill-edge-left',
+    'fill-edge-right'
   ];
   const selector = prevClasses.map(cls => `.${cls}`).join(',');
   scratchGridBody.querySelectorAll(selector).forEach(el => {
     el.classList.remove(...prevClasses);
   });
+  scratchGridBody.querySelectorAll('.scratch-fill-handle').forEach(el => el.remove());
   scratchGridBody.querySelectorAll('.active-row-hdr').forEach(el => el.classList.remove('active-row-hdr'));
 
   if (scratchGridHead) {
@@ -1050,9 +2619,39 @@ function applyScratchSelectionDOM() {
         if (c === clip.maxCol) td.classList.add('copied-edge-right');
       }
     }
+
+    if (fillPreview && r >= fillPreview.minRow && r <= fillPreview.maxRow) {
+      const maxFillCol = Math.min(fillPreview.maxCol, tr.cells.length - 1);
+      for (let c = fillPreview.minCol; c <= maxFillCol; c++) {
+        const td = tr.cells[c];
+        if (!td) continue;
+        const inSrc = r >= range.minRow && r <= range.maxRow && c >= range.minCol && c <= range.maxCol;
+        if (!inSrc) {
+          td.classList.add('in-fill-preview-cell');
+          if (r === fillPreview.minRow) td.classList.add('fill-edge-top');
+          if (r === fillPreview.maxRow) td.classList.add('fill-edge-bottom');
+          if (c === fillPreview.minCol) td.classList.add('fill-edge-left');
+          if (c === fillPreview.maxCol) td.classList.add('fill-edge-right');
+        }
+      }
+    }
+  }
+
+  // Attach Excel-style bottom-right corner Fill Handle square when not inline-editing
+  if (!scratchInlineEditState && !fillPreview) {
+    const cornerTd = scratchGridBody.querySelector(`td[data-r="${range.maxRow}"][data-c="${range.maxCol}"]`);
+    if (cornerTd) {
+      cornerTd.classList.add('fill-handle-host');
+      const handleEl = document.createElement('span');
+      handleEl.className = 'scratch-fill-handle';
+      handleEl.dataset.fillHandle = 'true';
+      handleEl.title = 'Drag corner square to copy/fill • Dates & Numbers auto-increment (hold Ctrl to copy without incrementing)';
+      cornerTd.appendChild(handleEl);
+    }
   }
 
   updateScratchSelectionStatsUI();
+  syncScratchFormatSelectUI();
 }
 
 function setScratchSelectionRange(
@@ -1295,9 +2894,19 @@ function refreshSingleScratchCellDOM(sheetName, rNum, cNum) {
 
   const info = extractScratchCellInfo(ws, rNum, cNum);
   const visual = extractScratchCellVisualStyle(ws, rNum, cNum);
+  const anchorSpills = scratchSpillStateMap.get(sheetName);
+  const isArrayAnchor = Boolean(anchorSpills && anchorSpills.has(`${rNum}::${cNum}`));
   td.classList.toggle('formula-cell', info.isFormula);
+  td.classList.toggle('formula-anchor-cell', isArrayAnchor);
+  td.classList.toggle('spilled-array-cell', Boolean(info.isSpilled && info.anchorR > 0));
   applyVisualStyleToScratchTd(td, visual);
-  td.title = info.isFormula ? `${info.rawEdit} → ${info.display}` : info.display;
+  if (info.isFormula) {
+    td.title = `${info.rawEdit} → ${info.display}`;
+  } else if (info.isSpilled && info.anchorR > 0) {
+    td.title = `${info.display} (Spilled from ${getCellCoordString(info.anchorR, info.anchorC)})`;
+  } else {
+    td.title = info.display;
+  }
 
   let span = td.querySelector('.scratch-cell-text');
   if (!span) {
@@ -1350,7 +2959,7 @@ function applyScratchCellChanges(
     let beforeRaw = '';
     let afterRaw = '';
     if (hasTextProp) {
-      beforeRaw = extractScratchCellInfo(ws, r, c).rawEdit;
+      beforeRaw = extractScratchCellInfo(ws, r, c, { skipSpillLookup: true }).rawEdit;
       afterRaw = String(item.rawText ?? '').replace(/\r/g, '');
       textChanged = beforeRaw !== afterRaw;
     }
@@ -1362,19 +2971,20 @@ function applyScratchCellChanges(
       beforeStyle = captureCellStyleSnapshot(ws, r, c);
       afterStyle = item.styleSnap
         ? JSON.parse(JSON.stringify(item.styleSnap))
-        : { fill: null, font: null };
+        : { fill: null, font: null, numFmt: null };
       styleChanged = JSON.stringify(beforeStyle) !== JSON.stringify(afterStyle);
     }
 
     if (!textChanged && !styleChanged) return;
 
-    if (textChanged) {
-      applyRawEditToExcelCell(ws, r, c, afterRaw);
-      pendingSheetMap.set(`${r}::${c}`, afterRaw);
-    }
+    // Apply style/format snapshot first so applyRawEditToExcelCell respects updated numFmt
     if (styleChanged) {
       applyCellStyleSnapshotToExcelCell(ws, r, c, afterStyle);
       pendingFillMap.set(`${r}::${c}`, afterStyle);
+    }
+    if (textChanged) {
+      applyRawEditToExcelCell(ws, r, c, afterRaw);
+      pendingSheetMap.set(`${r}::${c}`, afterRaw);
     }
 
     recordedChanges.push({
@@ -1442,7 +3052,19 @@ function applyScratchCellChanges(
     scratchRedoStackMap.set(sheetName, []);
   }
 
-  // Update grid dimensions if paste/edit exceeded current bounds
+  // Re-evaluate any =FILTER / =SORT / =UNIQUE / summary formulas affected by these edits
+  const formulaAffectedCoords = recalculateScratchWorksheetFormulas(ws, sheetName);
+  formulaAffectedCoords.forEach(({ r, c }) => {
+    if (r > maxTargetRow) maxTargetRow = r;
+    if (c > maxTargetCol) maxTargetCol = c;
+  });
+
+  // Update cached non-empty row count & data bounds metadata (including live spills)
+  const bounds = measureScratchWorksheetBounds(ws);
+  if (bounds.maxRow > maxTargetRow) maxTargetRow = bounds.maxRow;
+  if (bounds.maxCol > maxTargetCol) maxTargetCol = bounds.maxCol;
+
+  // Update grid dimensions if paste/edit/spill exceeded current bounds
   const curDims = getScratchSheetGridDimensions(ws, sheetName);
   const needsExpand = maxTargetRow > curDims.rows || maxTargetCol > curDims.cols;
   if (needsExpand) {
@@ -1452,8 +3074,6 @@ function applyScratchCellChanges(
     });
   }
 
-  // Update cached non-empty row count metadata
-  const bounds = measureScratchWorksheetBounds(ws);
   const meta = scratchSheets.find(s => s.name === sheetName);
   if (meta) {
     meta.nonEmptyRows = bounds.nonEmptyRows;
@@ -1476,10 +3096,13 @@ function applyScratchCellChanges(
 
   const hasActiveSearch = Boolean(scratchSearchInput && scratchSearchInput.value.trim().length > 0);
   if (activeWorkspaceTab === sheetName) {
-    if (needsExpand || recordedChanges.length > 40 || hasActiveSearch) {
+    if (needsExpand || (recordedChanges.length + formulaAffectedCoords.length) > 40 || hasActiveSearch) {
       renderActiveScratchSheetGrid();
     } else {
-      recordedChanges.forEach(ch => refreshSingleScratchCellDOM(sheetName, ch.r, ch.c));
+      const toRefresh = new Map();
+      recordedChanges.forEach(ch => toRefresh.set(`${ch.r}::${ch.c}`, { r: ch.r, c: ch.c }));
+      formulaAffectedCoords.forEach(pt => toRefresh.set(`${pt.r}::${pt.c}`, pt));
+      toRefresh.forEach(pt => refreshSingleScratchCellDOM(sheetName, pt.r, pt.c));
       applyScratchSelectionDOM();
       syncScratchFormulaBarFromActiveCell();
       if (scratchStatsMeta) {
@@ -1498,6 +3121,7 @@ function applyScratchCellChanges(
 }
 
 function recordScratchCellEdit(sheetName, rNum, cNum, rawText, { coalesceKey = null } = {}) {
+  scratchClipboardRangeState = null;
   applyScratchCellChanges(sheetName, [{ r: rNum, c: cNum, rawText }], {
     recordUndo: true,
     coalesceKey
@@ -1633,6 +3257,7 @@ function syncScratchFormulaBarFromActiveCell() {
 
 function startScratchInlineEdit(rNum, cNum, initialChar = null) {
   if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook || !scratchGridBody) return;
+  scratchClipboardRangeState = null;
   commitActiveScratchInlineEdit();
   selectScratchCell(rNum, cNum);
 
@@ -1645,7 +3270,7 @@ function startScratchInlineEdit(rNum, cNum, initialChar = null) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'scratch-inline-editor';
-  input.value = initialChar !== null ? initialChar : info.rawEdit;
+  input.value = initialChar !== null ? initialChar : (info.isSpilled ? '' : info.rawEdit);
 
   scratchInlineEditState = {
     sheetName: activeWorkspaceTab,
@@ -1719,7 +3344,9 @@ function renderActiveScratchSheetGrid() {
     return;
   }
 
+  recalculateScratchWorksheetFormulas(ws, activeWorkspaceTab);
   const dims = getScratchSheetGridDimensions(ws, activeWorkspaceTab);
+  const anchorSpills = scratchSpillStateMap.get(activeWorkspaceTab);
   const range = getScratchSelectionRange(activeWorkspaceTab);
   const query = scratchSearchInput ? scratchSearchInput.value.trim().toLowerCase() : '';
   const filterRowsOnly = Boolean(chkScratchFilterRows && chkScratchFilterRows.checked && query.length > 0);
@@ -1782,6 +3409,8 @@ function renderActiveScratchSheetGrid() {
       if (visual.bgHex) classes.push('has-custom-fill');
       else if (visual.fgHex) classes.push('has-custom-fg');
       if (info.isFormula) classes.push('formula-cell');
+      if (anchorSpills && anchorSpills.has(`${r}::${c}`)) classes.push('formula-anchor-cell');
+      if (info.isSpilled && info.anchorR > 0) classes.push('spilled-array-cell');
       if (isHit) classes.push('search-hit');
 
       let styleAttr = '';
@@ -1790,7 +3419,9 @@ function renderActiveScratchSheetGrid() {
       } else if (visual.fgHex) {
         styleAttr = ` style="--cell-fill-fg:${visual.fgHex};"`;
       }
-      const titleText = info.isFormula ? `${info.rawEdit} → ${info.display}` : info.display;
+      const titleText = info.isFormula
+        ? `${info.rawEdit} → ${info.display}`
+        : (info.isSpilled && info.anchorR > 0 ? `${info.display} (Spilled from ${getCellCoordString(info.anchorR, info.anchorC)})` : info.display);
       rowCellsHtml.push(
         `<td data-r="${r}" data-c="${c}" class="${classes.join(' ')}"${styleAttr} title="${escapeHtml(titleText)}"><span class="scratch-cell-text">${escapeHtml(info.display)}</span></td>`
       );
@@ -1875,6 +3506,27 @@ function updateScratchDragSelectionFromPoint(clientX, clientY) {
         focusRow: dims.rows,
         focusCol: targetCol
       });
+    }
+    return;
+  }
+
+  if (scratchDragState.mode === 'fill') {
+    const probeX = Math.max(rect.left + rowHdrW + 3, Math.min(rect.right - 3, clientX));
+    const probeY = Math.max(rect.top + headerH + 3, Math.min(rect.bottom - 3, clientY));
+    const hit = document.elementFromPoint(probeX, probeY);
+    if (!hit) return;
+    const td = hit.closest('td[data-r][data-c]');
+    if (!td) return;
+    const r = Number(td.dataset.r);
+    const c = Number(td.dataset.c);
+    if (r >= 1 && c >= 1) {
+      const nextTarget = computeScratchFillTargetRange(scratchDragState.sourceRange, r, c);
+      const prevKey = scratchDragState.fillTargetRange ? JSON.stringify(scratchDragState.fillTargetRange) : '';
+      const nextKey = nextTarget ? JSON.stringify(nextTarget) : '';
+      if (prevKey !== nextKey) {
+        scratchDragState.fillTargetRange = nextTarget;
+        applyScratchSelectionDOM();
+      }
     }
     return;
   }
@@ -1973,7 +3625,7 @@ function runScratchDragAutoScrollTick() {
   }
 }
 
-function startScratchPointerDrag(mode, clientX, clientY) {
+function startScratchPointerDrag(mode, clientX, clientY, extraState = null) {
   stopScratchPointerDrag();
   if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB) return;
   scratchDragState = {
@@ -1982,15 +3634,20 @@ function startScratchPointerDrag(mode, clientX, clientY) {
     clientX,
     clientY,
     rafId: null,
-    lastExpandAt: 0
+    lastExpandAt: 0,
+    ...(extraState || {})
   };
   if (scratchGridWrap) {
     scratchGridWrap.classList.add('is-drag-selecting');
+    if (mode === 'fill') {
+      scratchGridWrap.classList.add('is-fill-dragging');
+    }
   }
   scratchDragState.rafId = requestAnimationFrame(runScratchDragAutoScrollTick);
 }
 
 function stopScratchPointerDrag() {
+  const wasFill = Boolean(scratchDragState && scratchDragState.mode === 'fill');
   if (scratchDragState) {
     if (scratchDragState.rafId) {
       cancelAnimationFrame(scratchDragState.rafId);
@@ -1999,6 +3656,10 @@ function stopScratchPointerDrag() {
   }
   if (scratchGridWrap) {
     scratchGridWrap.classList.remove('is-drag-selecting');
+    scratchGridWrap.classList.remove('is-fill-dragging');
+  }
+  if (wasFill) {
+    applyScratchSelectionDOM();
   }
 }
 
@@ -2199,6 +3860,19 @@ function buildScratchStyleMatrix(ws, range) {
       rowSnaps.push(captureCellStyleSnapshot(ws, r, c));
     }
     matrix.push(rowSnaps);
+  }
+  return matrix;
+}
+
+function buildScratchRawEditMatrix(ws, range) {
+  const matrix = [];
+  for (let r = range.minRow; r <= range.maxRow; r++) {
+    const rowVals = [];
+    for (let c = range.minCol; c <= range.maxCol; c++) {
+      const info = extractScratchCellInfo(ws, r, c);
+      rowVals.push({ rawEdit: info.rawEdit, isFormula: info.isFormula });
+    }
+    matrix.push(rowVals);
   }
   return matrix;
 }
@@ -2432,6 +4106,7 @@ function clearScratchSelectionCells(sheetName, range) {
   if (!workbook) return 0;
   const ws = workbook.getWorksheet(sheetName);
   if (!ws) return 0;
+  scratchClipboardRangeState = null;
   const edits = [];
   for (let r = range.minRow; r <= range.maxRow; r++) {
     for (let c = range.minCol; c <= range.maxCol; c++) {
@@ -2459,8 +4134,20 @@ function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemC
   const tsv = serializeScratchSelectionToTSV(ws, effRange);
   const html = serializeScratchSelectionToExcelHtml(ws, effRange);
   const styleMatrix = buildScratchStyleMatrix(ws, effRange);
+  const rawEditMatrix = buildScratchRawEditMatrix(ws, effRange);
   scratchInternalClipboardText = tsv;
-  scratchInternalClipboardState = { tsv, html, styleMatrix };
+  scratchInternalClipboardState = {
+    tsv,
+    html,
+    styleMatrix,
+    rawEditMatrix,
+    sourceRange: {
+      minRow: effRange.minRow,
+      maxRow: effRange.maxRow,
+      minCol: effRange.minCol,
+      maxCol: effRange.maxCol
+    }
+  };
 
   if (writeSystemClipboard) {
     writeScratchClipboardPayloadToSystem(tsv, html);
@@ -2497,7 +4184,7 @@ function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemC
   return tsv;
 }
 
-function applyScratchPasteFromText(sheetName, rawText, htmlText = '') {
+function applyScratchPasteFromText(sheetName, rawText, htmlText = '', { clearCopyMarquee = false } = {}) {
   if (!workbook || !sheetName || sheetName === DAILY_TRACKER_WS_TAB) return 0;
   if (rawText === undefined || rawText === null || rawText === '') return 0;
 
@@ -2507,13 +4194,21 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '') {
   const matrix = parseClipboardTSVMatrix(rawText);
   if (matrix.length === 0) return 0;
 
-  let styleMatrix = null;
-  if (
+  const hasMatchingInternalClip = Boolean(
     scratchInternalClipboardState &&
-    scratchInternalClipboardState.tsv === rawText &&
-    Array.isArray(scratchInternalClipboardState.styleMatrix)
-  ) {
-    styleMatrix = scratchInternalClipboardState.styleMatrix;
+    scratchInternalClipboardState.tsv === rawText
+  );
+  let styleMatrix = null;
+  let rawEditMatrix = null;
+  let srcRange = null;
+  if (hasMatchingInternalClip) {
+    if (Array.isArray(scratchInternalClipboardState.styleMatrix)) {
+      styleMatrix = scratchInternalClipboardState.styleMatrix;
+    }
+    if (Array.isArray(scratchInternalClipboardState.rawEditMatrix)) {
+      rawEditMatrix = scratchInternalClipboardState.rawEditMatrix;
+    }
+    srcRange = scratchInternalClipboardState.sourceRange || null;
   } else if (htmlText) {
     styleMatrix = parseClipboardHtmlTableToMatrix(htmlText);
   }
@@ -2525,13 +4220,18 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '') {
 
   if (isSingleValueClipboard && curRange.cellCount > 1) {
     // Excel-style Repeat-Fill: fill entire highlighted multi-cell range with the single copied value
-    const fillVal = matrix[0][0];
+    const singleRawEntry = rawEditMatrix && rawEditMatrix[0] ? rawEditMatrix[0][0] : null;
+    const baseVal = singleRawEntry ? singleRawEntry.rawEdit : matrix[0][0];
+    const singleIsFormula = Boolean(singleRawEntry && singleRawEntry.isFormula && baseVal.startsWith('='));
     const singleStyle = styleMatrix && styleMatrix[0] ? styleMatrix[0][0] : undefined;
     for (let r = curRange.minRow; r <= curRange.maxRow; r++) {
       for (let c = curRange.minCol; c <= curRange.maxCol; c++) {
-        const editObj = { r, c, rawText: fillVal };
+        const finalVal = (singleIsFormula && srcRange)
+          ? shiftFormulaCellReferences(baseVal, r - srcRange.minRow, c - srcRange.minCol)
+          : baseVal;
+        const editObj = { r, c, rawText: finalVal };
         if (singleStyle !== undefined) {
-          editObj.styleSnap = singleStyle || { fill: null, font: null };
+          editObj.styleSnap = singleStyle || { fill: null, font: null, numFmt: null };
         }
         edits.push(editObj);
       }
@@ -2551,15 +4251,25 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '') {
 
     matrix.forEach((cols, rOffset) => {
       const styleRow = styleMatrix && styleMatrix[rOffset] ? styleMatrix[rOffset] : null;
+      const rawRow = rawEditMatrix && rawEditMatrix[rOffset] ? rawEditMatrix[rOffset] : null;
       cols.forEach((cellVal, cOffset) => {
         const r = startRow + rOffset;
         const c = startCol + cOffset;
         if (r > maxR) maxR = r;
         if (c > maxC) maxC = c;
-        const editObj = { r, c, rawText: cellVal };
+        const rawEntry = rawRow && rawRow[cOffset] ? rawRow[cOffset] : null;
+        let finalVal = rawEntry ? rawEntry.rawEdit : cellVal;
+        if (rawEntry && rawEntry.isFormula && finalVal.startsWith('=') && srcRange) {
+          finalVal = shiftFormulaCellReferences(
+            finalVal,
+            r - (srcRange.minRow + rOffset),
+            c - (srcRange.minCol + cOffset)
+          );
+        }
+        const editObj = { r, c, rawText: finalVal };
         if (styleMatrix) {
           const cellStyle = styleRow && styleRow[cOffset] ? styleRow[cOffset] : null;
-          editObj.styleSnap = cellStyle || { fill: null, font: null };
+          editObj.styleSnap = cellStyle || { fill: null, font: null, numFmt: null };
         }
         edits.push(editObj);
       });
@@ -2573,11 +4283,17 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '') {
     };
   }
 
-  scratchClipboardRangeState = null;
+  if (clearCopyMarquee) {
+    scratchClipboardRangeState = null;
+  }
   const changed = applyScratchCellChanges(sheetName, edits, {
     recordUndo: true,
     selectionAfter: nextSelection
   });
+
+  if (clearCopyMarquee) {
+    applyScratchSelectionDOM();
+  }
 
   if (edits.length > 1) {
     showToast(`Pasted ${edits.length} cells into "${sheetName}".`, 'info');
@@ -3037,6 +4753,336 @@ function executeTextToColumnsSplit() {
   }
 }
 
+// --- AUTO-FILTER SIDE LISTS (=FILTER ARRAY BUILDER) ---
+function closeScratchAutoFilterModal() {
+  activeScratchAutoFilterState = null;
+  if (scratchAutoFilterModal) {
+    scratchAutoFilterModal.classList.remove('open');
+  }
+}
+
+function buildAutoFilterPlanFromUI() {
+  if (!activeScratchAutoFilterState || !workbook) return null;
+  const { sheetName, headers } = activeScratchAutoFilterState;
+  const ws = workbook.getWorksheet(sheetName);
+  if (!ws) return null;
+
+  const presetMode = afPresetModeSelect ? afPresetModeSelect.value : 'three_bucket';
+  let retStartCol = parseInt(afReturnStartCol ? afReturnStartCol.value : '1', 10) || 1;
+  let retEndCol = parseInt(afReturnEndCol ? afReturnEndCol.value : '1', 10) || 1;
+  if (retEndCol < retStartCol) {
+    const tmp = retStartCol;
+    retStartCol = retEndCol;
+    retEndCol = tmp;
+  }
+  const critCol = parseInt(afCriteriaCol ? afCriteriaCol.value : '1', 10) || 1;
+  const destStartCol = parseInt(afDestStartCol ? afDestStartCol.value : '6', 10) || 6;
+  const startRow = Math.max(2, parseInt(afStartRowInput ? afStartRowInput.value : '2', 10) || 2);
+  const maxRow = Math.max(startRow, Math.min(5000, parseInt(afMaxRowInput ? afMaxRowInput.value : '200', 10) || 200));
+
+  const retStartLetter = colIndexToExcelLetter(retStartCol);
+  const retEndLetter = colIndexToExcelLetter(retEndCol);
+  const critLetter = colIndexToExcelLetter(critCol);
+  const retRange = `${retStartLetter}${startRow}:${retEndLetter}${maxRow}`;
+  const critRange = `${critLetter}${startRow}:${critLetter}${maxRow}`;
+  const nonEmptyGuard = `(${retStartLetter}${startRow}:${retStartLetter}${maxRow}<>"")`;
+
+  const getHeaderLabel = (c) => {
+    const found = headers.find(h => h.col === c);
+    return (found && found.rawLabel) ? found.rawLabel : `Col ${colIndexToExcelLetter(c)}`;
+  };
+  const baseHeaders = [];
+  for (let c = retStartCol; c <= retEndCol; c++) {
+    baseHeaders.push(getHeaderLabel(c));
+  }
+  const critHeader = getHeaderLabel(critCol);
+
+  const buckets = [];
+  let cursorCol = destStartCol;
+
+  if (presetMode === 'three_bucket') {
+    const keyword = (afYellowKeywordInput ? afYellowKeywordInput.value : 'Duplicate').trim() || 'Duplicate';
+    const kwEsc = keyword.replace(/"/g, '""');
+    const includeCritInGreen = Boolean(!afIncludeCriteriaInGreen || afIncludeCriteriaInGreen.checked);
+
+    // 1. Red Bucket: Empty Criteria
+    buckets.push({
+      key: 'red',
+      title: `Missing ${critHeader} (Red)`,
+      badgeClass: 'af-red',
+      fillPresetId: 'excel_bad',
+      startCol: cursorCol,
+      headers: baseHeaders.map((h, i) => (i === 0 ? `${h} — No ${critHeader}` : h)),
+      formulas: [
+        {
+          colOffset: 0,
+          formula: `=FILTER(${retRange}, ${nonEmptyGuard}*(${critRange}=""), "")`
+        }
+      ]
+    });
+    cursorCol += baseHeaders.length + 1;
+
+    // 2. Yellow Bucket: Keyword Match (e.g. "Duplicate")
+    buckets.push({
+      key: 'yellow',
+      title: `${keyword} ${critHeader} (Yellow)`,
+      badgeClass: 'af-yellow',
+      fillPresetId: 'excel_neutral',
+      startCol: cursorCol,
+      headers: baseHeaders.map((h, i) => (i === 0 ? `${h} — ${keyword}` : h)),
+      formulas: [
+        {
+          colOffset: 0,
+          formula: `=FILTER(${retRange}, ${critRange}="${kwEsc}", "")`
+        }
+      ]
+    });
+    cursorCol += baseHeaders.length + 1;
+
+    // 3. Green Bucket: Occupied Criteria & Not Keyword
+    const greenCond = `(${critRange}<>"")*(${critRange}<>"${kwEsc}")`;
+    const critAlreadyIncluded = critCol >= retStartCol && critCol <= retEndCol;
+    const greenHeaders = [...baseHeaders];
+    const greenFormulas = [];
+
+    if (includeCritInGreen && !critAlreadyIncluded && critCol === retEndCol + 1) {
+      const greenRange = `${retStartLetter}${startRow}:${critLetter}${maxRow}`;
+      greenHeaders.push(critHeader);
+      greenFormulas.push({
+        colOffset: 0,
+        formula: `=FILTER(${greenRange}, ${greenCond}, "")`
+      });
+    } else if (includeCritInGreen && !critAlreadyIncluded) {
+      greenFormulas.push({
+        colOffset: 0,
+        formula: `=FILTER(${retRange}, ${greenCond}, "")`
+      });
+      greenFormulas.push({
+        colOffset: baseHeaders.length,
+        formula: `=FILTER(${critRange}, ${greenCond}, "")`
+      });
+      greenHeaders.push(critHeader);
+    } else {
+      greenFormulas.push({
+        colOffset: 0,
+        formula: `=FILTER(${retRange}, ${greenCond}, "")`
+      });
+    }
+
+    buckets.push({
+      key: 'green',
+      title: `${critHeader} Available (Green)`,
+      badgeClass: 'af-green',
+      fillPresetId: 'excel_good',
+      startCol: cursorCol,
+      headers: greenHeaders.map((h, i) => (i === 0 ? `${h} — Available` : h)),
+      formulas: greenFormulas
+    });
+  } else {
+    const op = afCustomOperatorSelect ? afCustomOperatorSelect.value : 'isempty';
+    const val = (afCustomValueInput ? afCustomValueInput.value : '').trim();
+    const valEsc = val.replace(/"/g, '""');
+    const colorId = afCustomColorSelect ? afCustomColorSelect.value : 'none';
+
+    let condExpr = `${nonEmptyGuard}*(${critRange}="")`;
+    let suffix = 'Filtered';
+    if (op === 'isempty') {
+      condExpr = `${nonEmptyGuard}*(${critRange}="")`;
+      suffix = `Missing ${critHeader}`;
+    } else if (op === 'isnotempty') {
+      condExpr = `${critRange}<>""`;
+      suffix = `Has ${critHeader}`;
+    } else if (op === 'equals') {
+      condExpr = `${critRange}="${valEsc}"`;
+      suffix = `${critHeader} = ${val}`;
+    } else if (op === 'notequals') {
+      condExpr = `${nonEmptyGuard}*(${critRange}<>"${valEsc}")`;
+      suffix = `${critHeader} <> ${val}`;
+    } else if (op === 'contains') {
+      condExpr = `ISNUMBER(SEARCH("${valEsc}", ${critRange}))`;
+      suffix = `${critHeader} ~ "${val}"`;
+    }
+
+    buckets.push({
+      key: 'custom',
+      title: `Filtered (${suffix})`,
+      badgeClass: colorId === 'excel_bad' ? 'af-red' : (colorId === 'excel_neutral' ? 'af-yellow' : (colorId === 'excel_good' ? 'af-green' : '')),
+      fillPresetId: colorId,
+      startCol: cursorCol,
+      headers: baseHeaders.map((h, i) => (i === 0 ? `${h} — ${suffix}` : h)),
+      formulas: [
+        {
+          colOffset: 0,
+          formula: `=FILTER(${retRange}, ${condExpr}, "")`
+        }
+      ]
+    });
+  }
+
+  return { sheetName, startRow, maxRow, buckets };
+}
+
+function renderScratchAutoFilterPreview() {
+  if (!activeScratchAutoFilterState || !afFormulaPreviewBox) return;
+  const presetMode = afPresetModeSelect ? afPresetModeSelect.value : 'three_bucket';
+  if (afThreeBucketWrap) afThreeBucketWrap.style.display = presetMode === 'three_bucket' ? 'block' : 'none';
+  if (afSingleCustomWrap) afSingleCustomWrap.style.display = presetMode === 'single_custom' ? 'block' : 'none';
+
+  const plan = buildAutoFilterPlanFromUI();
+  if (!plan) return;
+
+  afFormulaPreviewBox.innerHTML = plan.buckets.map(b => {
+    const anchorCoord = getCellCoordString(plan.startRow, b.startCol);
+    const colSpan = `${colIndexToExcelLetter(b.startCol)}:${colIndexToExcelLetter(b.startCol + b.headers.length - 1)}`;
+    const formulasHtml = b.formulas.map(f => `<code>${escapeHtml(f.formula)}</code>`).join(' ');
+    return `
+      <div class="af-preview-row">
+        <span class="af-legend-chip ${b.badgeClass}">${escapeHtml(b.title)} (${escapeHtml(colSpan)} • @${escapeHtml(anchorCoord)})</span>
+        ${formulasHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+function openScratchAutoFilterModal() {
+  closeScratchContextMenu();
+  closeScratchFillDropdown();
+  if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
+  commitActiveScratchInlineEdit();
+
+  const sheetName = activeWorkspaceTab;
+  const ws = workbook.getWorksheet(sheetName);
+  if (!ws) return;
+  const dims = getScratchSheetGridDimensions(ws, sheetName);
+  const scanCols = Math.max(dims.dataMaxCol, 10);
+  const headers = [];
+  for (let c = 1; c <= scanCols; c++) {
+    const rawLabel = extractScratchCellInfo(ws, 1, c, { skipSpillLookup: true }).display.trim();
+    const letter = colIndexToExcelLetter(c);
+    headers.push({
+      col: c,
+      letter,
+      rawLabel,
+      label: rawLabel ? `Col ${letter} — ${rawLabel}` : `Col ${letter}`
+    });
+  }
+
+  activeScratchAutoFilterState = { sheetName, headers };
+  if (afSheetBadge) afSheetBadge.textContent = sheetName;
+
+  const optsHtml = headers.map(h => `<option value="${h.col}">${escapeHtml(h.label)}</option>`).join('');
+  [afReturnStartCol, afReturnEndCol, afCriteriaCol].forEach(sel => {
+    if (sel) sel.innerHTML = optsHtml;
+  });
+
+  if (afDestStartCol) {
+    const destHeaders = [];
+    const maxDest = Math.max(scanCols + 8, 20);
+    for (let c = 1; c <= maxDest; c++) {
+      const found = headers.find(h => h.col === c);
+      const lbl = found && found.rawLabel ? `Col ${found.letter} (${found.rawLabel})` : `Col ${colIndexToExcelLetter(c)}`;
+      destHeaders.push(`<option value="${c}">${escapeHtml(lbl)}</option>`);
+    }
+    afDestStartCol.innerHTML = destHeaders.join('');
+  }
+
+  // Smart column auto-detection
+  let detectedCritCol = Math.max(2, Math.min(dims.dataMaxCol || 4, scanCols));
+  const critMatch = headers.find(h => /track|carrier|mail|status|title\s*#/i.test(h.rawLabel));
+  if (critMatch) {
+    detectedCritCol = critMatch.col;
+  }
+  const retEndDefault = detectedCritCol > 1 ? detectedCritCol - 1 : 1;
+  const destDefault = Math.max(dims.dataMaxCol + 2, detectedCritCol + 2, 6);
+
+  if (afReturnStartCol) afReturnStartCol.value = '1';
+  if (afReturnEndCol) afReturnEndCol.value = String(retEndDefault);
+  if (afCriteriaCol) afCriteriaCol.value = String(detectedCritCol);
+  if (afDestStartCol) afDestStartCol.value = String(destDefault);
+  if (afStartRowInput) afStartRowInput.value = '2';
+  if (afMaxRowInput) afMaxRowInput.value = String(Math.max(200, dims.dataMaxRow + 50));
+
+  renderScratchAutoFilterPreview();
+  if (scratchAutoFilterModal) {
+    scratchAutoFilterModal.classList.add('open');
+  }
+}
+
+function executeScratchAutoFilterSetup() {
+  const plan = buildAutoFilterPlanFromUI();
+  if (!plan || !workbook) return;
+  const ws = workbook.getWorksheet(plan.sheetName);
+  if (!ws) return;
+
+  const dims = getScratchSheetGridDimensions(ws, plan.sheetName);
+  const headerRowNum = Math.max(1, plan.startRow - 1);
+  const tintEndRow = Math.max(30, Math.min(plan.maxRow, Math.max(dims.dataMaxRow + 15, 35)));
+  const edits = [];
+  let maxEndCol = plan.buckets[0].startCol;
+
+  plan.buckets.forEach(bucket => {
+    const colCount = bucket.headers.length;
+    const endCol = bucket.startCol + colCount - 1;
+    if (endCol > maxEndCol) maxEndCol = endCol;
+
+    // 1. Headers on row above startRow + fill tint down tintEndRow
+    bucket.headers.forEach((hdrText, cOff) => {
+      const c = bucket.startCol + cOff;
+      const baseSnap = captureCellStyleSnapshot(ws, headerRowNum, c);
+      let hdrSnap = baseSnap;
+      if (bucket.fillPresetId && bucket.fillPresetId !== 'none') {
+        hdrSnap = buildStyleSnapshotForFillPreset(baseSnap, bucket.fillPresetId);
+      }
+      hdrSnap = {
+        fill: hdrSnap.fill,
+        font: { ...(hdrSnap.font || {}), bold: true },
+        numFmt: hdrSnap.numFmt || null
+      };
+      edits.push({ r: headerRowNum, c, rawText: hdrText, styleSnap: hdrSnap });
+
+      // Ensure formula / data rows start clean (empty values except formula anchor) & tinted
+      for (let r = plan.startRow; r <= tintEndRow; r++) {
+        const cellBefore = captureCellStyleSnapshot(ws, r, c);
+        let cellSnap = cellBefore;
+        if (bucket.fillPresetId && bucket.fillPresetId !== 'none') {
+          cellSnap = buildStyleSnapshotForFillPreset(cellBefore, bucket.fillPresetId);
+        }
+        const formulaSpec = (r === plan.startRow)
+          ? bucket.formulas.find(f => f.colOffset === cOff)
+          : null;
+        edits.push({
+          r,
+          c,
+          rawText: formulaSpec ? formulaSpec.formula : '',
+          styleSnap: cellSnap
+        });
+      }
+    });
+  });
+
+  const firstBucket = plan.buckets[0];
+  const nextSelection = {
+    anchorRow: plan.startRow,
+    anchorCol: firstBucket.startCol,
+    focusRow: plan.startRow,
+    focusCol: maxEndCol
+  };
+
+  closeScratchAutoFilterModal();
+  applyScratchCellChanges(plan.sheetName, edits, {
+    recordUndo: true,
+    selectionAfter: nextSelection
+  });
+
+  showToast(
+    `Created ${plan.buckets.length} auto-filtered side list${plan.buckets.length === 1 ? '' : 's'} using live =FILTER formulas.`,
+    'success'
+  );
+  if (scratchGridWrap) {
+    scratchGridWrap.focus({ preventScroll: true });
+  }
+}
+
 function migrateScratchSheetRuntimeMaps(oldName, newName) {
   const maps = [
     scratchGridDimensionsMap,
@@ -3045,7 +5091,9 @@ function migrateScratchSheetRuntimeMaps(oldName, newName) {
     scratchUndoStackMap,
     scratchRedoStackMap,
     scratchPendingColWidths,
-    scratchPendingFills
+    scratchPendingFills,
+    scratchSpillStateMap,
+    scratchSpilledCellsMap
   ];
   maps.forEach(m => {
     if (m.has(oldName)) {
@@ -3074,6 +5122,8 @@ function resetScratchWorkbookRuntimeState() {
   scratchSelectionRangeMap.clear();
   scratchUndoStackMap.clear();
   scratchRedoStackMap.clear();
+  scratchSpillStateMap.clear();
+  scratchSpilledCellsMap.clear();
   scratchClipboardRangeState = null;
   lastFormulaCoalesceMeta = null;
 }
@@ -3132,6 +5182,10 @@ async function promptCreateNewScratchSheet() {
     selectLabel: 'Starter Layout',
     selectOptions: [
       {
+        value: 'title_buckets',
+        label: 'Title Tracking + Auto-Filtered Red / Yellow / Green Side Lists (Lot #, Buyer #, LLY Date, Tracking #)'
+      },
+      {
         value: 'title_headers',
         label: 'Title Tracking Columns (Lot #, Yard #, Broker / Master #, Title Status, Carrier / Tracking #, Notes)'
       },
@@ -3140,7 +5194,7 @@ async function promptCreateNewScratchSheet() {
         label: 'Blank Spreadsheet Grid'
       }
     ],
-    defaultSelectValue: 'title_headers',
+    defaultSelectValue: 'title_buckets',
     inputLabel: 'Scratch Sheet Name',
     defaultValue: defaultSuggested,
     placeholder: 'e.g., Title Tracking, Pending Titles, Scratch',
@@ -3160,7 +5214,72 @@ async function promptCreateNewScratchSheet() {
 
   const newWs = workbook.addWorksheet(newSheetName);
 
-  if (starterLayout === 'title_headers') {
+  if (starterLayout === 'title_buckets') {
+    const mainHeaders = [
+      { header: 'Lot #', width: 15, numFmt: '@' },
+      { header: 'Buyer #', width: 14, numFmt: '@' },
+      { header: 'LLY Date', width: 14, numFmt: 'mm/dd/yyyy' },
+      { header: 'Tracking #', width: 24, numFmt: '@' }
+    ];
+    const headerRow = newWs.getRow(1);
+    headerRow.height = 22;
+    mainHeaders.forEach((colDef, idx) => {
+      const colObj = newWs.getColumn(idx + 1);
+      colObj.width = colDef.width;
+      colObj.numFmt = colDef.numFmt;
+      const cell = headerRow.getCell(idx + 1);
+      cell.value = colDef.header;
+      cell.font = { bold: true, color: { argb: 'FF0F172A' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    });
+
+    const bucketDefs = [
+      {
+        startCol: 6,
+        fillArgb: 'FFFFC7CE',
+        fontArgb: 'FF9C0006',
+        headers: ['Lot # — No Tracking', 'Buyer #', 'LLY Date'],
+        formula: '=_xlfn._xlws.FILTER(A2:C200, (A2:A200<>"")*(D2:D200=""), "")'.slice(1)
+      },
+      {
+        startCol: 10,
+        fillArgb: 'FFFFEB9C',
+        fontArgb: 'FF9C6500',
+        headers: ['Lot # — Duplicate', 'Buyer #', 'LLY Date'],
+        formula: '=_xlfn._xlws.FILTER(A2:C200, D2:D200="Duplicate", "")'.slice(1)
+      },
+      {
+        startCol: 14,
+        fillArgb: 'FFC6EFCE',
+        fontArgb: 'FF006100',
+        headers: ['Lot # — Available', 'Buyer #', 'LLY Date', 'Tracking #'],
+        formula: '=_xlfn._xlws.FILTER(A2:D200, (D2:D200<>"")*(D2:D200<>"Duplicate"), "")'.slice(1)
+      }
+    ];
+    bucketDefs.forEach(b => {
+      b.headers.forEach((hText, offset) => {
+        const c = b.startCol + offset;
+        newWs.getColumn(c).width = offset === 3 ? 24 : 16;
+        const hCell = headerRow.getCell(c);
+        hCell.value = hText;
+        hCell.font = { bold: true, color: { argb: b.fontArgb } };
+        hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: b.fillArgb } };
+        for (let r = 2; r <= 30; r++) {
+          const rowObj = newWs.getRow(r);
+          const dCell = rowObj.getCell(c);
+          dCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: b.fillArgb } };
+          dCell.font = { color: { argb: b.fontArgb } };
+          if (r === 2 && offset === 0) {
+            dCell.value = { formula: b.formula };
+          }
+          rowObj.commit();
+        }
+      });
+    });
+    headerRow.commit();
+    scratchActiveCellMap.set(newSheetName, { row: 2, col: 1 });
+    scratchSelectionRangeMap.set(newSheetName, { anchorRow: 2, anchorCol: 1, focusRow: 2, focusCol: 1 });
+  } else if (starterLayout === 'title_headers') {
     const starterHeaders = [
       { header: 'Lot #', width: 16 },
       { header: 'Yard #', width: 11 },
@@ -3383,8 +5502,62 @@ if (scratchFillDropdown) {
   });
 }
 
+if (scratchCellFormatSelect) {
+  scratchCellFormatSelect.addEventListener('change', () => {
+    if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
+    applyScratchFormatToSelection(activeWorkspaceTab, scratchCellFormatSelect.value);
+    if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
+  });
+}
+
 if (btnScratchTextToColumns) {
   btnScratchTextToColumns.addEventListener('click', openTextToColumnsModal);
+}
+
+if (btnScratchAutoFilter) {
+  btnScratchAutoFilter.addEventListener('click', openScratchAutoFilterModal);
+}
+
+// Auto-Filter Side Lists Modal Listeners
+[
+  afPresetModeSelect,
+  afReturnStartCol,
+  afReturnEndCol,
+  afCriteriaCol,
+  afDestStartCol,
+  afStartRowInput,
+  afMaxRowInput,
+  afYellowKeywordInput,
+  afIncludeCriteriaInGreen,
+  afCustomOperatorSelect,
+  afCustomValueInput,
+  afCustomColorSelect
+].forEach(el => {
+  if (el) {
+    el.addEventListener('change', renderScratchAutoFilterPreview);
+    if (el.tagName === 'INPUT' && el.type !== 'checkbox') {
+      el.addEventListener('input', renderScratchAutoFilterPreview);
+    }
+  }
+});
+
+if (btnCancelAutoFilter) {
+  btnCancelAutoFilter.addEventListener('click', closeScratchAutoFilterModal);
+}
+
+if (scratchAutoFilterModal) {
+  scratchAutoFilterModal.addEventListener('click', (e) => {
+    if (e.target === scratchAutoFilterModal) {
+      closeScratchAutoFilterModal();
+    }
+  });
+}
+
+if (scratchAutoFilterForm) {
+  scratchAutoFilterForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    executeScratchAutoFilterSetup();
+  });
 }
 
 // Data to Columns Modal Listeners
@@ -3454,6 +5627,9 @@ if (scratchContextMenu) {
         break;
       case 'text-to-columns':
         openTextToColumnsModal();
+        break;
+      case 'auto-filter-lists':
+        openScratchAutoFilterModal();
         break;
       case 'clear-contents': {
         const cleared = clearScratchSelectionCells(activeWorkspaceTab, range);
@@ -3687,7 +5863,22 @@ if (scratchGridBody) {
       return;
     }
 
-    // 2. Grid Cell Click / Shift+Click / Drag Range Selection
+    // 2. Corner Fill Handle Drag
+    const fillHandle = e.target.closest('.scratch-fill-handle');
+    if (fillHandle) {
+      e.preventDefault();
+      e.stopPropagation();
+      commitActiveScratchInlineEdit();
+      if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
+      const curRange = getScratchSelectionRange(activeWorkspaceTab);
+      startScratchPointerDrag('fill', e.clientX, e.clientY, {
+        sourceRange: { ...curRange },
+        fillTargetRange: null
+      });
+      return;
+    }
+
+    // 3. Grid Cell Click / Shift+Click / Drag Range Selection
     const td = e.target.closest('td[data-r][data-c]');
     if (!td) return;
     if (scratchInlineEditState && scratchInlineEditState.tdEl === td) return;
@@ -3703,6 +5894,43 @@ if (scratchGridBody) {
   });
 
   scratchGridBody.addEventListener('dblclick', (e) => {
+    const fillHandle = e.target.closest('.scratch-fill-handle');
+    if (fillHandle && activeWorkspaceTab !== DAILY_TRACKER_WS_TAB && workbook) {
+      e.preventDefault();
+      e.stopPropagation();
+      const ws = workbook.getWorksheet(activeWorkspaceTab);
+      if (!ws) return;
+      const curRange = getScratchSelectionRange(activeWorkspaceTab);
+      const dims = getScratchSheetGridDimensions(ws, activeWorkspaceTab);
+      // Find contiguous filled rows in adjacent left (or right) column
+      const probeCols = [curRange.minCol - 1, curRange.maxCol + 1].filter(col => col >= 1 && col <= dims.cols);
+      let targetEndRow = curRange.maxRow;
+      for (const pCol of probeCols) {
+        let r = curRange.maxRow + 1;
+        while (r <= Math.max(dims.dataMaxRow, dims.rows) && extractScratchCellInfo(ws, r, pCol).display.trim() !== '') {
+          if (r > targetEndRow) targetEndRow = r;
+          r++;
+        }
+        if (targetEndRow > curRange.maxRow) break;
+      }
+      if (targetEndRow > curRange.maxRow) {
+        executeScratchFillHandleDrag(
+          activeWorkspaceTab,
+          curRange,
+          {
+            axis: 'vertical',
+            dir: 1,
+            minRow: curRange.minRow,
+            maxRow: targetEndRow,
+            minCol: curRange.minCol,
+            maxCol: curRange.maxCol
+          },
+          { ctrlKey: Boolean(e.ctrlKey || e.metaKey) }
+        );
+      }
+      return;
+    }
+
     const td = e.target.closest('td[data-r][data-c]');
     if (!td) return;
     const r = parseInt(td.dataset.r, 10);
@@ -3729,7 +5957,7 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 
-window.addEventListener('mouseup', () => {
+window.addEventListener('mouseup', (e) => {
   if (scratchColResizeState) {
     const st = scratchColResizeState;
     scratchColResizeState = null;
@@ -3739,7 +5967,18 @@ window.addEventListener('mouseup', () => {
     }
   }
   if (scratchDragState) {
-    stopScratchPointerDrag();
+    const dragSnap = scratchDragState;
+    if (dragSnap.mode === 'fill' && dragSnap.fillTargetRange) {
+      const src = dragSnap.sourceRange;
+      const target = dragSnap.fillTargetRange;
+      const sheet = dragSnap.sheetName;
+      stopScratchPointerDrag();
+      executeScratchFillHandleDrag(sheet, src, target, {
+        ctrlKey: Boolean(e && (e.ctrlKey || e.metaKey))
+      });
+    } else {
+      stopScratchPointerDrag();
+    }
   }
 });
 
@@ -3863,6 +6102,18 @@ if (scratchGridWrap) {
         return;
       case 'Enter':
         e.preventDefault();
+        if (
+          scratchClipboardRangeState &&
+          scratchInternalClipboardText !== ''
+        ) {
+          applyScratchPasteFromText(
+            activeWorkspaceTab,
+            scratchInternalClipboardText,
+            scratchInternalClipboardState ? scratchInternalClipboardState.html : '',
+            { clearCopyMarquee: true }
+          );
+          return;
+        }
         selectScratchCell(
           e.shiftKey ? Math.max(1, range.anchorRow - 1) : range.anchorRow + 1,
           range.anchorCol,
@@ -3999,8 +6250,20 @@ if (scratchGridWrap) {
     const tsv = serializeScratchSelectionToTSV(ws, effRange);
     const html = serializeScratchSelectionToExcelHtml(ws, effRange);
     const styleMatrix = buildScratchStyleMatrix(ws, effRange);
+    const rawEditMatrix = buildScratchRawEditMatrix(ws, effRange);
     scratchInternalClipboardText = tsv;
-    scratchInternalClipboardState = { tsv, html, styleMatrix };
+    scratchInternalClipboardState = {
+      tsv,
+      html,
+      styleMatrix,
+      rawEditMatrix,
+      sourceRange: {
+        minRow: effRange.minRow,
+        maxRow: effRange.maxRow,
+        minCol: effRange.minCol,
+        maxCol: effRange.maxCol
+      }
+    };
 
     if (e.clipboardData) {
       e.preventDefault();
@@ -4033,8 +6296,20 @@ if (scratchGridWrap) {
     const tsv = serializeScratchSelectionToTSV(ws, range);
     const html = serializeScratchSelectionToExcelHtml(ws, range);
     const styleMatrix = buildScratchStyleMatrix(ws, range);
+    const rawEditMatrix = buildScratchRawEditMatrix(ws, range);
     scratchInternalClipboardText = tsv;
-    scratchInternalClipboardState = { tsv, html, styleMatrix };
+    scratchInternalClipboardState = {
+      tsv,
+      html,
+      styleMatrix,
+      rawEditMatrix,
+      sourceRange: {
+        minRow: range.minRow,
+        maxRow: range.maxRow,
+        minCol: range.minCol,
+        maxCol: range.maxCol
+      }
+    };
 
     if (e.clipboardData) {
       e.preventDefault();
@@ -4069,6 +6344,11 @@ if (scratchGridWrap) {
 // Global Ctrl+S & Escape handlers while viewing a Scratch Sheet Tab
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    if (scratchAutoFilterModal && scratchAutoFilterModal.classList.contains('open')) {
+      e.preventDefault();
+      closeScratchAutoFilterModal();
+      return;
+    }
     if (textToColumnsModal && textToColumnsModal.classList.contains('open')) {
       e.preventDefault();
       closeTextToColumnsModal();

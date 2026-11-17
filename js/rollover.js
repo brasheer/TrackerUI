@@ -830,7 +830,9 @@ function updateRolloverModalPreview() {
         : `From ${escapeHtml(item.sheetName)}${item._ageDays > 0 ? ` (${item._ageDays}d old)` : ''}`;
       const noteLineCount = item.notes ? item.notes.split(/\r?\n/).filter(Boolean).length : 0;
       const notesMeta = noteLineCount > 0 ? ` • ${noteLineCount} note line${noteLineCount === 1 ? '' : 's'} appended` : '';
-      const overdueClass = item._isOverdue ? ' overdue-outline-red' : '';
+      const statusHighlightClass = item._isOverdue
+        ? ' overdue-outline-red'
+        : ((typeof isWaitingOrHoldStatus === 'function' && isWaitingOrHoldStatus(item.status)) ? ' waiting-outline-purple' : '');
       const badgeClass = typeof getStatusBadgeClass === 'function'
         ? getStatusBadgeClass(item.status)
         : 'badge-pending';
@@ -838,7 +840,7 @@ function updateRolloverModalPreview() {
         ? `⚠️ ${escapeHtml(item._previousStatus)} → Overdue (${item._ageDays}d / ${item._carryCount}x)`
         : escapeHtml(item.status);
       html += `
-        <div class="preview-item${overdueClass}">
+        <div class="preview-item${statusHighlightClass}">
           <div class="preview-item-main">
             <strong>${escapeHtml(getRolloverItemDisplayTitle(item))}</strong>
             <span class="preview-item-sub">${escapeHtml(item.broker || 'No Broker')} • ${spanInfo}${notesMeta} • ID: ${escapeHtml(item.key.slice(0, 8))}...</span>
@@ -865,11 +867,16 @@ function updateRolloverModalPreview() {
         : (isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending');
       const isTargetOverdue = !isCompletedStatus(effectiveTargetStatus) &&
         typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveTargetStatus);
+      const isTargetWaiting = !isTargetOverdue && !isCompletedStatus(effectiveTargetStatus) &&
+        typeof isWaitingOrHoldStatus === 'function' && isWaitingOrHoldStatus(effectiveTargetStatus);
+      const targetHighlightClass = isTargetOverdue
+        ? ' overdue-outline-red'
+        : (isTargetWaiting ? ' waiting-outline-purple' : '');
       const statusArrowText = reopenedOnSource
         ? ` → Reopen (${escapeHtml(latestRow.status)})`
         : (autoOverdueOnTarget ? ' → Overdue' : '');
       html += `
-        <div class="preview-item${isTargetOverdue ? ' overdue-outline-red' : ''}">
+        <div class="preview-item${targetHighlightClass}">
           <div class="preview-item-main">
             <strong>${escapeHtml(getRolloverItemDisplayTitle(targetRow))}</strong>
             <span class="preview-item-sub">${escapeHtml(targetRow.broker || 'No Broker')} • Row ${targetRow.rowNumber} on ${escapeHtml(targetVal)}${syncNoteLabel}</span>
@@ -896,8 +903,13 @@ function updateRolloverModalPreview() {
       const reopenBadgeClass = typeof getStatusBadgeClass === 'function'
         ? getStatusBadgeClass(openRow.status)
         : 'badge-pending';
+      const isReopenWaiting = !openRow._isOverdue &&
+        typeof isWaitingOrHoldStatus === 'function' && isWaitingOrHoldStatus(openRow.status);
+      const reopenHighlightClass = openRow._isOverdue
+        ? ' overdue-outline-red'
+        : (isReopenWaiting ? ' waiting-outline-purple' : '');
       html += `
-        <label class="preview-item${openRow._isOverdue ? ' overdue-outline-red' : ''}" style="cursor:pointer;">
+        <label class="preview-item${reopenHighlightClass}" style="cursor:pointer;">
           <div style="display:flex; align-items:center; gap:10px;">
             <input type="checkbox" class="chk-force-rollover" data-key="${escapeHtml(openRow.key)}" style="width:16px; height:16px;">
             <div class="preview-item-main">

@@ -270,7 +270,7 @@ At the start of a new shift or workday, use the **Smart Rollover Engine** to cre
 
 ---
 
-## 11. Workbook Scratch Sheets (Colors, Context Menu & `Data to Columns`)
+## 11. Workbook Scratch Sheets (Fill Handle, Types, `=FILTER` Lists & Context Menu)
 
 Any worksheet in your Excel workbook that is **not** a `MM-DD-YYYY` daily tab and **not** a reserved reference sheet (`template`, `validation lists`, `Master Accounts`) is automatically discovered as an editable **Scratch Sheet** (for example, `Title Tracking`, `Lot Audit`, or personal notes).
 
@@ -278,20 +278,25 @@ Any worksheet in your Excel workbook that is **not** a `MM-DD-YYYY` daily tab an
 
 ### Opening & Creating Scratch Sheets
 - **Where to Click**: On the right side of the **`Sheets`** bar, click **`Scratch Sheets ▾`**.
-- Click any existing sheet in the dropdown to open it as a tab in the `Sheets` bar, or click **`+ Create New Scratch Sheet...`** at the bottom of the dropdown.
+- Click any existing sheet in the dropdown to open it as a tab in the `Sheets` bar, or click **`+ Create New Scratch Sheet...`** at the bottom of the dropdown (includes a 1-click **Title Tracking + Auto-Filtered Red / Yellow / Green Side Lists** template).
 
-### Editing Cells, Keyboard Navigation & Multi-Cell Paste
+### Editing Cells, Copy + `Enter` Paste & Fill Handle Auto-Increment
 - **Single-Click & Type**: Click any cell (or navigate with `Arrow Keys`, `Tab`, `Enter`) and start typing immediately to replace its value, or press `F2` / **Double-Click** to edit inside the existing text.
 - **Range Selection**: Click and drag across cells (or hold `Shift + Arrow Keys`) to highlight a multi-cell range. Click a column letter (`A`, `B`, `C`) or row number (`1`, `2`, `3`) to select an entire column or row.
-- **Cut, Copy & Multi-Cell Paste**: Right-click any cell or selection to open the **Context Menu** (`Cut`, `Copy`, `Paste`, `Clear Contents`, `Clear Fill Color`) or use `Ctrl+X`, `Ctrl+C`, `Ctrl+V`. Pasting multi-row/multi-column cells copied from Desktop Excel or another webpage automatically expands across adjacent cells.
+- **Copy + `Enter` to Paste & Multi-Cell Paste**: Press `Ctrl+C` on a cell or range, move to any target cell, and press **`Enter`** to paste and clear the copy marquee (or press `Ctrl+V` to keep the marquee active for repeated pasting). Right-click any cell or selection to open the **Context Menu** (`Cut`, `Copy`, `Paste`, `Auto-Filter Side Lists...`, `Data to Columns...`, `Clear Contents`, `Clear Fill Color`).
+- **Corner Fill Handle Square & Date/Number Auto-Increment**: Drag the blue square at the bottom-right corner of the active selection (or double-click it to fill down alongside adjacent data) to fill cells across rows or columns. **Dates** and **Numbers** (`<= 10` digits) auto-increment automatically (`+1` day / `+1`, or by the step delta between two selected cells; hold `Ctrl` while dragging to copy without incrementing). Use the toolbar **`Type:`** dropdown (`Auto`, `Text (@)`, `Date (MM/DD/YYYY)`, `Number (123)`, `Currency ($)`) to lock columns like Lot # or Tracking # as **`Text (@)`** so they never increment.
 - **Undo / Redo**: Click **`↶ Undo`** (`Ctrl+Z`) or **`↷ Redo`** (`Ctrl+Y`).
+
+### Live `=FILTER` Array Functions & Auto-Filter Side Lists
+- **1-Click Red / Yellow / Green Side Lists**: Click **`Auto-Filter Lists`** in the scratch toolbar (or right-click → **`Auto-Filter Side Lists...`**) to split your main list (e.g. `Lot #`, `Buyer #`, `LLY Date`, `Tracking #`) into live color-coded side lists: **Red** (Missing/Empty Tracking), **Yellow** (`"Duplicate"`), and **Green** (Occupied Tracking). Updates happen automatically as you type so you can highlight and copy any color list straight into Outlook/Gmail.
+- **Supported In-App Functions**: Scratch sheets evaluate `=FILTER`, `=UNIQUE`, `=SORT`, `=IF`, `=COUNTIF`, `=COUNTA`, `=COUNTBLANK`, `=SUM`, `=AVERAGE`, `=MIN`, `=MAX`, `=ISBLANK`, `=ISNUMBER`, `=SEARCH`, `=TRIM`, `=UPPER`, `=LOWER`, `=LEN`, `=LEFT`, `=RIGHT`, `=MID`, and `=TODAY()` live in-app.
 
 ### Cell Fill Colors & App-Only Striped Rows
 - **Excel Default Fill Colors**: Select any cell(s) or header row and click **`Fill ▾`** in the scratch toolbar (or click a color swatch directly inside the **Right-Click Context Menu**). All colors use standard **Excel Default Fill Swatches** (Pastel Good/Warning/Bad/Note fills + Bold Header fills) with automatic high-contrast text color and save directly into the `.xlsx` file.
 - **`Striped rows` Toggle**: Check or uncheck **`Striped rows`** in the left scratch toolbar to toggle alternating row shading inside the app. *(As requested, striped row shading is visual-only inside TrackerUI and is never written to the Excel file.)*
 
-> [!WARNING]
-> **Formulas Do Not Run in Scratch Sheets:** Scratch sheets operate as a plain-value grid. Excel formulas (`=SUM`, `=XLOOKUP`, `=LET`, cross-sheet references, etc.) are **not evaluated or recalculated** in-app, and Excel 365 formulas may display raw OpenXML tokens like `_xlpm.data` or `_xlfn.` until opened in Desktop Excel. You can dismiss the yellow reminder banner permanently by clicking **`Acknowledge ✕`**.
+> [!NOTE]
+> **Desktop Excel Compatibility:** Complex Excel-only functions (`=XLOOKUP`, `=LET`, cross-workbook references) are preserved as raw OpenXML and recalculate when opened in Desktop Excel. You can dismiss the formula notice banner permanently by clicking **`Acknowledge ✕`**.
 
 ### Splitting Delimited Data (`Data to Columns`)
 
@@ -353,7 +358,7 @@ TrackerUI includes two dedicated tools for team leads and supervisors inside **`
 | **Filter table to all rows sharing a Broker/Master/Ticket/ID** | **Click directly on any chip/badge** inside the table (`🔍 ID`, `Master #`, `Broker`, `Status`, etc.) |
 | **Bulk-update status or delete multiple rows** | Check the **boxes on the left of rows** → Use the floating **Batch Action Bar** at the bottom |
 | **Roll over unfinished requests to today/tomorrow** | Top Header → **`Rollover / Sync`** |
-| **Color cells or split columns on a Scratch Sheet** | Scratch Toolbar → **`Fill ▾`** or **`Data to Columns`** (or **Right-Click** any cell) |
+| **Color cells, set data type, or build `=FILTER` lists** | Scratch Toolbar → **`Type:`**, **`Fill ▾`**, **`Data to Columns`**, or **`Auto-Filter Lists`** |
 | **Aggregate multiple agent workbooks for a supervisor** | **`⚙️ Tools & Setup ▾` → `Supervisor Multi-Workbook Rollup...`** |
 
 ### Keyboard Shortcuts (Scratch Sheets & Global)
@@ -362,6 +367,8 @@ TrackerUI includes two dedicated tools for team leads and supervisors inside **`
 | :--- | :--- |
 | `Arrow Keys` / `Tab` / `Shift+Tab` | Move active cell selection across the Scratch Sheet grid |
 | `Enter` / `Shift+Enter` | Commit cell edit and move down / up to the next row |
+| `Ctrl + C` then `Enter` | Paste copied cell/range at target cell and clear copy marquee |
+| `Drag Corner Square` | Fill cells across rows/columns (auto-increments Dates & Numbers; hold `Ctrl` to copy only) |
 | `F2` or `Double-Click` | Edit inside the active Scratch Sheet cell without overwriting existing text |
 | `Escape` | Cancel active inline cell edit or close open modal / popover menu |
 | `Shift + Arrow Keys` | Expand multi-cell range selection on a Scratch Sheet |

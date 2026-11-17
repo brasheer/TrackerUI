@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.18.4</title>
+  <title>TrackerUI v1.19.1</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.18.4">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.1">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.18.4 — Click to check for updates &amp; refresh app cache">v1.18.4</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.1 — Click to check for updates &amp; refresh app cache">v1.19.1</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.18.4</span>
+              <span class="menu-item-meta" data-app-version>v1.19.1</span>
             </button>
           </div>
         </div>
@@ -802,6 +802,17 @@
           </label>
         </div>
 
+        <!-- Cell Data Type / Format Selector -->
+        <div class="scratch-format-wrap" title="Set data type / display format for selected cell(s) or column(s) (Dates &amp; Numbers auto-increment when dragging the corner fill square; Text never auto-increments)">
+          <select id="scratchCellFormatSelect" class="scratch-format-select" aria-label="Cell data type and format">
+            <option value="auto">Type: Auto</option>
+            <option value="text">Type: Text (@)</option>
+            <option value="date">Type: Date (MM/DD/YYYY)</option>
+            <option value="number">Type: Number (123)</option>
+            <option value="currency">Type: Currency ($)</option>
+          </select>
+        </div>
+
         <!-- Excel Default Cell Fill Color Split Picker -->
         <div id="scratchFillMenuWrap" class="scratch-fill-wrap">
           <div class="scratch-fill-split" role="group" aria-label="Cell fill color">
@@ -843,6 +854,13 @@
           <span>Data to Columns</span>
         </button>
 
+        <button type="button" id="btnScratchAutoFilter" class="btn-sm btn-with-icon" title="Set up live auto-filtered side lists (e.g. Empty = Red, Duplicate = Yellow, Occupied = Green) using =FILTER array functions">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="2.5 4 17.5 4 11.8 10.5 11.8 16 8.2 14.2 8.2 10.5 2.5 4"></polygon>
+          </svg>
+          <span>Auto-Filter Lists</span>
+        </button>
+
         <button type="button" id="btnScratchUndo" class="btn-sm" title="Undo last edit (Ctrl+Z)" disabled>↶ Undo</button>
         <button type="button" id="btnScratchRedo" class="btn-sm" title="Redo edit (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷ Redo</button>
         <button type="button" id="btnScratchAddRows" class="btn-sm" title="Add 10 blank rows to the grid">＋ 10 Rows</button>
@@ -855,20 +873,20 @@
 
     <div class="scratch-formula-bar">
       <span id="scratchCellCoord" class="scratch-cell-coord" title="Selected cell or range coordinate">A1</span>
-      <span class="scratch-fx-label" title="Raw cell text / OpenXML value (live Excel formulas do not evaluate in-app)">Cell</span>
-      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="View or edit plain cell values • Formulas do NOT calculate in-app • Cut/Copy/Paste • Fill Color • Data to Columns..." autocomplete="off">
+      <span class="scratch-fx-label" title="Cell value or live array/summary formula">fx</span>
+      <input type="text" id="scratchFormulaInput" class="scratch-formula-input" placeholder="View or edit cell values &amp; =FILTER(...) array formulas • Copy + Enter to Paste • Drag corner square to fill/increment..." autocomplete="off">
       <span id="scratchSelectionStats" class="scratch-selection-stats" style="display:none;" title="Quick summary of highlighted cell range"></span>
     </div>
 
     <div id="scratchFormulaNotice" class="scratch-formula-notice" role="note">
       <div class="scratch-formula-notice-main">
-        <span class="scratch-formula-notice-icon" aria-hidden="true">⚠️</span>
+        <span class="scratch-formula-notice-icon" aria-hidden="true">ℹ️</span>
         <span class="scratch-formula-notice-body">
-          <strong>Formulas Do Not Run in Scratch Sheets:</strong>
-          Scratch sheets are a plain-value grid — Excel formulas (<code>=SUM</code>, <code>=XLOOKUP</code>, <code>=LET</code>, cross-sheet references, etc.) are <strong>not evaluated or recalculated</strong> here and shouldn't be expected to work in-app. Existing Excel 365 formulas are stored as raw OpenXML text (which is why internal tokens like <code>_xlpm.data</code> or <code>_xlfn.</code> appear) and only calculate when opened in Desktop Excel.
+          <strong>Live Array &amp; Summary Functions Active:</strong>
+          Scratch sheets evaluate <code>=FILTER</code>, <code>=UNIQUE</code>, <code>=SORT</code>, <code>=IF</code>, <code>=COUNTIF</code>, <code>=COUNTA</code>, and <code>=SUM</code> live in-app (use <strong>Auto-Filter Lists</strong> for 1-click Red/Yellow/Green side lists). Complex Desktop Excel formulas (<code>=XLOOKUP</code>, <code>=LET</code>, cross-workbook references) are preserved as raw OpenXML and recalculate when opened in Desktop Excel.
         </span>
       </div>
-      <button type="button" id="btnAckScratchFormulaNotice" class="btn-ack-formula-notice" title="Acknowledge and dismiss this formula warning">
+      <button type="button" id="btnAckScratchFormulaNotice" class="btn-ack-formula-notice" title="Acknowledge and dismiss this formula note">
         Acknowledge ✕
       </button>
     </div>
@@ -933,6 +951,14 @@
           <rect x="15" y="3.5" width="2.5" height="13" rx="0.8"></rect>
         </svg>
         <span>Data to Columns...</span>
+      </span>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="auto-filter-lists" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="2.5 4 17.5 4 11.8 10.5 11.8 16 8.2 14.2 8.2 10.5 2.5 4"></polygon>
+        </svg>
+        <span>Auto-Filter Side Lists...</span>
       </span>
     </button>
     <button type="button" class="scratch-ctx-item" data-ctx-action="clear-contents" role="menuitem">
@@ -1225,6 +1251,116 @@
         <div class="modal-actions">
           <button type="button" id="btnCancelTextToColumns">Cancel</button>
           <button type="submit" id="btnConfirmTextToColumns" class="btn-primary">Split into Columns</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Auto-Filter Side Lists (=FILTER Array Builder) Modal for Scratch Sheets -->
+  <div id="scratchAutoFilterModal" class="modal-backdrop">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <div>
+          <h3>Auto-Filter Side Lists (<code>=FILTER</code> Array Builder)</h3>
+          <div class="modal-subtitle">Automatically route rows from your main table into color-coded side lists whenever values change — ready to copy &amp; paste into emails</div>
+        </div>
+        <span id="afSheetBadge" class="key-chip" style="cursor:default;">Scratch Sheet</span>
+      </div>
+      <form id="scratchAutoFilterForm">
+        <div class="af-config-grid">
+          <div class="form-group full">
+            <label for="afPresetModeSelect">Auto-Filter Layout Preset</label>
+            <select id="afPresetModeSelect">
+              <option value="three_bucket">Title Tracking 3-Bucket Split (Empty → Red • &quot;Duplicate&quot; → Yellow • Occupied → Green)</option>
+              <option value="single_custom">Single Custom =FILTER List</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="afReturnStartCol">Output Columns — Start</label>
+            <select id="afReturnStartCol"></select>
+          </div>
+          <div class="form-group">
+            <label for="afReturnEndCol">Output Columns — End</label>
+            <select id="afReturnEndCol"></select>
+          </div>
+          <div class="form-group">
+            <label for="afCriteriaCol">Filter Criteria Column (e.g., Tracking #)</label>
+            <select id="afCriteriaCol"></select>
+          </div>
+          <div class="form-group">
+            <label for="afDestStartCol">Place Side Lists Starting at Column</label>
+            <select id="afDestStartCol"></select>
+          </div>
+          <div class="form-group">
+            <label for="afStartRowInput">First Data Row (after Header)</label>
+            <input type="number" id="afStartRowInput" min="1" max="5000" value="2">
+          </div>
+          <div class="form-group">
+            <label for="afMaxRowInput">Scan Down Through Row</label>
+            <input type="number" id="afMaxRowInput" min="2" max="5000" value="200">
+          </div>
+        </div>
+
+        <div id="afThreeBucketWrap" class="ttc-options-panel">
+          <div class="ttc-section-label">3-Bucket Routing Rules (Red / Yellow / Green Side Columns)</div>
+          <div class="af-config-grid" style="margin-bottom:0.45rem;">
+            <div class="form-group">
+              <label for="afYellowKeywordInput">Yellow Column Keyword (Exact Match, Case-Insensitive)</label>
+              <input type="text" id="afYellowKeywordInput" value="Duplicate" placeholder="e.g. Duplicate">
+            </div>
+            <div class="form-group" style="justify-content:flex-end;">
+              <label class="checkbox-label" title="Include the criteria column (e.g. Tracking #) in the Green list even if you exclude it from Red &amp; Yellow">
+                <input type="checkbox" id="afIncludeCriteriaInGreen" checked>
+                <span>Include Criteria / Tracking # Column in Green List</span>
+              </label>
+            </div>
+          </div>
+          <div class="af-bucket-legend">
+            <span class="af-legend-chip af-red">Red: Criteria cell is blank</span>
+            <span class="af-legend-chip af-yellow">Yellow: Criteria equals keyword</span>
+            <span class="af-legend-chip af-green">Green: Criteria occupied &amp; not keyword</span>
+          </div>
+        </div>
+
+        <div id="afSingleCustomWrap" class="ttc-options-panel" style="display:none;">
+          <div class="ttc-section-label">Custom =FILTER Criteria</div>
+          <div class="af-config-grid" style="margin-bottom:0;">
+            <div class="form-group">
+              <label for="afCustomOperatorSelect">Condition</label>
+              <select id="afCustomOperatorSelect">
+                <option value="isempty">Is Empty (Blank)</option>
+                <option value="isnotempty">Is Occupied (Not Blank)</option>
+                <option value="equals">Equals Value (=)</option>
+                <option value="notequals">Does Not Equal (&lt;&gt;)</option>
+                <option value="contains">Contains Text</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="afCustomValueInput">Comparison Value</label>
+              <input type="text" id="afCustomValueInput" placeholder="e.g. Duplicate">
+            </div>
+            <div class="form-group full">
+              <label for="afCustomColorSelect">Side List Fill Tint</label>
+              <select id="afCustomColorSelect">
+                <option value="none">No Fill (Plain)</option>
+                <option value="excel_bad">Red (Excel Bad)</option>
+                <option value="excel_neutral">Yellow (Excel Neutral)</option>
+                <option value="excel_good">Green (Excel Good)</option>
+                <option value="blue_80">Blue Accent (Light)</option>
+                <option value="gold_80">Gold Accent (Light)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="ttc-preview-section">
+          <div class="ttc-section-label">Generated <code>=FILTER</code> Array Formula Preview</div>
+          <div id="afFormulaPreviewBox" class="af-formula-preview"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btnCancelAutoFilter">Cancel</button>
+          <button type="submit" id="btnConfirmAutoFilter" class="btn-primary">Create Auto-Filter Lists</button>
         </div>
       </form>
     </div>
@@ -1576,16 +1712,17 @@
 
           <!-- Section 11 -->
           <article id="manual-sec-11" class="manual-section">
-            <h4>11. Workbook Scratch Sheets (Colors, Context Menu &amp; <code>Data to Columns</code>)</h4>
+            <h4>11. Workbook Scratch Sheets (Fill Handle, Types, <code>=FILTER</code> Lists &amp; Context Menu)</h4>
             <p>Open or create custom worksheets (such as <code>Title Tracking</code> or <code>Lot Audit</code>) from the <strong><code>Scratch Sheets ▾</code></strong> menu on the right side of the <code>Sheets</code> bar:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/07-scratch-sheet-and-context-menu.png" alt="Scratch Sheet and Right-Click Context Menu" class="manual-screenshot" loading="lazy">
               <figcaption>Scratch Sheet Editor — Excel Default Fill Colors, Striped Rows &amp; Right-Click Context Menu</figcaption>
             </figure>
             <ul class="manual-list">
-              <li><strong>Right-Click Context Menu &amp; Multi-Cell Paste:</strong> Right-click any cell or highlighted range for <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, quick Excel Fill Color swatches, <code>Data to Columns...</code>, <code>Clear Contents</code>, and <code>Clear Fill Color</code>. Multi-cell ranges copied from Desktop Excel paste cleanly across rows and columns.</li>
+              <li><strong>Copy + Enter to Paste &amp; Multi-Cell Paste:</strong> Press <code>Ctrl+C</code> on a cell or range, move to a target cell, and press <strong><code>Enter</code></strong> to paste immediately and finish the copy (or press <code>Ctrl+V</code> to keep the copied marquee active for repeated pasting). Right-click any cell or range for <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, quick Excel Fill Color swatches, <code>Data to Columns...</code>, <code>Auto-Filter Side Lists...</code>, <code>Clear Contents</code>, and <code>Clear Fill Color</code>.</li>
+              <li><strong>Fill Handle Square &amp; Date/Number Auto-Increment:</strong> Drag the blue corner square at the bottom-right of your selection to copy across adjacent cells. Cells formatted as <strong>Date</strong> or <strong>Number</strong> (or auto-detected) increment automatically (e.g., <code>+1 day</code> or <code>+1</code>, or by the step between two selected cells; hold <code>Ctrl</code> while dragging to copy without incrementing). Set <strong><code>Type: Text (@)</code></strong> in the toolbar to keep tracking numbers or IDs as exact strings that never increment.</li>
+              <li><strong>Live <code>=FILTER</code> Array Side Lists &amp; Summary Functions:</strong> Click <strong><code>Auto-Filter Lists</code></strong> in the scratch toolbar (or type <code>=FILTER</code>, <code>=UNIQUE</code>, <code>=SORT</code>, <code>=IF</code>, <code>=COUNTIF</code>, <code>=COUNTA</code>, <code>=SUM</code>) to dynamically split lists into color-coded Red (Empty), Yellow (<code>"Duplicate"</code>), and Green (Occupied) side lists that update live for 1-click email copy/paste.</li>
               <li><strong>Excel Default Fill Colors &amp; App-Only Striped Rows:</strong> Use <strong><code>Fill ▾</code></strong> in the toolbar (or right-click swatches) to apply Excel-compatible cell/header fill colors. Toggle <strong><code>Striped rows</code></strong> for visual-only alternating row shading in the app.</li>
-              <li><strong>Acknowledgeable Formula Notice:</strong> Scratch sheets edit plain values—Excel formulas (<code>=SUM</code>, <code>=XLOOKUP</code>, etc.) do not calculate in-app. Click <strong><code>Acknowledge ✕</code></strong> on the yellow banner to dismiss the reminder.</li>
             </ul>
             <figure class="manual-figure">
               <img src="assets/images/manual/08-data-to-columns-modal.png" alt="Data to Columns Modal" class="manual-screenshot" loading="lazy">
@@ -1612,7 +1749,7 @@
             <h4>13. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, export or import your department tracker profiles, custom column mappings, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.18.4</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.1</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -1635,7 +1772,7 @@
                   <tr><td>Adjust form field widths, order, or Notes height</td><td>Bottom Dock Header → <strong><code>🔒 Layout</code></strong> (unlocks <code>◀ ▶</code>, <code>− +</code>, <code>↕− ↕+</code>)</td></tr>
                   <tr><td>Filter table to rows sharing a Broker/Master/Ticket/ID</td><td><strong>Click directly on any chip/badge</strong> inside the table</td></tr>
                   <tr><td>Bulk-update status or delete multiple rows</td><td>Check left-hand row checkboxes → Use floating <strong>Batch Action Bar</strong></td></tr>
-                  <tr><td>Color cells or split columns on a Scratch Sheet</td><td>Scratch Toolbar → <strong><code>Fill ▾</code></strong> or <strong><code>Data to Columns</code></strong> (or <strong>Right-Click</strong> cell)</td></tr>
+                  <tr><td>Color cells, format types, or split columns on a Scratch Sheet</td><td>Scratch Toolbar → <strong><code>Type</code></strong>, <strong><code>Fill ▾</code></strong>, <strong><code>Data to Columns</code></strong>, or <strong><code>Auto-Filter Lists</code></strong></td></tr>
                 </tbody>
               </table>
             </div>
@@ -1647,6 +1784,8 @@
                 </thead>
                 <tbody>
                   <tr><td><code>Arrow Keys</code> / <code>Tab</code> / <code>Enter</code></td><td>Navigate cells or commit edit and move down/up on Scratch Sheets</td></tr>
+                  <tr><td><code>Ctrl+C</code> then <code>Enter</code></td><td>Paste copied cell/range at destination and clear copy marquee</td></tr>
+                  <tr><td><code>Drag Corner Square</code></td><td>Fill cells across rows/columns (auto-increments Dates &amp; Numbers; hold <code>Ctrl</code> to copy only)</td></tr>
                   <tr><td><code>F2</code> or <code>Double-Click</code></td><td>Edit inside active Scratch Sheet cell without overwriting existing text</td></tr>
                   <tr><td><code>Shift + Arrow Keys</code></td><td>Expand multi-cell range selection on Scratch Sheets</td></tr>
                   <tr><td><code>Ctrl+C</code> / <code>Ctrl+X</code> / <code>Ctrl+V</code></td><td>Copy / Cut / Paste single cells or multi-cell Excel TSV ranges</td></tr>
@@ -1727,16 +1866,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.18.4</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.1</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.18.4"></script>
-  <script src="js/core-ui.js?v=1.18.4"></script>
-  <script src="js/workbook-io.js?v=1.18.4"></script>
-  <script src="js/tracker-table.js?v=1.18.4"></script>
-  <script src="js/request-editors.js?v=1.18.4"></script>
-  <script src="js/scratch-sheets.js?v=1.18.4"></script>
-  <script src="js/rollover.js?v=1.18.4"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.1"></script>
+  <script src="js/core-ui.js?v=1.19.1"></script>
+  <script src="js/workbook-io.js?v=1.19.1"></script>
+  <script src="js/tracker-table.js?v=1.19.1"></script>
+  <script src="js/request-editors.js?v=1.19.1"></script>
+  <script src="js/scratch-sheets.js?v=1.19.1"></script>
+  <script src="js/rollover.js?v=1.19.1"></script>
 </body>
 </html>

@@ -1028,15 +1028,30 @@ function renderList() {
       });
       occurrencesUpToSheet = Math.max(1, count);
     }
+    let effectiveRowStatus = item.status;
+    if (isCustomSchema && activeSchemaConfig && activeSchemaConfig.statusCol) {
+      const stFieldKey = `col_${activeSchemaConfig.statusCol}`;
+      const rawCustomSt = item.customValues && item.customValues[stFieldKey] !== undefined
+        ? String(item.customValues[stFieldKey]).trim()
+        : '';
+      if (rawCustomSt) {
+        effectiveRowStatus = rawCustomSt;
+      }
+    }
+    const isRowWaiting =
+      !isCompletedStatus(effectiveRowStatus) &&
+      typeof isWaitingOrHoldStatus === 'function' &&
+      isWaitingOrHoldStatus(effectiveRowStatus);
     const isRowOverdue =
-      !isCompletedStatus(item.status) &&
+      !isCompletedStatus(effectiveRowStatus) &&
       (
-        (typeof isOverdueStatus === 'function' && isOverdueStatus(item.status)) ||
-        ageDays > SMART_OVERDUE_MAX_AGE_DAYS ||
-        occurrencesUpToSheet >= SMART_OVERDUE_MIN_CARRIES
+        (typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveRowStatus)) ||
+        (!isRowWaiting && (ageDays > SMART_OVERDUE_MAX_AGE_DAYS || occurrencesUpToSheet >= SMART_OVERDUE_MIN_CARRIES))
       );
     if (isRowOverdue) {
       tr.classList.add('overdue-outline-red');
+    } else if (isRowWaiting) {
+      tr.classList.add('waiting-outline-purple');
     }
 
     const noteText = item.notes || '—';
