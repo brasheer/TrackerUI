@@ -8,7 +8,14 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.2` (Current — `main` / `meerkat`)
+### `v1.19.3` (Current — `main` / `meerkat`)
+- **🔧 OpenXML Dynamic Array & View-Only Mirror Repair Fix (`js/workbook-io.js`, `js/scratch-sheets.js`)**:
+  - Scoped `repairSavedXlsxArchive()`'s `t="s"` → `t="str"` conversion strictly to legacy reference sheets and active multi-cell `ref="Start:End"` spill rectangles (with XML entity escaping), preventing static shared-string cells on Scratch Sheets from triggering Desktop Excel repair prompts.
+  - Updated dynamic array post-processing and `recalculateScratchWorksheetFormulas()` to preserve cached results for unsupported Excel functions (`=LET`/`=XLOOKUP`), purge stale cached spill cells when an array anchor is edited to an in-app evaluated formula, and write `<f t="array" ref="<cell>">` + `cm="1"` + `xl/metadata.xml` (`XLDAPR`) for `=FILTER`, `=SORT`, `=UNIQUE`, `=LET`, and `=XLOOKUP` cells so Excel never prepends legacy `@` implicit intersection (`=@FILTER(...)`).
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v40'` in [`sw.js`](sw.js) and updated asset version query strings to `?v=1.19.3` in [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.2` (`main` / `meerkat`)
 - **📖 Comprehensive User Manual Update & Excel Function Reference (`USER_MANUAL.md`, `index.html`)**:
   - Updated all 15 sections across both [`USER_MANUAL.md`](USER_MANUAL.md) and the interactive in-app `#userManualModal` (adding `Section 12: Scratch Sheet Excel Functions, Formula Syntax & Dynamic Array Reference` covering `=FILTER`, `=UNIQUE`, `=SORT`, `=IF`, `=AND`, `=OR`, `=NOT`, `=ISBLANK`, `=ISEMPTY`, `=ISNUMBER`, `=ISTEXT`, `=COUNTIF`, `=COUNTA`, `=COUNTBLANK`, `=SUM`, `=AVERAGE`, `=MIN`, `=MAX`, `=TRIM`, `=UPPER`, `=LOWER`, `=LEN`, `=LEFT`, `=RIGHT`, `=MID`, `=SEARCH`, `=FIND`, `=TODAY()`, `*`/`+` boolean array criteria, `$` absolute/relative coordinates, cross-sheet `Sheet1!Range` references, and spill error codes).
   - Documented `v1.18.1`–`v1.19.1` features including 1080p responsive space optimization vs. ultrawide `#sheetTabsBar`, Overdue (red fill + outline) & Waiting/On Hold (purple fill + outline) highlights, Left-Hand Row Numbers (`#`), Integrated Split-Pill Copy Buttons, Multi-Tab Session Standby Lock & Fail-Safe Primary Save staging, Manual Row Copy & Paste across daily tabs, and Scratch Sheet Data Types + Corner Fill Handle auto-increment.

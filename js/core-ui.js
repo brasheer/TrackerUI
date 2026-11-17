@@ -1610,7 +1610,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.2';
+const APP_VERSION = 'v1.19.3';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;

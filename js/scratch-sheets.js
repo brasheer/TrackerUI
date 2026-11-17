@@ -2193,7 +2193,10 @@ function evaluateWorksheetCellFormula(ws, rNum, cNum, ctx) {
     return topLeftRaw;
   }
 
-  cell.value = { formula: cell.value.formula, result: toExcelScalarValue(evaluated) };
+  const hasPriorResult = cell.value.result !== undefined && cell.value.result !== null;
+  if (!(isFormulaError(evaluated) && evaluated.error === '#NAME?' && hasPriorResult)) {
+    cell.value = { formula: cell.value.formula, result: toExcelScalarValue(evaluated) };
+  }
   return evaluated;
 }
 
@@ -2265,6 +2268,49 @@ function recalculateScratchWorksheetFormulas(ws, sheetName) {
   formulaCoords.forEach(({ r, c }) => {
     evaluateWorksheetCellFormula(ws, r, c, ctx);
   });
+
+  // Physically purge stale Excel cached spill cells on any original array anchor that is now evaluated
+  // in-app (or was cleared) so ExcelJS never writes ghost cached cells back into the saved .xlsx archive.
+  if (typeof originalArchiveState !== 'undefined' && originalArchiveState && originalArchiveState.arrayFormulasBySheet) {
+    const origCellMap = originalArchiveState.arrayFormulasBySheet.get(String(sheetName || '').toLowerCase());
+    if (origCellMap) {
+      for (const [anchorRef, info] of origCellMap.entries()) {
+        if (!info || !info.fTag) continue;
+        const refMatch = info.fTag.match(/\bref="([A-Z]+\d+):([A-Z]+\d+)"/i);
+        if (!refMatch) continue;
+        const p1 = parseCellRefParts(refMatch[1]);
+        const p2 = parseCellRefParts(refMatch[2]);
+        const anchorP = parseCellRefParts(anchorRef);
+        if (!p1 || !p2 || !anchorP) continue;
+
+        const anchorEval = ctx.computedAnchors.get(`${sheetName}::${anchorP.row}::${anchorP.col}`);
+        const stillUnsupportedDesktopFormula = Boolean(isFormulaError(anchorEval) && anchorEval.error === '#NAME?');
+        if (stillUnsupportedDesktopFormula) continue;
+
+        const minR = Math.min(p1.row, p2.row);
+        const maxR = Math.max(p1.row, p2.row);
+        const minC = Math.min(p1.col, p2.col);
+        const maxC = Math.max(p1.col, p2.col);
+        for (let r = minR; r <= maxR; r++) {
+          const rObj = ws.findRow ? ws.findRow(r) : null;
+          if (!rObj) continue;
+          let rowTouched = false;
+          for (let c = minC; c <= maxC; c++) {
+            if (r === anchorP.row && c === anchorP.col) continue;
+            const cObj = rObj.findCell ? rObj.findCell(c) : null;
+            if (cObj && cObj.value !== null && cObj.value !== undefined) {
+              if (!(typeof cObj.value === 'object' && cObj.value.formula !== undefined)) {
+                cObj.value = null;
+                rowTouched = true;
+              }
+            }
+          }
+          if (rowTouched && rObj.commit) rObj.commit();
+        }
+        info.fTag = info.fTag.replace(/\bref="[A-Z]+\d+:[A-Z]+\d+"/i, `ref="${anchorRef}"`);
+      }
+    }
+  }
 
   const nextSpills = ctx.spillBySheet.get(sheetName) || new Map();
   // Mask any original Desktop Excel cached spill cells that were NOT repopulated in this recalculation

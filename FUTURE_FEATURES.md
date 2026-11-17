@@ -37,8 +37,26 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
+### ↔️ Resizable Tracker Table Columns
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Add Excel-style draggable column resize handles along the right edge of `#tableHead` column headers in the Daily Requests tracker table (for both Standard and Custom Department schemas), similar to the column resizers already present on Scratch Sheets.
+  - Persist custom column widths per tracker profile / schema key in `localStorage` (and include them in `.json` Workspace Config export/import), with a double-click auto-fit or `Reset Column Widths` option.
+
+---
+
+### 🔄 Always-Live Bidirectional Master Buyer Account Sync (`Broker Name` ↔ `Master #`)
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Remove the current guard that only auto-fills `Master #` / `Broker Name` / `Bidder #` when the counterpart field is blank (which currently forces users to clear both fields before auto-fill triggers again when changing accounts).
+  - Whenever a known **Master Buyer Account Name** (`Broker Name`) or **Account Number** (`Master #`) is entered or changed in the Bottom Editor Dock or Popup Modal, automatically overwrite and sync the corresponding `Master #` / `Broker Name` (and default `Bidder #`) to match the newly selected account.
+
+---
+
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
 |---|---|---|---|
+| **Resizable Tracker Table Columns** | *Daily Tracker Table* | 📋 Planned | Draggable column header resize handles in `#tableHead` across Standard & Custom Department trackers, persisted per profile/schema in `localStorage` and `.json` config backups. |
+| **Always-Live Master Buyer Account Sync** | *Request Editors* | 📋 Planned | Always update `Master #` ↔ `Broker Name` (and `Bidder #`) automatically whenever either known account field changes, without requiring both fields to be cleared first. |
 | **Simple Text Editing & Formatting (`Bold`/`Italic`/`Align`)** | *Scratch Sheets* | 📋 Planned | Toolbar toggles & shortcuts (`Ctrl+B` Bold/Unbold toggle to override auto-bolded Row 1 headers, `Ctrl+I`, `Ctrl+U`, Left/Center/Right align, and Clear Formatting) persisted to `.xlsx` `cell.font` / `cell.alignment` with full Undo/Redo support. |
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
@@ -155,8 +173,8 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 | Concept | Status | Rationale |
 |---|---|---|
 | **Cross-Queue Ticket Claiming (Tombstoning)** | ⏸️ Parked | Manual dual-write transfer of tickets between agent workbooks. Intentionally parked to prioritize core workflow stability before introducing cross-file mutation. |
-| **Hidden UUID Configuration Sheets** | ⏸️ Parked | Generating and storing Agent UUID/Names in a hidden `TrackerConfig` Excel tab. Parked alongside cross-queue sharing. |
-| **Nested Agent JSON Config Storage** | ⏸️ Parked | Saving a `settings.json` file inside a nested agent directory for state persistence. Parked for now. |
+| **Hidden UUID Configuration Sheets (`TrackerConfig`)** | ⏸️ Parked | Hidden `TrackerConfig` Excel tab reserved strictly for **Agent Name, Agent UUIDv4, and workbook-level parsing/ownership metadata** needed when cross-agent request sharing is enabled (NOT for UI/layout settings, which stay in `.json`). |
+| **Nested Agent JSON Config Storage** | ⏸️ Parked | Saving a `settings.json` file inside a nested agent directory for state persistence. Parked for now (manual `.json` export/import is implemented). |
 | **Mass Report Filter (380,000-Row Client-Side `Set` Filter)** | ⏸️ Parked | Explicitly parked. High memory overhead; requires `{ header: 1 }` stream parsing to avoid V8 memory crashes. |
 | **Smart Scratchpad (Real-Time Regex Lot # & Title Extractor)** | ⏸️ Parked | Split-pane scratchpad with automated regex scraping for 8-digit lot numbers. Parked in favor of Excel-like in-app scratch sheet tabs (`v1.15.0`). |
 | **Chart.js Metric View for Current Data** | 📋 Promoted to Section 1 | Superseded by the **Charts & Visual Analytics Panel (Phase 1 & 2)** proposal in Section 1 above (preferring lightweight zero-dependency SVG charts first, with optional Chart.js UMD if needed). |

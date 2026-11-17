@@ -1154,7 +1154,7 @@ async function captureOriginalArchiveState(arrayBuffer) {
         const cAttrs = cm[1];
         const cellRef = cm[2];
         const fTag = cm[3];
-        if (/\bt="array"/.test(fTag) || /\bcm="/.test(cAttrs) || /_xlfn\._xlws\.FILTER|_xlfn\.LET/.test(fTag)) {
+        if (/\bt="array"/.test(fTag) || /\bcm="/.test(cAttrs) || /_xlfn\._xlws\.(?:FILTER|SORT)|_xlfn\.(?:UNIQUE|LET|XLOOKUP)/.test(fTag)) {
           const tAttr = (cAttrs.match(/\bt="([^"]+)"/) || [])[1] || null;
           cellMap.set(cellRef, { fTag, tAttr });
         }
@@ -1280,68 +1280,131 @@ async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
         hasAnyExternalRefFormula = true;
       }
 
-      const isDynamicArrayRefSheet =
+      const isLegacyRefSheet =
         lower === 'master accounts' ||
         lower === 'master account' ||
         lower === 'validation list' ||
-        lower === 'validation lists' ||
-        /\bt="array"|_xlfn\._xlws\.FILTER|_xlfn\.LET/.test(xml);
+        lower === 'validation lists';
+
+      const isDynamicArrayRefSheet =
+        isLegacyRefSheet ||
+        /\bt="array"|_xlfn\._xlws\.(?:FILTER|SORT)|_xlfn\.(?:UNIQUE|LET|XLOOKUP)/.test(xml);
 
       if (isDynamicArrayRefSheet) {
         const origCellMap = archiveState && archiveState.arrayFormulasBySheet
           ? archiveState.arrayFormulasBySheet.get(lower)
           : null;
+        const activeMultiCellSpillRects = [];
 
-        // 1. Restore cm="1" and exact <f t="array" ref="..."> on dynamic array anchor cells
+        // 1. Restore cm="1" and <f t="array" ref="..."> on dynamic array anchor cells
+        //    so Excel never inserts legacy '@' implicit intersection before FILTER/SORT/UNIQUE.
         xml = xml.replace(
-          /<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>(<f\b[^>]*>[\s\S]*?<\/f>)(<v[^>]*>([\s\S]*?)<\/v>|<v\/>)?<\/c>/g,
-          (full, cAttrs, cellRef, fTag, vFull, vInner) => {
+          /<c\b([^>]*\br="([A-Z]+\d+)"[^>]*)>(<f\b[^>]*>([\s\S]*?)<\/f>)(<v[^>]*>([\s\S]*?)<\/v>|<v\/>)?<\/c>/g,
+          (full, cAttrs, cellRef, fTag, fInner, vFull, vInner) => {
             const origInfo = origCellMap ? origCellMap.get(cellRef) : null;
+            const origInner = origInfo
+              ? origInfo.fTag.replace(/^<f\b[^>]*>([\s\S]*?)<\/f>$/, '$1')
+              : null;
+            const isFormulaUnchanged = Boolean(origInfo && origInner === fInner);
+            const hasDynFn = /_xlfn\._xlws\.(?:FILTER|SORT)|_xlfn\.(?:UNIQUE|LET|XLOOKUP)/.test(fTag);
             const isArrayF = Boolean(
-              origInfo ||
+              isFormulaUnchanged ||
               /\bt="array"/.test(fTag) ||
-              /_xlfn\._xlws\.FILTER|_xlfn\.LET/.test(fTag)
+              hasDynFn
             );
             if (!isArrayF) return full;
 
             hasAnyDynamicArrayFormula = true;
-            const finalFTag = origInfo ? origInfo.fTag : fTag;
+            let finalFTag = isFormulaUnchanged ? origInfo.fTag : fTag;
+            if (!/\bt="array"/.test(finalFTag)) {
+              finalFTag = finalFTag.replace(/^<f\b([^>]*)>/, (_m, fAttrs) => {
+                const cleanedFAttrs = fAttrs.replace(/\s+ref="[^"]*"/g, '').replace(/\s+t="[^"]*"/g, '');
+                return `<f${cleanedFAttrs} t="array" ref="${cellRef}">`;
+              });
+            }
             if (/\[1\]/.test(finalFTag)) {
               hasAnyExternalRefFormula = true;
+            }
+
+            const spillRangeMatch = finalFTag.match(/\bref="([A-Za-z]+)(\d+):([A-Za-z]+)(\d+)"/i);
+            if (spillRangeMatch) {
+              const c1 = excelLettersToColNumber(spillRangeMatch[1]);
+              const r1 = parseInt(spillRangeMatch[2], 10);
+              const c2 = excelLettersToColNumber(spillRangeMatch[3]);
+              const r2 = parseInt(spillRangeMatch[4], 10);
+              if (c1 >= 1 && c2 >= 1 && r1 >= 1 && r2 >= 1) {
+                activeMultiCellSpillRects.push({
+                  minC: Math.min(c1, c2),
+                  maxC: Math.max(c1, c2),
+                  minR: Math.min(r1, r2),
+                  maxR: Math.max(r1, r2),
+                  anchorRef: cellRef.toUpperCase()
+                });
+              }
             }
 
             let attrs = cAttrs;
             if (!/\bcm="/.test(attrs)) {
               attrs += ' cm="1"';
             }
+            const isErrVal = typeof vInner === 'string' && /^#[A-Z0-9/!?]+$/.test(vInner.trim());
             const isNumVal = vInner !== undefined && vInner !== '' && !isNaN(Number(vInner));
-            if (origInfo && origInfo.tAttr && !/\bt="/.test(attrs)) {
+            if (isErrVal) {
+              if (!/\bt="/.test(attrs)) attrs += ' t="e"';
+            } else if (isNumVal) {
+              attrs = attrs.replace(/\s+t="str"/g, '');
+            } else if (origInfo && origInfo.tAttr && !/\bt="/.test(attrs)) {
               attrs += ` t="${origInfo.tAttr}"`;
-            } else if (!isNumVal && !/\bt="/.test(attrs)) {
+            } else if (!/\bt="/.test(attrs)) {
               attrs += ' t="str"';
             }
             return `<c${attrs}>${finalFTag}${vFull || '<v/>'}</c>`;
           }
         );
 
-        // 2. Convert spilled string cells in rows 2+ from t="s" (shared string) back to t="str" (formula string result)
-        xml = xml.replace(
-          /<row\b([^>]*\br="(\d+)"[^>]*)>([\s\S]*?)<\/row>/g,
-          (rowFull, rowAttrs, rNumStr, rowInner) => {
-            const rNum = parseInt(rNumStr, 10);
-            if (rNum < 2) return rowFull;
-            const fixedInner = rowInner.replace(
-              /<c\b([^>]*?)\bt="s"([^>]*)><v>(\d+)<\/v><\/c>/g,
-              (cFull, a1, a2, idxStr) => {
-                const idx = parseInt(idxStr, 10);
-                const resolved = sharedStrings[idx] !== undefined ? sharedStrings[idx] : '';
-                const needsSpace = resolved.startsWith(' ') || resolved.endsWith(' ');
-                return `<c${a1}t="str"${a2}><v${needsSpace ? ' xml:space="preserve"' : ''}>${resolved}</v></c>`;
-              }
-            );
-            return `<row${rowAttrs}>${fixedInner}</row>`;
-          }
-        );
+        // 2. Only convert static t="s" cells to XML-escaped t="str" when the cell is inside an active
+        //    multi-cell ref="Start:End" spill rectangle (or on Master Accounts / Validation List sheets),
+        //    never on unrelated static string cells.
+        const isInActiveSpillRect = (colIdx, rowIdx, cellRefUpper) => {
+          return activeMultiCellSpillRects.some(rect =>
+            cellRefUpper !== rect.anchorRef &&
+            rowIdx >= rect.minR && rowIdx <= rect.maxR &&
+            colIdx >= rect.minC && colIdx <= rect.maxC
+          );
+        };
+        const escapeXmlStrSafe = (s) => String(s || '')
+          .replace(/&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+        if (isLegacyRefSheet || activeMultiCellSpillRects.length > 0) {
+          xml = xml.replace(
+            /<row\b([^>]*\br="(\d+)"[^>]*)>([\s\S]*?)<\/row>/g,
+            (rowFull, rowAttrs, rNumStr, rowInner) => {
+              const rNum = parseInt(rNumStr, 10);
+              if (rNum < 2) return rowFull;
+              const fixedInner = rowInner.replace(
+                /<c\b([^>]*?)\bt="s"([^>]*)><v>(\d+)<\/v><\/c>/g,
+                (cFull, a1, a2, idxStr) => {
+                  const refM = `${a1} ${a2}`.match(/\br="(([A-Za-z]+)\d+)"/);
+                  if (!isLegacyRefSheet) {
+                    if (!refM) return cFull;
+                    const cellRefUpper = refM[1].toUpperCase();
+                    const colIdx = excelLettersToColNumber(refM[2]);
+                    if (!isInActiveSpillRect(colIdx, rNum, cellRefUpper)) {
+                      return cFull;
+                    }
+                  }
+                  const idx = parseInt(idxStr, 10);
+                  const resolved = sharedStrings[idx] !== undefined ? escapeXmlStrSafe(sharedStrings[idx]) : '';
+                  const needsSpace = resolved.startsWith(' ') || resolved.endsWith(' ');
+                  return `<c${a1}t="str"${a2}><v${needsSpace ? ' xml:space="preserve"' : ''}>${resolved}</v></c>`;
+                }
+              );
+              return `<row${rowAttrs}>${fixedInner}</row>`;
+            }
+          );
+        }
 
         if (lower === 'validation list' || lower === 'validation lists') {
           repairedValidationXml = xml;
