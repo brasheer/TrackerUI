@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tracker-ui-v38';
+const CACHE_NAME = 'tracker-ui-v39';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -25,6 +25,12 @@ const ASSETS_TO_CACHE = [
   './assets/images/manual/08-data-to-columns-modal.png',
   './assets/images/manual/09-supervisor-master-rollup.png',
   './assets/images/manual/10-light-mode-and-batch-actions.png',
+  './assets/images/manual/11-overdue-and-waiting-highlights.png',
+  './assets/images/manual/12-manual-row-copy-and-paste-across-tabs.png',
+  './assets/images/manual/13-scratch-auto-filter-lists-modal.png',
+  './assets/images/manual/14-scratch-live-filter-buckets-and-fill-handle.png',
+  './assets/images/manual/15-multi-tab-standby-and-fail-safe-banners.png',
+  './assets/images/manual/16-view-only-mirror-inspector.png',
   'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'
 ];
 

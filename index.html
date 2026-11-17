@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.1</title>
+  <title>TrackerUI v1.19.2</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.1">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.2">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.1 — Click to check for updates &amp; refresh app cache">v1.19.1</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.2 — Click to check for updates &amp; refresh app cache">v1.19.2</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.1</span>
+              <span class="menu-item-meta" data-app-version>v1.19.2</span>
             </button>
           </div>
         </div>
@@ -1530,19 +1530,20 @@
           <div class="manual-toc-header">Table of Contents</div>
           <div id="userManualTocList" class="manual-toc-list">
             <button type="button" class="manual-toc-item active" data-manual-target="manual-sec-1">1. Getting Started &amp; Chrome Check</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-2">2. Workspace Layout &amp; Bars</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-3">3. Dual-Write &amp; Fail-Safe Saves</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-2">2. Workspace Layout &amp; Display Modes</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-3">3. Dual-Write, Tab Lock &amp; Fail-Safe</button>
             <button type="button" class="manual-toc-item" data-manual-target="manual-sec-4">4. Tools &amp; Setup Menu</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-5">5. Creating &amp; Editing Requests</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-5">5. Requests, Overdue/Waiting &amp; Copy</button>
             <button type="button" class="manual-toc-item" data-manual-target="manual-sec-6">6. Grab Ticket, Pull Prior &amp; Sync</button>
             <button type="button" class="manual-toc-item" data-manual-target="manual-sec-7">7. Custom Schemas &amp; Form Layout</button>
             <button type="button" class="manual-toc-item" data-manual-target="manual-sec-8">8. Ticket Details &amp; Timeline</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-9">9. Search, Filters &amp; Batch Actions</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-10">10. Smart Daily Rollover Engine</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-11">11. Scratch Sheets &amp; Fill Colors</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-12">12. Supervisor Master Rollup</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-13">13. Config Backups &amp; PWA Cache</button>
-            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-14">14. Quick Reference &amp; Shortcuts</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-9">9. Search, Batch &amp; Row Copy/Paste</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-10">10. Smart Rollover &amp; Overdue Aging</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-11">11. Scratch Sheets, Types &amp; Fill Handle</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-12">12. Excel Functions &amp; Formula Syntax</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-13">13. Supervisor Rollup &amp; Inspector</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-14">14. Config Backups &amp; PWA Cache</button>
+            <button type="button" class="manual-toc-item" data-manual-target="manual-sec-15">15. Quick Reference &amp; Shortcuts</button>
           </div>
         </nav>
 
@@ -1556,23 +1557,23 @@
           <article id="manual-sec-1" class="manual-section">
             <h4>1. Browser Requirements &amp; Getting Started</h4>
             <div class="manual-callout callout-important">
-              <strong>Important — Use Google Chrome in Desktop Mode:</strong> TrackerUI uses the Chromium <strong>File System Access API</strong> (<code>window.showDirectoryPicker</code>) to read and write <code>.xlsx</code> workbooks directly in your local or OneDrive folders. Opening the app in a non-Chrome browser or mobile viewport triggers a reminder alert that TrackerUI is built specifically for <strong>Google Chrome in Desktop Mode</strong>.
+              <strong>Important — Use Google Chrome in Desktop Mode:</strong> TrackerUI uses the Chromium <strong>File System Access API</strong> (<code>window.showDirectoryPicker</code>) to read and write <code>.xlsx</code> workbooks directly in your local or OneDrive folders. Opening the app in another browser or mobile viewport triggers a compatibility reminder that TrackerUI is built specifically for <strong>Google Chrome in Desktop Mode</strong>.
             </div>
             <ol class="manual-list">
               <li>Open TrackerUI in <strong>Desktop Google Chrome</strong>.</li>
               <li>Click the blue <strong><code>Select Agent Folder</code></strong> button in the top header bar.</li>
               <li>Choose the folder containing your monthly <code>.xlsx</code> tracker workbooks (for example, <code>Agent_Trackers\</code>) and grant Chrome read/write permission when prompted.</li>
-              <li>TrackerUI remembers your folder handles in <code>IndexedDB</code> so future sessions reconnect automatically (when <strong><code>Auto-Reconnect</code></strong> is checked) or in 1 click.</li>
+              <li>TrackerUI remembers directory handles per profile tab in <code>IndexedDB</code> so future sessions reconnect automatically (when <strong><code>Auto-Reconnect Folders on Startup</code></strong> is enabled) or with 1 click.</li>
             </ol>
           </article>
 
           <!-- Section 2 -->
           <article id="manual-sec-2" class="manual-section">
-            <h4>2. Workspace Layout &amp; Navigation Hierarchy</h4>
-            <p>TrackerUI separates top-level <strong>Workbooks</strong> from in-workbook <strong>Sheets</strong> so the hierarchy is always clear:</p>
+            <h4>2. Workspace Layout, Navigation Hierarchy &amp; Display Modes</h4>
+            <p>TrackerUI separates top-level <strong>Workbooks</strong> from in-workbook <strong>Sheets</strong> so the hierarchy stays clear while maximizing vertical table room:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/01-main-workspace-overview.png" alt="Main Workspace Overview" class="manual-screenshot" loading="lazy">
-              <figcaption>Main Workspace Overview — Click image to enlarge</figcaption>
+              <figcaption>Main Workspace Overview (v1.19.2) — Workbooks Bar, Sheets Bar, Daily Requests Table &amp; Bottom Editor Dock</figcaption>
             </figure>
             <div class="manual-table-wrap">
               <table class="manual-ref-table">
@@ -1580,13 +1581,12 @@
                   <tr><th>Workspace Zone</th><th>Location</th><th>Where to Click &amp; Purpose</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td><strong>1. Top Header Bar</strong></td><td>Top of window</td><td>Switch monthly <code>.xlsx</code> files in <strong><code>Workbook</code></strong>, click <strong><code>Switch Folder</code></strong>, launch <strong><code>Rollover / Sync</code></strong>, switch <strong><code>Light / Auto / Dark</code></strong> theme, open <strong><code>Manual</code></strong>, or open <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>.</td></tr>
-                  <tr><td><strong>2. <code>Workbooks</code> Bar</strong></td><td>Level 1 Bar (above File Paths)</td><td>Switch between separate department tracker profiles (e.g., <strong><code>Bidder Support</code></strong> vs. <strong><code>Vendor Operations</code></strong>). The active tab uses a solid accent fill. Click <strong><code>+ Tracker Tab</code></strong> on the right to add another department tracker.</td></tr>
-                  <tr><td><strong>3. File Paths Strip</strong></td><td>Below <code>Workbooks</code> Bar</td><td>Shows live paths for <strong><code>Tracker:</code></strong> (working file), <strong><code>View-Only:</code></strong> (supervisor mirror), and <strong><code>Templates:</code></strong>, plus the <strong><code>Auto-Reconnect</code></strong> checkbox.</td></tr>
-                  <tr><td><strong>4. <code>Sheets</code> Bar</strong></td><td>Level 2 Bar (below File Paths)</td><td>Switches between views <em>inside</em> the active workbook: <strong><code>Daily Requests</code></strong> and open <strong><code>Scratch Sheets</code></strong>. Click <strong><code>Scratch Sheets ▾</code></strong> on the right to open or create scratch sheets.</td></tr>
-                  <tr><td><strong>5. Controls &amp; Search</strong></td><td>Above main table</td><td>Click <strong><code>+ New Request</code></strong>, step through dates with <strong><code>◀</code> / <code>▶</code></strong> around <strong><code>Day Tab</code></strong>, toggle <strong><code>Scope</code></strong>, or type in the <strong>Global Search Box</strong>.</td></tr>
-                  <tr><td><strong>6. Date Pill Strip</strong></td><td>Below Controls bar</td><td>Click any <code>MM-DD-YYYY</code> pill (ordered oldest left → newest right) to jump straight to that day's sheet.</td></tr>
-                  <tr><td><strong>7. Bottom Editor Dock</strong></td><td>Pinned above Status Bar</td><td>Click any table row to load it here for instant editing. Click <strong><code>▾ Collapse</code></strong> (or the dock header bar) to fold or expand the dock.</td></tr>
+                  <tr><td><strong>1. Top Header Bar</strong></td><td>Top of window</td><td>Switch monthly <code>.xlsx</code> files in <strong><code>Workbook</code></strong>, click <strong><code>Select Agent Folder</code></strong>, launch <strong><code>Rollover / Sync</code></strong>, switch <strong><code>Light / Auto / Dark</code></strong> theme, open <strong><code>Manual</code></strong>, or open <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>.</td></tr>
+                  <tr><td><strong>2. <code>Workbooks</code> Bar</strong></td><td>Level 1 Bar</td><td>Switch between separate department tracker profiles (e.g., <strong><code>Bidder Support</code></strong> vs. <strong><code>Vendor Operations</code></strong>). Click <strong><code>+ Tracker Tab</code></strong> on the right to add another department tracker.</td></tr>
+                  <tr><td><strong>3. <code>Sheets</code> Bar</strong></td><td>Level 2 Bar</td><td>Switches between views <em>inside</em> the active workbook: <strong><code>Daily Requests</code></strong> and open <strong><code>Scratch Sheets</code></strong>. Click <strong><code>Scratch Sheets ▾</code></strong> on the right to open or create scratch sheets.</td></tr>
+                  <tr><td><strong>4. Controls &amp; Search</strong></td><td>Above main table</td><td>Click <strong><code>+ New Request</code></strong>, paste copied rows via <strong><code>📥 Paste Row(s)</code></strong>, step dates with <strong><code>◀</code> / <code>▶</code></strong> around <strong><code>Day Tab</code></strong>, toggle <strong><code>Scope</code></strong>, or type in the <strong>Global Search Box</strong>.</td></tr>
+                  <tr><td><strong>5. Quick Date Pill Strip</strong></td><td>Below Controls <em>(Ultrawide &gt; 1920×1080)</em></td><td>Click any <code>MM-DD-YYYY</code> pill ordered oldest left → newest right. On <strong>1920×1080 and smaller screens</strong>, this strip hides automatically (use <code>◀</code> / <code>▶</code> or the <code>Day Tab</code> menu) and vertical spacing compacts to maximize visible table rows.</td></tr>
+                  <tr><td><strong>6. Bottom Editor Dock</strong></td><td>Pinned above Status Bar</td><td>Single-click any table row to load it here for instant editing. Click <strong><code>▾ Collapse</code></strong> (or the dock header bar) to fold or expand the dock.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1594,12 +1594,17 @@
 
           <!-- Section 3 -->
           <article id="manual-sec-3" class="manual-section">
-            <h4>3. Connecting Folders, Dual-Write Mirroring &amp; Fail-Safe Saving</h4>
+            <h4>3. Connecting Folders, Dual-Write Mirroring, Multi-Tab Locking &amp; Fail-Safe Saves</h4>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/15-multi-tab-standby-and-fail-safe-banners.png" alt="Multi-Tab Standby Lock Banner and Fail-Safe Recovery Status Bar" class="manual-screenshot" loading="lazy">
+              <figcaption>Multi-Tab Standby Mode Banner (top) &amp; Fail-Safe Primary Save / Mirror Retry Controls (bottom-left)</figcaption>
+            </figure>
             <ul class="manual-list">
-              <li><strong>Automatic File Filtering:</strong> When scanning your Agent Folder, TrackerUI ignores Excel lock files (<code>~$*</code>) and mirror copies (<code>*(VIEW ONLY).xlsx</code>) so you only edit working files.</li>
-              <li><strong>Dual-Write Supervisor Mirroring:</strong> Every save writes your primary <code>.xlsx</code> file first, then writes an identical <code>&lt;Workbook Name&gt; (VIEW ONLY).xlsx</code> copy to your configured <strong>Supervisor Folder</strong>.</li>
-              <li><strong>Non-Blocking Mirror Auto-Retry:</strong> If a supervisor has the <code>(VIEW ONLY)</code> file locked in Desktop Excel, your save still succeeds immediately! TrackerUI starts a <strong>15-second background auto-retry countdown</strong> and surfaces a <strong><code>Retry Mirror Sync</code></strong> button on the bottom status bar.</li>
-              <li><strong>Fail-Safe Primary Save Cache:</strong> If Desktop Excel has your <em>working</em> <code>.xlsx</code> file locked when you save, TrackerUI stages the updated workbook buffer in browser storage so zero edits are lost. Close Excel and click <strong><code>💾 Retry Primary Save</code></strong> on the bottom-left status bar.</li>
+              <li><strong>Automatic File Filtering:</strong> Ignores Excel lock files (<code>~$*</code>) and mirror copies (<code>*(VIEW ONLY).xlsx</code>) so you only edit working files.</li>
+              <li><strong>Dual-Write Supervisor Mirroring:</strong> Every save writes your primary <code>.xlsx</code> file first inside an async save mutex, then writes an identical <code>&lt;Workbook Name&gt; (VIEW ONLY).xlsx</code> copy to your <strong>Supervisor Folder</strong>.</li>
+              <li><strong>Non-Blocking Mirror Auto-Retry:</strong> If a supervisor has the <code>(VIEW ONLY)</code> file open in Excel, your primary save still succeeds immediately! TrackerUI runs a <strong>15-second background auto-retry countdown</strong> and surfaces <strong><code>Retry Mirror Sync</code></strong> on the status bar.</li>
+              <li><strong>Fail-Safe Primary Save Cache (<code>💾 Retry Primary Save</code>):</strong> If Desktop Excel locks your working <code>.xlsx</code> file during a save, TrackerUI stages the serialized buffer in <code>IndexedDB</code> so zero edits are lost. Close Excel and click <strong><code>💾 Retry Primary Save</code></strong> on the bottom-left status bar.</li>
+              <li><strong>Multi-Tab Session Standby Lock:</strong> Opening TrackerUI in a second tab puts the duplicate tab into <strong>Read-Only Standby Mode</strong> (pausing background auto-saves) to prevent concurrent file race conditions. Click <strong><code>⚡ Take Over Active Session Here</code></strong> to claim ownership and reload latest data from disk.</li>
             </ul>
           </article>
 
@@ -1609,26 +1614,30 @@
             <p>Click <strong><code>⚙️ Tools &amp; Setup ▾</code></strong> in the top-right header to configure appearance, folders, schemas, and daily tabs:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/02-tools-and-setup-menu.png" alt="Tools and Setup Popover Menu" class="manual-screenshot" loading="lazy">
-              <figcaption>Tools &amp; Setup Menu — Appearance, Directories, Workbook Schema &amp; Day Tab Actions</figcaption>
+              <figcaption>Tools &amp; Setup Menu — Appearance, Directories &amp; Live Paths, Workbook Schema &amp; Day Tab Actions</figcaption>
             </figure>
             <ul class="manual-list">
               <li><strong>Appearance &amp; Display:</strong> Toggle <code>Light</code> / <code>Auto</code> / <code>Dark</code> mode and scale application text size between <strong>85% and 125%</strong> using <code>A−</code>, the slider, or <code>A+</code>.</li>
-              <li><strong>Directories &amp; Mirroring:</strong> Configure your <strong>Tracker Folder</strong>, <strong>Supervisor Folder</strong>, and <strong>Templates Folder</strong>, open the <strong>View-Only Mirror Inspector</strong>, or launch the <strong>Supervisor Multi-Workbook Rollup</strong>.</li>
-              <li><strong>Workbook &amp; Schema:</strong> Create a new monthly <code>.xlsx</code> workbook (cloned from your Templates Folder or bootstrapped in memory), non-destructively repair missing sheets, open <strong>Configure Column Mapping</strong>, add/rename Department Tracker Tabs, or create a new Scratch Sheet.</li>
-              <li><strong>Active Day Tab Management:</strong> Create a new <code>MM-DD-YYYY</code> tab (blank or rolled over), roll over strictly from the previous sheet, or rename/delete the current daily tab (reference sheets remain protected).</li>
-              <li><strong>Row Management, Config &amp; Cache:</strong> Toggle Batch Delete Mode, export/import portable <code>.json</code> workspace configurations, open this User Manual, or clear &amp; refresh the PWA cache.</li>
+              <li><strong>Directories &amp; Mirroring:</strong> Configure your <strong>Tracker Workbooks Folder</strong>, <strong>Supervisor Folder</strong>, and <strong>Templates Folder</strong>, open the <strong>View-Only Mirror Inspector</strong>, launch <strong>Supervisor Multi-Workbook Rollup</strong>, or toggle mirror writes / startup auto-reconnect.</li>
+              <li><strong>Workbook &amp; Schema:</strong> Create a new monthly <code>.xlsx</code> workbook, non-destructively repair schemas, open <strong>Configure Column Mapping</strong>, add/rename Department Tracker Tabs, or create a new Scratch Sheet (with 1-click Title Tracking starter layout).</li>
+              <li><strong>Active Day Tab Management:</strong> Create a new <code>MM-DD-YYYY</code> tab (blank or rolled over), roll over strictly from the previous sheet, or rename/delete the current daily tab (reference sheets remain protected and date tabs stay sorted chronologically left-to-right).</li>
+              <li><strong>Row Management, Config &amp; Cache:</strong> Toggle Batch Delete Mode, export/import portable <code>.json</code> workspace configurations, open this User Manual, or refresh the PWA cache.</li>
             </ul>
           </article>
 
           <!-- Section 5 -->
           <article id="manual-sec-5" class="manual-section">
-            <h4>5. Daily Request Management (Creating &amp; Editing Requests)</h4>
+            <h4>5. Daily Request Management, Row Numbers, Split-Pill Copy &amp; Status Highlights</h4>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/11-overdue-and-waiting-highlights.png" alt="Overdue Red and Waiting Purple Row Highlights, Row Numbers, and Split-Pill Copy Buttons" class="manual-screenshot" loading="lazy">
+              <figcaption>Daily Requests Table — Left-Hand Row Numbers (#), Integrated Split-Pill Copy Buttons, Overdue (Red) &amp; Waiting / On Hold (Purple) Rows</figcaption>
+            </figure>
             <ul class="manual-list">
-              <li><strong>Create a New Request:</strong> Click <strong><code>+ New Request</code></strong> in the Controls bar (or <strong><code>+ Clear / New</code></strong> in the Bottom Editor Dock header).</li>
-              <li><strong>Edit an Existing Request:</strong> <strong>Single-click any request row</strong> in the table to load it into the Bottom Editor Dock, or click the row's <strong><code>Edit</code></strong> button (or <strong><code>Popup Editor</code></strong> in the dock) to edit in a centered popup modal.</li>
-              <li><strong>Bidirectional Master Account Auto-Fill:</strong> Typing a known <strong>Broker Name</strong> (<code>Col C</code>) auto-fills <strong>Master #</strong> (<code>Col D</code>) and <strong>Bidder #</strong> (<code>Col E</code>); typing a known <strong>Master #</strong> reverse-fills Broker Name and Bidder #.</li>
-              <li><strong>Immutable UUIDv4 Primary Keys (<code>Col K</code>):</strong> Every request gets a permanent 36-character UUIDv4 in hidden Column K. Editing Subject, Ticket #, or Broker never breaks its identity across daily tabs.</li>
-              <li><strong>Quick Timestamps:</strong> Click <strong><code>+ Insert Timestamp</code></strong> above Action Notes to insert a formatted <code>[MM/DD/YYYY HH:MM AM/PM]</code> prefix.</li>
+              <li><strong>Left-Hand Row Numbers (<code>#</code>):</strong> Sequential Excel-style index numbers appear down the left edge (hovering shows the exact Excel sheet &amp; row number).</li>
+              <li><strong>Urgency Color Highlights:</strong> <strong><code>Overdue</code></strong> rows highlight with both a <strong>red outline and red background tint</strong>, while <strong><code>Waiting</code></strong>, <strong><code>Waiting on Buyer</code></strong>, and <strong><code>On Hold</code></strong> rows highlight with a <strong>purple outline and purple background tint</strong>.</li>
+              <li><strong>Integrated Split-Pill Copy Buttons:</strong> On <strong>Subject</strong>, <strong>Ticket #</strong>, <strong>Master #</strong>, <strong>Bidder #</strong>, <strong>Yard #</strong>, and individual <strong>Lot #</strong> tokens, click the left text to filter by Like-Item, or hover and click the right copy icon inside the same pill to copy directly to your clipboard.</li>
+              <li><strong>Create / Edit Requests:</strong> Click <strong><code>+ New Request</code></strong> (or single-click any row to load into the Bottom Editor Dock; click <strong><code>Edit</code></strong> / <strong><code>Popup Editor</code></strong> for a dialog).</li>
+              <li><strong>Auto-Fill &amp; Immutable UUIDv4 (<code>Col K</code>):</strong> Typing a known <strong>Broker Name</strong> fills <strong>Master #</strong> and <strong>Bidder #</strong> (and typing a Master # reverse-fills Broker). Every row gets an immutable 36-character UUIDv4 in hidden Column K and timestamp support via <strong><code>+ Insert Timestamp</code></strong>.</li>
             </ul>
           </article>
 
@@ -1636,35 +1645,31 @@
           <article id="manual-sec-6" class="manual-section">
             <h4>6. Time-Saving Editor Power Tools (<code>🎯 Grab Ticket</code>, <code>📥 Pull Prior</code>, <code>🔄 Sync Forward</code>)</h4>
             <ul class="manual-list">
-              <li><strong><code>🎯 Grab Ticket</code> (Above Ticket Number input):</strong> Extracts bracketed hyphenated ticket IDs such as <code>[REQ-24-8812]</code> from the Subject field, normalizes them to uppercase, and merges them comma-delimited into Ticket Number without duplicates.</li>
-              <li><strong><code>📥 Pull Prior</code> (In Bottom Dock &amp; Popup Editor headers):</strong> Scans earlier <code>MM-DD-YYYY</code> tabs for the most recent matching request (by UUID, Ticket #, account/lot identity, or Subject) and non-destructively fills only currently blank fields while comma-merging Ticket Numbers.</li>
-              <li><strong><code>🔄 Sync Forward</code> (In Bottom Dock &amp; Ticket Details):</strong> Propagates newly added information (such as a Ticket #, Master #, Bidder #, or Lot #) forward onto rolled-over instances of the same request on newer daily tabs without overwriting existing data.</li>
+              <li><strong><code>🎯 Grab Ticket</code> (Above Ticket Number input):</strong> Extracts bracketed hyphenated ticket IDs such as <code>[REQ-26-4418]</code> from the Subject field, normalizes them to uppercase, and merges them comma-delimited into Ticket Number without duplicates.</li>
+              <li><strong><code>📥 Pull Prior</code> (In Bottom Dock &amp; Popup Editor headers):</strong> Scans earlier <code>MM-DD-YYYY</code> tabs for the most recent matching request (by UUID, Ticket #, account/lot identity, or Subject) and fills only currently blank fields while comma-merging Ticket Numbers.</li>
+              <li><strong><code>🔄 Sync Forward</code> (In Bottom Dock &amp; Ticket Details):</strong> Propagates newly added information (Ticket #, Master #, Bidder #, or Lot #) forward onto rolled-over instances on newer daily tabs non-destructively after preview confirmation.</li>
             </ul>
           </article>
 
           <!-- Section 7 -->
           <article id="manual-sec-7" class="manual-section">
             <h4>7. Multi-Department Trackers, Custom Schemas &amp; Lockable Form Layout</h4>
-            <p>Work across multiple departments with different Excel column structures using dedicated workbook tabs and the adjustable 12-column form grid:</p>
+            <p>Work across multiple departments with custom Excel column headers using dedicated workbook tabs and the adjustable 12-column form grid:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/03-custom-department-and-layout-editor.png" alt="Custom Department Tracker and Unlocked Form Layout Editor" class="manual-screenshot" loading="lazy">
-              <figcaption>Custom Department Tracker with Unlocked 12-Column Form Layout Controls</figcaption>
+              <figcaption>Custom Department Tracker (Vendor Operations) with Unlocked 12-Column Form Layout Controls</figcaption>
             </figure>
             <ul class="manual-list">
-              <li><strong>Add or Switch Department Workbooks:</strong> Click <strong><code>+ Tracker Tab</code></strong> on the right side of the top <strong><code>Workbooks</code></strong> bar. Each workbook tab maintains its own folder handles, active workbook, and custom schema. Double-click any workbook tab to rename it.</li>
-              <li><strong>Adjusting Form Field Widths, Order &amp; Rows (<code>🔒 Layout</code> → <code>🔓 Lock Layout</code>):</strong>
-                <ol>
-                  <li>Click <strong><code>🔒 Layout</code></strong> in the Bottom Editor Dock header to unlock the 12-column form customizer.</li>
-                  <li>Use <strong><code>◀</code> / <code>▶</code></strong> on any field card to change its visual position in the form (your Excel column save order <code>Col A</code>, <code>Col B</code>, etc. remains untouched).</li>
-                  <li>Use <strong><code>−</code> / <code>+</code></strong> (from <code>2/12</code> to <code>12/12</code>) or drag the right edge of any field card to resize its width.</li>
-                  <li>Use <strong><code>↕−</code> / <code>↕+</code></strong> on Notes fields to adjust textarea height (`1r` to `6r`), then click <strong><code>🔓 Lock Layout</code></strong> to lock your layout in place (or <strong><code>↺ Reset Layout</code></strong> to restore defaults).</li>
-                </ol>
-              </li>
+              <li><strong>Department Workbooks:</strong> Click <strong><code>+ Tracker Tab</code></strong> on the right of the <strong><code>Workbooks</code></strong> bar. Each tab maintains its own folder handles, active workbook, and custom schema; double-click to rename.</li>
+              <li><strong>12-Column Form Customizer (<code>🔒 Layout</code> → <code>🔓 Lock Layout</code>):</strong> Unlock the form header to reorder field cards visually (<strong><code>◀</code> / <code>▶</code></strong>), adjust column spans (<strong><code>−</code> / <code>+</code></strong> from <code>2/12</code> to <code>12/12</code> or drag borders), and resize Notes textarea height (<strong><code>↕−</code> / <code>↕+</code></strong> from <code>1r</code> to <code>6r</code>), without altering Excel column positions.</li>
             </ul>
             <figure class="manual-figure">
               <img src="assets/images/manual/04-column-mapping-modal.png" alt="Configure Column Mapping Modal" class="manual-screenshot" loading="lazy">
-              <figcaption>Configure Column Mapping Modal — Inspect or override semantic roles for custom Row-1 headers</figcaption>
+              <figcaption>Configure Column Mapping Modal — Assign Semantic Roles &amp; Toggle Per-Column 📋 Copy Buttons</figcaption>
             </figure>
+            <ul class="manual-list">
+              <li><strong>Per-Column Role &amp; Copy Checkboxes:</strong> Open <strong><code>⚙️ Tools &amp; Setup ▾</code> → <code>Configure Column Mapping...</code></strong> to assign semantic roles and check or uncheck <strong><code>📋 Copy</code></strong> on each detected Row-1 column chip.</li>
+            </ul>
           </article>
 
           <!-- Section 8 -->
@@ -1673,66 +1678,124 @@
             <p>Click <strong><code>Details</code></strong> in any row's Actions column (or click <strong><code>[+] Expand</code></strong> in Action Notes) to view the complete multi-day history of a request:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/05-ticket-details-and-timeline.png" alt="Ticket Details and Aggregated Timeline Modal" class="manual-screenshot" loading="lazy">
-              <figcaption>Ticket Details &amp; Aggregated Notes Timeline across Daily Tabs</figcaption>
+              <figcaption>Ticket Details &amp; Aggregated Notes Timeline — Split-Pill Copy, Parent Category &amp; Chronological Entries</figcaption>
             </figure>
             <ul class="manual-list">
-              <li><strong>Chronological Daily Timeline:</strong> Displays every <code>MM-DD-YYYY</code> tab where the request appeared, with individual <code>[MM/DD/YYYY HH:MM AM/PM]</code> notes parsed into timeline entries. Click <strong><code>Edit Row</code></strong> on any day card to load that specific day's row.</li>
-              <li><strong>Quick Timestamped Note Form:</strong> Type an update in <strong><code>Append New Timestamped Note to Latest Entry</code></strong> and click <strong><code>+ Add Timestamped Note</code></strong> to timestamp and save directly to the latest tab.</li>
+              <li><strong>Multi-Day Metadata &amp; Copy Pills:</strong> Shows Subject, Ticket #, Broker/Master/Bidder, Yard/Lots (with integrated copy buttons), and classified Parent Category.</li>
+              <li><strong>Chronological Daily Timeline &amp; Quick Notes:</strong> Displays every <code>MM-DD-YYYY</code> tab where the request appeared, lets you click <strong><code>Edit Row</code></strong> to jump to any day, and appends timestamped updates straight to the latest entry via <strong><code>＋ Add Timestamped Note</code></strong>.</li>
             </ul>
           </article>
 
           <!-- Section 9 -->
           <article id="manual-sec-9" class="manual-section">
-            <h4>9. Searching, Sorting, Like-Item Filtering &amp; Batch Actions</h4>
+            <h4>9. Searching, Sorting, Like-Item Filtering, Batch Actions &amp; Row Copy/Paste</h4>
             <figure class="manual-figure">
               <img src="assets/images/manual/10-light-mode-and-batch-actions.png" alt="Light Mode, Like-Item Filter and Batch Action Bar" class="manual-screenshot" loading="lazy">
-              <figcaption>Light Mode Theme, 1-Click Like-Item Filtering &amp; Floating Batch Action Bar</figcaption>
+              <figcaption>Light Mode Theme, 1-Click Like-Item Filtering Banner &amp; Floating Batch Action Bar</figcaption>
             </figure>
             <ul class="manual-list">
-              <li><strong>Automatic Global Search:</strong> Typing in the search bar automatically searches across <strong>all</strong> <code>MM-DD-YYYY</code> tabs in the workbook and returns to your selected Scope when cleared.</li>
-              <li><strong>1-Click Like-Item Filtering:</strong> Click directly on any <strong>Tracking ID chip</strong> (<code>🔍 8f4a92c1...</code>), <strong>Ticket #</strong>, <strong>Broker</strong>, <strong>Master #</strong>, <strong>Bidder #</strong>, <strong>Action</strong>, <strong>Yard #</strong>, <strong>Lot #</strong>, or <strong>Status badge</strong> in the table to filter the entire workbook to matching rows.</li>
-              <li><strong>Floating Batch Action Bar:</strong> Check the box on the left of one or more rows to reveal the floating Batch Bar at the bottom—update statuses in bulk or delete selected rows in a single operation.</li>
+              <li><strong>Automatic Global Search &amp; Sub-Column Sorting:</strong> Typing in Search automatically searches across <strong>all</strong> <code>MM-DD-YYYY</code> tabs and restores your Scope when cleared. Click <code>Master</code> vs. <code>Bidder</code> or <code>Yard</code> vs. <code>Lots</code> headers to sort by sub-field.</li>
+              <li><strong>1-Click Like-Item Filtering:</strong> Click any <strong>Tracking ID</strong>, <strong>Ticket #</strong>, <strong>Broker</strong>, <strong>Master #</strong>, <strong>Bidder #</strong>, <strong>Action</strong>, <strong>Yard #</strong>, <strong>Lot #</strong>, or <strong>Status</strong> pill to isolate matching rows across all tabs.</li>
+              <li><strong>Floating Batch Status &amp; Manual Row Copy/Paste Bar:</strong> Check row checkboxes to reveal the bottom Batch Bar—update statuses in bulk or delete rows cleanly.</li>
+            </ul>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/12-manual-row-copy-and-paste-across-tabs.png" alt="Manual Row Copy and Paste Across Daily Tabs" class="manual-screenshot" loading="lazy">
+              <figcaption>Manual Row Copy &amp; Paste — Use 📋 Copy Row(s) + 📥 Paste Row(s) or 📅 Copy to Next Day / Tab...</figcaption>
+            </figure>
+            <ul class="manual-list">
+              <li><strong>Two-Step Copy &amp; Paste Across Tabs:</strong> Check 1+ rows → click <strong><code>📋 Copy Row(s)</code></strong> (or <code>Ctrl+C</code>) → switch to any target daily tab → click <strong><code>📥 Paste Row(s) (N)</code></strong> in Controls (or <code>Ctrl+V</code>) while preserving UUIDv4 Tracking IDs.</li>
+              <li><strong>1-Step Copy to Next Day / Tab:</strong> Click <strong><code>📅 Copy to Next Day / Tab...</code></strong> to push selected rows directly to tomorrow's or any chosen <code>MM-DD-YYYY</code> sheet (creating the tab from <code>template</code> if needed—ideal for custom workbooks without Status columns).</li>
             </ul>
           </article>
 
           <!-- Section 10 -->
           <article id="manual-sec-10" class="manual-section">
-            <h4>10. Smart Daily Rollover &amp; Carryover Engine</h4>
+            <h4>10. Smart Daily Rollover, Overdue Aging &amp; Carryover Engine</h4>
             <p>Click <strong><code>Rollover / Sync</code></strong> in the top header bar to carry unfinished requests forward into today's or tomorrow's <code>MM-DD-YYYY</code> tab:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/06-smart-rollover-modal.png" alt="Smart Rollover Modal" class="manual-screenshot" loading="lazy">
-              <figcaption>Smart Rollover / Sync Modal with Target Date Presets &amp; Live Consolidation Preview</figcaption>
+              <figcaption>Smart Rollover / Sync Modal — All Prior Sheets Scan, Overdue Aging (Red) &amp; Waiting / On Hold (Purple) Preview Cards</figcaption>
             </figure>
             <ul class="manual-list">
-              <li><strong>Target Date Presets:</strong> Click <strong><code>Today</code></strong>, <strong><code>Tomorrow</code></strong>, or <strong><code>Latest Tab</code></strong> (if the tab doesn't exist yet, TrackerUI clones it from <code>template</code>).</li>
-              <li><strong>Source Sheet Scope:</strong> Choose between <strong><code>Previous Sheet Only</code></strong> or <strong><code>All Prior Sheets</code></strong> (chronological resolution from oldest to newest).</li>
-              <li><strong>Idempotent Notes Merging &amp; Superseded Overrides:</strong> Consolidates chronological notes without duplicates, skips already-synced items, and lets you optionally reopen older requests that were marked <code>Complete</code> on a later tab.</li>
+              <li><strong>Target Date Presets &amp; Source Scope:</strong> Choose <strong><code>Today</code></strong> or <strong><code>Tomorrow</code></strong> (cloned automatically from <code>template</code> if missing) and toggle <strong><code>Previous Sheet Only</code></strong> vs. <strong><code>All Prior Sheets</code></strong>.</li>
+              <li><strong>Waiting / On Hold Preservation &amp; Smart Overdue Aging:</strong> Active items marked <strong><code>Waiting</code></strong>, <strong><code>Waiting on Buyer</code></strong>, or <strong><code>On Hold</code></strong> remain explicitly preserved in <strong>purple cards</strong>. Any unfinished active request <strong>&gt; 5 days old</strong> or <strong>carried over 7+ times</strong> automatically upgrades to <strong><code>Overdue</code></strong> with a red outline card and aging summary.</li>
+              <li><strong>Idempotent Sync &amp; Superseded Overrides:</strong> Consolidates chronological notes without creating duplicate rows on existing tabs and allows optionally reopening items previously completed on later sheets.</li>
             </ul>
           </article>
 
           <!-- Section 11 -->
           <article id="manual-sec-11" class="manual-section">
-            <h4>11. Workbook Scratch Sheets (Fill Handle, Types, <code>=FILTER</code> Lists &amp; Context Menu)</h4>
+            <h4>11. Workbook Scratch Sheets (Cell Types, Fill Handle, Copy + <code>Enter</code> &amp; <code>Auto-Filter Lists</code>)</h4>
             <p>Open or create custom worksheets (such as <code>Title Tracking</code> or <code>Lot Audit</code>) from the <strong><code>Scratch Sheets ▾</code></strong> menu on the right side of the <code>Sheets</code> bar:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/07-scratch-sheet-and-context-menu.png" alt="Scratch Sheet and Right-Click Context Menu" class="manual-screenshot" loading="lazy">
-              <figcaption>Scratch Sheet Editor — Excel Default Fill Colors, Striped Rows &amp; Right-Click Context Menu</figcaption>
+              <figcaption>Scratch Sheet Editor — Type Selector, Excel Default Fill Swatches, Striped Rows &amp; Right-Click Context Menu</figcaption>
             </figure>
             <ul class="manual-list">
-              <li><strong>Copy + Enter to Paste &amp; Multi-Cell Paste:</strong> Press <code>Ctrl+C</code> on a cell or range, move to a target cell, and press <strong><code>Enter</code></strong> to paste immediately and finish the copy (or press <code>Ctrl+V</code> to keep the copied marquee active for repeated pasting). Right-click any cell or range for <code>Cut</code>, <code>Copy</code>, <code>Paste</code>, quick Excel Fill Color swatches, <code>Data to Columns...</code>, <code>Auto-Filter Side Lists...</code>, <code>Clear Contents</code>, and <code>Clear Fill Color</code>.</li>
-              <li><strong>Fill Handle Square &amp; Date/Number Auto-Increment:</strong> Drag the blue corner square at the bottom-right of your selection to copy across adjacent cells. Cells formatted as <strong>Date</strong> or <strong>Number</strong> (or auto-detected) increment automatically (e.g., <code>+1 day</code> or <code>+1</code>, or by the step between two selected cells; hold <code>Ctrl</code> while dragging to copy without incrementing). Set <strong><code>Type: Text (@)</code></strong> in the toolbar to keep tracking numbers or IDs as exact strings that never increment.</li>
-              <li><strong>Live <code>=FILTER</code> Array Side Lists &amp; Summary Functions:</strong> Click <strong><code>Auto-Filter Lists</code></strong> in the scratch toolbar (or type <code>=FILTER</code>, <code>=UNIQUE</code>, <code>=SORT</code>, <code>=IF</code>, <code>=COUNTIF</code>, <code>=COUNTA</code>, <code>=SUM</code>) to dynamically split lists into color-coded Red (Empty), Yellow (<code>"Duplicate"</code>), and Green (Occupied) side lists that update live for 1-click email copy/paste.</li>
-              <li><strong>Excel Default Fill Colors &amp; App-Only Striped Rows:</strong> Use <strong><code>Fill ▾</code></strong> in the toolbar (or right-click swatches) to apply Excel-compatible cell/header fill colors. Toggle <strong><code>Striped rows</code></strong> for visual-only alternating row shading in the app.</li>
+              <li><strong>Copy + <code>Enter</code> Paste &amp; Excel HTML Clipboard:</strong> Press <code>Ctrl+C</code> on a cell or range, move to a destination cell, and press <strong><code>Enter</code></strong> to paste and clear the marquee (or press <code>Ctrl+V</code> to keep the marquee active for repeated pasting). Both internal and Excel clipboard transfers preserve fill colors, bold headers, borders, and shifted relative formulas, and paste cleanly into Outlook/Gmail.</li>
+              <li><strong>Cell Data Types (<code>Type:</code>) &amp; Corner Fill Handle Auto-Increment:</strong> Drag the blue corner square at the bottom-right of your selection (or double-click it to fill down alongside adjacent columns) to copy or extrapolate series. <strong>Dates</strong> and <strong>Numbers (&lt;= 10 digits)</strong> auto-increment (<code>+1 day</code> / <code>+1</code> or by multi-cell step delta; hold <strong><code>Ctrl</code></strong> to copy only). Use <strong><code>Type: Text (@)</code></strong> to lock tracking numbers or Lot IDs as exact non-incrementing strings.</li>
+              <li><strong>1-Click <code>Auto-Filter Lists</code> Modal (Red / Yellow / Green Title Tracking):</strong> Split source tables (e.g., <code>Lot #</code>, <code>Buyer #</code>, <code>LLY Date</code>, <code>Tracking #</code>) into color-coded <strong>Red</strong> (Missing Tracking), <strong>Yellow</strong> (<code>"Duplicate"</code>), and <strong>Green</strong> (Occupied Tracking) side lists powered by live <code>=FILTER</code> array formulas.</li>
+              <li><strong>Fill Colors, Striped Rows &amp; <code>Data to Columns</code>:</strong> Apply Excel-native swatches via <strong><code>Fill ▾</code></strong> or the right-click menu, toggle visual-only <strong><code>Striped rows</code></strong>, and split delimited text across columns via <strong><code>Data to Columns</code></strong>.</li>
             </ul>
             <figure class="manual-figure">
+              <img src="assets/images/manual/13-scratch-auto-filter-lists-modal.png" alt="Auto-Filter Side Lists Builder Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>Auto-Filter Side Lists Modal — Configure Source Range, Criteria Column, "Duplicate" Keyword &amp; Live Formula Preview</figcaption>
+            </figure>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/14-scratch-live-filter-buckets-and-fill-handle.png" alt="Live Auto-Filtered Red Yellow Green Side Lists and Corner Fill Handle" class="manual-screenshot" loading="lazy">
+              <figcaption>Live Scratch Sheet Array Spill — Source Table (A:D) Auto-Filtering into Red, Yellow &amp; Green Side Lists with Corner Fill Handle</figcaption>
+            </figure>
+            <figure class="manual-figure">
               <img src="assets/images/manual/08-data-to-columns-modal.png" alt="Data to Columns Modal" class="manual-screenshot" loading="lazy">
-              <figcaption>Data to Columns Wizard — Split delimited text across adjacent columns with live preview</figcaption>
+              <figcaption>Data to Columns Wizard — Split delimited text across adjacent columns with live preview &amp; Ctrl+Z undo</figcaption>
             </figure>
           </article>
 
           <!-- Section 12 -->
           <article id="manual-sec-12" class="manual-section">
-            <h4>12. Supervisor Tools (<code>View-Only Inspector</code> &amp; <code>Multi-Workbook Master Rollup</code>)</h4>
+            <h4>12. Scratch Sheet Excel Functions, Formula Syntax &amp; Dynamic Array Reference</h4>
+            <div class="manual-callout callout-important">
+              <strong>Live In-App Formula Engine &amp; OpenXML Compatibility:</strong> Supported functions below recalculate instantly inside TrackerUI as cells change and save as native Excel formulas. Complex Excel-only functions (<code>=XLOOKUP</code>, <code>=LET</code>, cross-workbook references) remain preserved cleanly in OpenXML for Desktop Excel.
+            </div>
+            <div class="manual-table-wrap">
+              <table class="manual-ref-table">
+                <thead>
+                  <tr><th>Function</th><th>Syntax</th><th>In-App Behavior</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><strong><code>=FILTER</code></strong></td><td><code>=FILTER(array, include, [if_empty])</code></td><td>Filters rows (or columns) matching boolean criteria and automatically <strong>spills</strong> matches into adjacent cells while skipping empty source rows. Uses optional <code>if_empty</code> fallback when 0 rows match (else <code>#CALC!</code>).</td></tr>
+                  <tr><td><strong><code>=UNIQUE</code></strong></td><td><code>=UNIQUE(array)</code></td><td>Extracts unique rows/values (case-insensitive) and spills deduplicated results.</td></tr>
+                  <tr><td><strong><code>=SORT</code></strong></td><td><code>=SORT(array, [sort_index], [sort_order])</code></td><td>Sorts a range or <code>=FILTER</code> output by column <code>sort_index</code> (1-based) and <code>sort_order</code> (<code>1</code> asc, <code>-1</code> desc) for Dates, Numbers, and text.</td></tr>
+                  <tr><td><strong><code>=IF</code> / <code>AND</code> / <code>OR</code> / <code>NOT</code></strong></td><td><code>=IF(cond, tVal, [fVal])</code></td><td>Conditional logic with array range broadcasting on <code>=IF</code> and <code>=NOT</code>; multi-argument boolean checks on <code>=AND</code> / <code>=OR</code>.</td></tr>
+                  <tr><td><strong><code>=ISBLANK</code> / <code>ISEMPTY</code> / <code>ISNUMBER</code> / <code>ISTEXT</code></strong></td><td><code>=ISBLANK(value)</code></td><td>Returns <code>TRUE</code>/<code>FALSE</code> for blank, numeric, or non-empty text cells (supports range array broadcasting).</td></tr>
+                  <tr><td><strong><code>=COUNTIF</code></strong></td><td><code>=COUNTIF(range, criteria)</code></td><td>Counts exact matches (<code>"Duplicate"</code>), operators (<code>"&gt;100"</code>, <code>"&lt;&gt;Duplicate"</code>), or wildcards (<code>"*TX*"</code>, <code>"B-?????"</code>).</td></tr>
+                  <tr><td><strong><code>=COUNTA</code> / <code>COUNTBLANK</code></strong></td><td><code>=COUNTA(r1, ...)</code> / <code>=COUNTBLANK(r)</code></td><td>Counts non-empty or blank cells across ranges and spilled outputs.</td></tr>
+                  <tr><td><strong><code>=SUM</code> / <code>AVERAGE</code> / <code>MIN</code> / <code>MAX</code></strong></td><td><code>=SUM(r1, ...)</code></td><td>Numeric aggregation across cells/ranges (<code>AVERAGE</code> returns <code>#DIV/0!</code> if 0 numbers).</td></tr>
+                  <tr><td><strong>Text: <code>TRIM</code>, <code>UPPER</code>, <code>LOWER</code>, <code>LEN</code>, <code>LEFT</code>, <code>RIGHT</code>, <code>MID</code>, <code>SEARCH</code>, <code>FIND</code></strong></td><td><code>=LEFT(txt, n)</code> / <code>=MID(txt, start, len)</code></td><td>String cleanup, extraction, and 1-based position lookup (<code>SEARCH</code> case-insensitive, <code>FIND</code> case-sensitive). All text functions broadcast over arrays.</td></tr>
+                  <tr><td><strong><code>=TODAY()</code></strong></td><td><code>=TODAY()</code></td><td>Returns current local date as <code>MM/DD/YYYY</code> for comparisons and date math.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="manual-table-wrap" style="margin-top:0.75rem;">
+              <table class="manual-ref-table">
+                <thead>
+                  <tr><th>Operators &amp; Reference Syntax</th><th>Example Pattern</th><th>How It Works</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><strong>Operators</strong></td><td><code>=</code>, <code>&lt;&gt;</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>&amp;</code></td><td>Comparison, arithmetic, and string concatenation (<code>A2 &amp; " - " &amp; B2</code>) with matrix broadcasting.</td></tr>
+                  <tr><td><strong>Compound AND (<code>*</code>) / OR (<code>+</code>) Criteria</strong></td><td><code>=FILTER(A2:C200, (A2:A200&lt;&gt;"")*(D2:D200=""), "")</code></td><td>Multiply parenthesized range checks with <code>*</code> for row-by-row <strong>AND</strong> logic, or add with <code>+</code> for <strong>OR</strong> logic inside <code>=FILTER</code>.</td></tr>
+                  <tr><td><strong>Relative vs. Absolute (<code>$</code>)</strong></td><td><code>A2</code> vs. <code>$A$2:$D$200</code></td><td>Copy/paste (<code>Ctrl+C</code> → <code>Enter</code>) and Fill Handle drags automatically shift relative coordinates while locking <code>$</code> anchors.</td></tr>
+                  <tr><td><strong>Cross-Sheet References</strong></td><td><code>'Title Tracking'!A2:D200</code></td><td>Read ranges from other tabs inside the same workbook using <code>Sheet!Range</code> (quote sheet names with spaces).</td></tr>
+                  <tr><td><strong>Spill &amp; Error Codes</strong></td><td><code>#SPILL!</code>, <code>#CALC!</code>, <code>#DIV/0!</code>, <code>#VALUE!</code>, <code>#REF!</code>, <code>#NAME?</code>, <code>#CIRC!</code></td><td>A blue top-left corner triangle marks array spill anchors; <code>#SPILL!</code> clears automatically once blocking cells are emptied.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <!-- Section 13 -->
+          <article id="manual-sec-13" class="manual-section">
+            <h4>13. Supervisor Tools (<code>View-Only Inspector</code> &amp; <code>Multi-Workbook Master Rollup</code>)</h4>
             <p>Open <strong><code>⚙️ Tools &amp; Setup ▾</code> → <code>Supervisor Multi-Workbook Rollup...</code></strong> to aggregate and classify requests across all agent workbooks in a folder:</p>
             <figure class="manual-figure">
               <img src="assets/images/manual/09-supervisor-master-rollup.png" alt="Supervisor Multi-Workbook Master Rollup Modal" class="manual-screenshot" loading="lazy">
@@ -1740,39 +1803,43 @@
             </figure>
             <ul class="manual-list">
               <li><strong>Web Worker Background Parsing:</strong> Scans all mirror or working <code>.xlsx</code> files in a team directory without freezing the UI, deduplicating rolled-over rows by Tracking ID.</li>
-              <li><strong>Subtype → Parent Category Pipeline:</strong> Automatically maps granular actions into executive Parent Categories (e.g., <em>Bidding &amp; Eligibility</em>, <em>Accounting &amp; Refunds</em>, <em>Title &amp; Ownership</em>, <em>Lot &amp; Yard Ops</em>). Click <strong><code>Export Rollup (.xlsx)</code></strong> to download a standalone two-sheet Excel summary report.</li>
+              <li><strong>Subtype → Parent Category Pipeline &amp; <code>.xlsx</code> Export:</strong> Maps granular actions into executive Parent Categories with 1-click category pills and exports a two-sheet summary report via <strong><code>Export Rollup (.xlsx)</code></strong>.</li>
             </ul>
-          </article>
-
-          <!-- Section 13 -->
-          <article id="manual-sec-13" class="manual-section">
-            <h4>13. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
-            <ul class="manual-list">
-              <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, export or import your department tracker profiles, custom column mappings, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.1</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
-            </ul>
+            <figure class="manual-figure">
+              <img src="assets/images/manual/16-view-only-mirror-inspector.png" alt="Supervisor View-Only Mirror Inspector Modal" class="manual-screenshot" loading="lazy">
+              <figcaption>View-Only Mirror Inspector — Non-Locking Snapshot Reader with Tab Filtering &amp; Standalone Download</figcaption>
+            </figure>
           </article>
 
           <!-- Section 14 -->
           <article id="manual-sec-14" class="manual-section">
-            <h4>14. Quick Reference: Where to Click &amp; Keyboard Shortcuts</h4>
+            <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
+            <ul class="manual-list">
+              <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.2</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+            </ul>
+          </article>
+
+          <!-- Section 15 -->
+          <article id="manual-sec-15" class="manual-section">
+            <h4>15. Quick Reference: Where to Click &amp; Keyboard Shortcuts</h4>
             <div class="manual-table-wrap">
               <table class="manual-ref-table">
                 <thead>
                   <tr><th>Goal / Action</th><th>Where to Click</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td>Connect or switch your Excel folder</td><td>Top Header → <strong><code>Select Agent Folder</code></strong> / <strong><code>Switch Folder</code></strong></td></tr>
-                  <tr><td>Add another department's tracker tab</td><td><code>Workbooks</code> bar (right) → <strong><code>+ Tracker Tab</code></strong></td></tr>
-                  <tr><td>Rename a workbook tab</td><td><strong>Double-click</strong> the tab in the <code>Workbooks</code> bar</td></tr>
+                  <tr><td>Connect or switch your Excel folder</td><td>Top Header → <strong><code>Select Agent Folder</code></strong> / <strong><code>Reconnect Folder</code></strong> (or <code>Tools &amp; Setup ▾</code>)</td></tr>
+                  <tr><td>Add or rename a department tracker tab</td><td><code>Workbooks</code> bar → <strong><code>+ Tracker Tab</code></strong> (or <strong>double-click</strong> tab to rename)</td></tr>
+                  <tr><td>Claim lock in active tab / retry locked save</td><td>Red Standby Banner → <strong><code>⚡ Take Over Active Session Here</code></strong> • Status Bar → <strong><code>💾 Retry Primary Save</code></strong></td></tr>
                   <tr><td>Open or create a Scratch Sheet</td><td><code>Sheets</code> bar (right) → <strong><code>Scratch Sheets ▾</code></strong></td></tr>
+                  <tr><td>Filter by value or copy field to clipboard</td><td>Table split-pill → <strong>Click text to filter</strong> • <strong>Click right copy icon to copy</strong></td></tr>
                   <tr><td>Extract <code>[XXXX-XX-XXXX]</code> ticket from Subject</td><td>Bottom Dock / Modal → <strong><code>🎯 Grab Ticket</code></strong> above Ticket Number</td></tr>
-                  <tr><td>Fill blank fields from an earlier day's tab</td><td>Bottom Dock Header → <strong><code>📥 Pull Prior</code></strong></td></tr>
-                  <tr><td>Push newly added Ticket/Account/Lot to newer tabs</td><td>Bottom Dock Header or Ticket Details → <strong><code>🔄 Sync Forward</code></strong></td></tr>
+                  <tr><td>Pull blank fields / push updates forward</td><td>Bottom Dock Header → <strong><code>📥 Pull Prior</code></strong> / <strong><code>🔄 Sync Forward</code></strong></td></tr>
                   <tr><td>Adjust form field widths, order, or Notes height</td><td>Bottom Dock Header → <strong><code>🔒 Layout</code></strong> (unlocks <code>◀ ▶</code>, <code>− +</code>, <code>↕− ↕+</code>)</td></tr>
-                  <tr><td>Filter table to rows sharing a Broker/Master/Ticket/ID</td><td><strong>Click directly on any chip/badge</strong> inside the table</td></tr>
-                  <tr><td>Bulk-update status or delete multiple rows</td><td>Check left-hand row checkboxes → Use floating <strong>Batch Action Bar</strong></td></tr>
-                  <tr><td>Color cells, format types, or split columns on a Scratch Sheet</td><td>Scratch Toolbar → <strong><code>Type</code></strong>, <strong><code>Fill ▾</code></strong>, <strong><code>Data to Columns</code></strong>, or <strong><code>Auto-Filter Lists</code></strong></td></tr>
+                  <tr><td>Bulk copy, update status, or delete rows</td><td>Check left-hand row checkboxes → <strong><code>📋 Copy Row(s)</code></strong>, <strong><code>📅 Copy to Next Day / Tab...</code></strong>, or <strong><code>Apply</code></strong></td></tr>
+                  <tr><td>Build 3-bucket Red/Yellow/Green <code>=FILTER</code> lists</td><td>Scratch Toolbar (or Right-Click) → <strong><code>Auto-Filter Lists</code></strong></td></tr>
+                  <tr><td>Lock tracking IDs against auto-increment</td><td>Scratch Toolbar → <strong><code>Type: Text (@)</code></strong></td></tr>
                 </tbody>
               </table>
             </div>
@@ -1783,16 +1850,18 @@
                   <tr><th>Keyboard Shortcut</th><th>Action</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td><code>Arrow Keys</code> / <code>Tab</code> / <code>Enter</code></td><td>Navigate cells or commit edit and move down/up on Scratch Sheets</td></tr>
-                  <tr><td><code>Ctrl+C</code> then <code>Enter</code></td><td>Paste copied cell/range at destination and clear copy marquee</td></tr>
-                  <tr><td><code>Drag Corner Square</code></td><td>Fill cells across rows/columns (auto-increments Dates &amp; Numbers; hold <code>Ctrl</code> to copy only)</td></tr>
+                  <tr><td><code>Arrow Keys</code> / <code>Tab</code> / <code>Shift+Tab</code></td><td>Move active cell selection across the Scratch Sheet grid</td></tr>
+                  <tr><td><code>Ctrl+C</code> then <code>Enter</code></td><td>Paste copied cell/range at destination and clear copy marquee immediately</td></tr>
+                  <tr><td><code>Enter</code> / <code>Shift+Enter</code></td><td>Commit cell edit and move down / up (or paste if copy marquee is active)</td></tr>
+                  <tr><td><code>Drag Corner Square</code></td><td>Fill across rows/columns (auto-increments Dates &amp; Numbers &lt;= 10 digits; hold <code>Ctrl</code> to copy only)</td></tr>
+                  <tr><td><code>Double-Click Corner Square</code></td><td>Auto-fill formula or series down alongside adjacent columns</td></tr>
                   <tr><td><code>F2</code> or <code>Double-Click</code></td><td>Edit inside active Scratch Sheet cell without overwriting existing text</td></tr>
                   <tr><td><code>Shift + Arrow Keys</code></td><td>Expand multi-cell range selection on Scratch Sheets</td></tr>
-                  <tr><td><code>Ctrl+C</code> / <code>Ctrl+X</code> / <code>Ctrl+V</code></td><td>Copy / Cut / Paste single cells or multi-cell Excel TSV ranges</td></tr>
+                  <tr><td><code>Ctrl+C</code> / <code>Ctrl+X</code> / <code>Ctrl+V</code></td><td>Copy / Cut / Paste cells (preserving fill colors, bold headers, HTML tables &amp; shifted formulas) or copy/paste checked request rows</td></tr>
                   <tr><td><code>Delete</code> / <code>Backspace</code></td><td>Clear contents of selected Scratch Sheet cells</td></tr>
-                  <tr><td><code>Ctrl+Z</code> / <code>Ctrl+Y</code></td><td>Undo / Redo cell value and fill color changes on Scratch Sheets</td></tr>
+                  <tr><td><code>Ctrl+Z</code> / <code>Ctrl+Y</code></td><td>Undo / Redo values, fill colors, data types &amp; Data to Columns (up to 50 steps)</td></tr>
                   <tr><td><code>Ctrl+S</code></td><td>Immediately save pending Scratch Sheet edits to workbook &amp; mirror</td></tr>
-                  <tr><td><code>Escape</code></td><td>Cancel inline cell edit or close open modal / menu</td></tr>
+                  <tr><td><code>Escape</code></td><td>Cancel inline cell edit or close open modal / context menu / popover</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1866,16 +1935,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.1</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.2</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.1"></script>
-  <script src="js/core-ui.js?v=1.19.1"></script>
-  <script src="js/workbook-io.js?v=1.19.1"></script>
-  <script src="js/tracker-table.js?v=1.19.1"></script>
-  <script src="js/request-editors.js?v=1.19.1"></script>
-  <script src="js/scratch-sheets.js?v=1.19.1"></script>
-  <script src="js/rollover.js?v=1.19.1"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.2"></script>
+  <script src="js/core-ui.js?v=1.19.2"></script>
+  <script src="js/workbook-io.js?v=1.19.2"></script>
+  <script src="js/tracker-table.js?v=1.19.2"></script>
+  <script src="js/request-editors.js?v=1.19.2"></script>
+  <script src="js/scratch-sheets.js?v=1.19.2"></script>
+  <script src="js/rollover.js?v=1.19.2"></script>
 </body>
 </html>

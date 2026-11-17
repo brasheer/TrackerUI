@@ -8,7 +8,19 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.1` (Current — `main` / `meerkat`)
+### `v1.19.2` (Current — `main` / `meerkat`)
+- **📖 Comprehensive User Manual Update & Excel Function Reference (`USER_MANUAL.md`, `index.html`)**:
+  - Updated all 15 sections across both [`USER_MANUAL.md`](USER_MANUAL.md) and the interactive in-app `#userManualModal` (adding `Section 12: Scratch Sheet Excel Functions, Formula Syntax & Dynamic Array Reference` covering `=FILTER`, `=UNIQUE`, `=SORT`, `=IF`, `=AND`, `=OR`, `=NOT`, `=ISBLANK`, `=ISEMPTY`, `=ISNUMBER`, `=ISTEXT`, `=COUNTIF`, `=COUNTA`, `=COUNTBLANK`, `=SUM`, `=AVERAGE`, `=MIN`, `=MAX`, `=TRIM`, `=UPPER`, `=LOWER`, `=LEN`, `=LEFT`, `=RIGHT`, `=MID`, `=SEARCH`, `=FIND`, `=TODAY()`, `*`/`+` boolean array criteria, `$` absolute/relative coordinates, cross-sheet `Sheet1!Range` references, and spill error codes).
+  - Documented `v1.18.1`–`v1.19.1` features including 1080p responsive space optimization vs. ultrawide `#sheetTabsBar`, Overdue (red fill + outline) & Waiting/On Hold (purple fill + outline) highlights, Left-Hand Row Numbers (`#`), Integrated Split-Pill Copy Buttons, Multi-Tab Session Standby Lock & Fail-Safe Primary Save staging, Manual Row Copy & Paste across daily tabs, and Scratch Sheet Data Types + Corner Fill Handle auto-increment.
+- **📸 Refreshed High-Resolution Manual Screenshots (`assets/images/manual/01`–`16`)**:
+  - Updated all existing screenshots (`01`–`10`) to `v1.19.2` and added 6 new visual walkthrough screenshots (`11`–`16`) covering Overdue/Waiting highlights, Manual Row Copy/Paste, the `Auto-Filter Lists` builder modal, Live `=FILTER` Red/Yellow/Green side lists with Corner Fill Handle, Multi-Tab Standby & Retry banners, and the View-Only Mirror Inspector.
+  - Fixed all image references in [`USER_MANUAL.md`](USER_MANUAL.md) and embedded all 16 screenshots in `#userManualModal`.
+- **🗺️ Roadmap Addition (`FUTURE_FEATURES.md`)**:
+  - Added **Simple Text Editing & Cell Formatting Controls for Scratch Sheets** (`Ctrl+B` Bold/Unbold toggle to override auto-bolded Row 1 headers, `Ctrl+I`, `Ctrl+U`, Left/Center/Right text alignment, and Clear Formatting) under Section 1 (`📋 Planned`).
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v39'` (with all 16 manual screenshots added to `ASSETS_TO_CACHE`) in [`sw.js`](sw.js) and synced `?v=1.19.2` asset query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.1` (`main` / `meerkat`)
 - **📐 1920x1080 Screen-Space Optimization (`css/styles.css`)**:
   - Added `@media (max-width: 1920px), (max-height: 1080px)` rules that hide `#sheetTabsBar` (`.sheet-tabs-bar`) and tighten vertical padding across the header, profile/sheet bars, controls toolbar, table cells, bottom editor dock, and status bar on `1920x1080` and smaller displays while keeping the quick tab strip visible on ultrawide monitors (e.g., `3440x1440`).
 - **🚨 Overdue & Waiting / On Hold Row Backgrounds + Outlines (`css/styles.css`, `js/tracker-table.js`, `js/rollover.js`)**:

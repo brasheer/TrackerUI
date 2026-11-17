@@ -28,8 +28,18 @@ This document maintains the roadmap, feature requests, planned enhancements, and
   - Make the UUIDv4 Tracking ID chips in the table (`🔍 8f4a92c1...`) and badges in the Bottom Editor Dock (`#dockKeyBadge`), Edit Modal (`#modalKeyDisplay`), and Ticket Details modal 1-click copy-able.
   - Clicking the chip or an adjacent copy icon will copy the full 36-character UUIDv4 to the system clipboard (`navigator.clipboard.writeText`) and trigger a quick feedback toast (e.g., `📋 Copied Tracking ID to clipboard: 8f4a92c1-...`).
 
+### ✍️ Simple Text Editing & Cell Formatting Controls for Scratch Sheets
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Add lightweight text formatting buttons and standard keyboard shortcuts directly in the Scratch Sheet toolbar and right-click context menu: **Bold (`Ctrl+B`)**, **Italic (`Ctrl+I`)**, **Underline (`Ctrl+U`)**, **Text Alignment (`Left`, `Center`, `Right`)**, and a **1-click "Clear Text Formatting / Unbold"** toggle.
+  - Because TrackerUI automatically styles populated Row 1 cells as bold column headers, a manual Bold/Unbold and text-formatting toggle lets agents unbold Row 1 when Row 1 contains normal list data, or highlight totals, subheaders, and email notes without needing to open Desktop Excel.
+  - Persist `cell.font` (`bold`, `italic`, `underline`) and `cell.alignment` cleanly through the existing Scratch Sheet undo/redo stack, copy/paste HTML matrix, and `.xlsx` dual-write save pipeline.
+
+---
+
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
 |---|---|---|---|
+| **Simple Text Editing & Formatting (`Bold`/`Italic`/`Align`)** | *Scratch Sheets* | 📋 Planned | Toolbar toggles & shortcuts (`Ctrl+B` Bold/Unbold toggle to override auto-bolded Row 1 headers, `Ctrl+I`, `Ctrl+U`, Left/Center/Right align, and Clear Formatting) persisted to `.xlsx` `cell.font` / `cell.alignment` with full Undo/Redo support. |
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
 | **Charts & Visual Analytics Panel (Phase 1 & 2)** | *Daily Tracker / Scratch Sheets / Supervisor Rollup* | 📋 Planned | Native SVG (zero-dependency) or offline-cached Chart.js visual cards for Daily Request Volume/Status breakdown, Title Tracking Red/Yellow/Green bucket progress, and Multi-Workbook Supervisor Category trends, with optional image/HTML export. |
