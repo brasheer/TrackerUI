@@ -117,5 +117,8 @@ assets/Testing/
 *.xlsx
 newfeatures.txt
 
+# Local working roadmap & scratch notes
+Roadmap_Review.md
+
 
 

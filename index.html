@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.3</title>
+  <title>TrackerUI v1.19.4</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.3">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.4">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.2 — Click to check for updates &amp; refresh app cache">v1.19.2</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.4 — Click to check for updates &amp; refresh app cache">v1.19.4</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.2</span>
+              <span class="menu-item-meta" data-app-version>v1.19.4</span>
             </button>
           </div>
         </div>
@@ -791,6 +791,10 @@
           <input type="checkbox" id="chkScratchStripedRows" checked>
           <span>Striped rows</span>
         </label>
+        <label class="scratch-filter-toggle scratch-autoincrement-toggle" title="When checked, dragging the corner fill handle increments dates &amp; numbers (hold Ctrl while dragging to invert; Type: Text (@) never increments; 11+ digit strings stay stored as text)">
+          <input type="checkbox" id="chkScratchAutoIncrement">
+          <span>Auto-increment</span>
+        </label>
       </div>
       <div class="scratch-toolbar-right">
         <div class="scratch-search-group">
@@ -803,7 +807,7 @@
         </div>
 
         <!-- Cell Data Type / Format Selector -->
-        <div class="scratch-format-wrap" title="Set data type / display format for selected cell(s) or column(s) (Dates &amp; Numbers auto-increment when dragging the corner fill square; Text never auto-increments)">
+        <div class="scratch-format-wrap" title="Set data type / display format for selected cell(s) or column(s) (Turn on Auto-increment or hold Ctrl while dragging the corner fill square to increment Dates &amp; Numbers; Type: Text (@) never auto-increments)">
           <select id="scratchCellFormatSelect" class="scratch-format-select" aria-label="Cell data type and format">
             <option value="auto">Type: Auto</option>
             <option value="text">Type: Text (@)</option>
@@ -935,6 +939,28 @@
         <span>Paste</span>
       </span>
       <kbd class="scratch-ctx-Shortcut">Ctrl+V</kbd>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="paste-transpose" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 14V6.5A1.5 1.5 0 0 1 6.5 5H14"></path>
+          <polyline points="11.5 2.5 14 5 11.5 7.5"></polyline>
+          <polyline points="2.5 11.5 5 14 7.5 11.5"></polyline>
+          <rect x="9.5" y="9.5" width="7" height="7" rx="1"></rect>
+        </svg>
+        <span>Paste Special → Transpose</span>
+      </span>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="transpose-selection" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3.5" width="10" height="4.5" rx="1"></rect>
+          <rect x="12" y="8" width="4.5" height="9" rx="1"></rect>
+          <path d="M6 12.5a3.5 3.5 0 0 0 3.5 3.5"></path>
+          <polyline points="7.5 11 6 12.5 7.5 14"></polyline>
+        </svg>
+        <span>Transpose Selection</span>
+      </span>
     </button>
     <div class="scratch-ctx-divider" role="separator"></div>
     <div class="scratch-ctx-swatches-section">
@@ -1223,6 +1249,7 @@
             <label class="checkbox-label"><input type="checkbox" id="chkTtcPipe"><span>Pipe (<code>|</code>)</span></label>
             <label class="checkbox-label"><input type="checkbox" id="chkTtcHyphen"><span>Hyphen (<code>-</code>)</span></label>
             <label class="checkbox-label"><input type="checkbox" id="chkTtcSpace"><span>Space</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="chkTtcNewline"><span>Newline (<code>\n</code>)</span></label>
             <div class="ttc-other-wrap">
               <label class="checkbox-label"><input type="checkbox" id="chkTtcOther"><span>Other:</span></label>
               <input type="text" id="ttcOtherInput" class="ttc-other-input" maxlength="6" placeholder="e.g. / or :" autocomplete="off">
@@ -1237,6 +1264,18 @@
             <label class="checkbox-label">
               <input type="checkbox" id="chkTtcConsecutive">
               <span>Treat consecutive delimiters as one</span>
+            </label>
+          </div>
+
+          <div class="ttc-direction-row">
+            <span class="ttc-section-label ttc-direction-label">Split Direction:</span>
+            <label class="checkbox-label">
+              <input type="radio" name="ttcSplitDirection" id="radTtcAcross" value="across" checked>
+              <span>Split Across (Columns →)</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="radio" name="ttcSplitDirection" id="radTtcDown" value="down">
+              <span>Split Down (Rows ↓)</span>
             </label>
           </div>
         </div>
@@ -1816,7 +1855,7 @@
             <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.2</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.4</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -1935,16 +1974,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.2</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.4</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.3"></script>
-  <script src="js/core-ui.js?v=1.19.3"></script>
-  <script src="js/workbook-io.js?v=1.19.3"></script>
-  <script src="js/tracker-table.js?v=1.19.3"></script>
-  <script src="js/request-editors.js?v=1.19.3"></script>
-  <script src="js/scratch-sheets.js?v=1.19.3"></script>
-  <script src="js/rollover.js?v=1.19.3"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.4"></script>
+  <script src="js/core-ui.js?v=1.19.4"></script>
+  <script src="js/workbook-io.js?v=1.19.4"></script>
+  <script src="js/tracker-table.js?v=1.19.4"></script>
+  <script src="js/request-editors.js?v=1.19.4"></script>
+  <script src="js/scratch-sheets.js?v=1.19.4"></script>
+  <script src="js/rollover.js?v=1.19.4"></script>
 </body>
 </html>

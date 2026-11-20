@@ -8,7 +8,24 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.3` (Current — `main` / `meerkat`)
+### `v1.19.4` (Current — `main` / `meerkat`)
+- **🔁 Rollover Status Transitions & Waiting/Hold Overdue Exemption (`js/core-ui.js`, `js/rollover.js`)**:
+  - Automatically transitions requests with `"New"` status to `"In Progress"` (`resolveInProgressStatusLabel()`) when carried forward to a subsequent daily tab, displaying `New → In Progress` badges in the Rollover preview and reporting transition counts on completion.
+  - Exempts `Waiting`, `Waiting on Buyer`, and `On Hold` requests from `evaluateRequestOverdueMetrics()` (`qualifiesForAutoOverdue`) so aged or frequently carried waiting items remain `Waiting` / `On Hold` with purple styling rather than mutating to `Overdue`.
+- **🔄 Always-Live Bidirectional Master Buyer Account Sync (`js/workbook-io.js`)**:
+  - Updated `applyBrokerAutoFillToPair()` and `applyMasterReverseAutoFillToPair()` via `syncAccountAuxiliaryFields()` so changing `Broker Name` or `Master #` to a known account immediately updates the paired field and default `Bidder #` without requiring fields to be cleared first (while preserving custom edits when re-validating the same account).
+- **📋 Email HTML `<table>` Paste Priority, Multi-Line Preservation & Transpose Actions (`js/scratch-sheets.js`, `index.html`)**:
+  - Updated `parseClipboardHtmlTableToMatrix()` and `applyScratchPasteFromText()` to reconstruct cell values and multi-line `<br>` / `<p>` / `<div>` content (plus `colspan`/`rowspan` and inline/`<style>` styling) directly from `text/html` `<table>` payloads before falling back to RFC-4180 multi-line TSV parsing.
+  - Added **`Paste Special → Transpose`** and **`Transpose Selection`** to `#scratchContextMenu` (`transpose2DMatrix()`, `transposeScratchSelection()`) with relative formula shifting and full Undo/Redo support.
+  - Fixed `applyScratchCellChanges()` grid expansion detection (`needsExpand` / Row-1 header refresh) and preserved `scrollTop`/`scrollLeft` in `renderActiveScratchSheetGrid()`, plus added a `localhost` Live Server `/ws` reload guard in `js/core-ui.js` (`GuardedWebSocket`) so auto-saving test `.xlsx` workbooks inside `assets/Testing/` never triggers a dev-server browser page reload.
+- **🟦 Explicit Fill Handle `Auto-increment` Toggle (`index.html`, `js/core-ui.js`, `js/scratch-sheets.js`, `css/styles.css`)**:
+  - Added the persistent **`Auto-increment`** toolbar checkbox (`#chkScratchAutoIncrement`, defaulting unchecked so dragging copies values safely; hold `Ctrl` while dragging to invert) and `BigInt` series support for 11–30 digit tracking numbers while still saving 11+ digit strings as text in `.xlsx`.
+- **✂️ Data to Columns: Newline (`\n`) Delimiter & Split Direction (`index.html`, `js/core-ui.js`, `js/scratch-sheets.js`, `css/styles.css`)**:
+  - Added the **`Newline (\n)`** delimiter (`#chkTtcNewline`, auto-detected before sample joining) and **`Split Across (Columns →)` / `Split Down (Rows ↓)`** toggle (`#radTtcAcross` / `#radTtcDown`) to `#textToColumnsModal`, with downward overwrite detection and Undo/Redo support.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v42'` in [`sw.js`](sw.js) and synced `?v=1.19.4` asset query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.3` (`main` / `meerkat`)
 - **🔧 OpenXML Dynamic Array & View-Only Mirror Repair Fix (`js/workbook-io.js`, `js/scratch-sheets.js`)**:
   - Scoped `repairSavedXlsxArchive()`'s `t="s"` → `t="str"` conversion strictly to legacy reference sheets and active multi-cell `ref="Start:End"` spill rectangles (with XML entity escaping), preventing static shared-string cells on Scratch Sheets from triggering Desktop Excel repair prompts.
   - Updated dynamic array post-processing and `recalculateScratchWorksheetFormulas()` to preserve cached results for unsupported Excel functions (`=LET`/`=XLOOKUP`), purge stale cached spill cells when an array anchor is edited to an in-app evaluated formula, and write `<f t="array" ref="<cell>">` + `cm="1"` + `xl/metadata.xml` (`XLDAPR`) for `=FILTER`, `=SORT`, `=UNIQUE`, `=LET`, and `=XLOOKUP` cells so Excel never prepends legacy `@` implicit intersection (`=@FILTER(...)`).

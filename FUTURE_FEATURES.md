@@ -45,18 +45,33 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-### 🔄 Always-Live Bidirectional Master Buyer Account Sync (`Broker Name` ↔ `Master #`)
+### 📂 Directory Paths & Startup Auto-Check in Workspace `.json` Config
 - **Status**: 📋 Planned
 - **Proposal**:
-  - Remove the current guard that only auto-fills `Master #` / `Broker Name` / `Bidder #` when the counterpart field is blank (which currently forces users to clear both fields before auto-fill triggers again when changing accounts).
-  - Whenever a known **Master Buyer Account Name** (`Broker Name`) or **Account Number** (`Master #`) is entered or changed in the Bottom Editor Dock or Popup Modal, automatically overwrite and sync the corresponding `Master #` / `Broker Name` (and default `Bidder #`) to match the newly selected account.
+  - Extend `Export Workspace Config (.json)` / `Import Workspace Config (.json)` to store per-profile directory metadata (`agentDirName`, `supervisorDirName`, `templatesDirName`, `backupsDirName`, optional shared-root relative subpaths, and `lastWorkbookName`).
+  - Add an **auto-check on startup** (e.g., checking a hosted/companion `trackerui-config.json` or saved team preset) so coworkers automatically receive pre-configured department tabs, column mappings, form layouts, and expected folder targets without manual setup.
+  - **Browser Security & Seamless Onboarding Design:** Because Chrome's File System Access API cannot bind raw OS path strings without a user-granted `FileSystemDirectoryHandle`:
+    - If coworkers share a common parent OneDrive/team root folder, picking that single root folder **once** can automatically resolve configured `agentSubPath` / `supervisorSubPath` / `templatesSubPath` / `backupsSubPath` handles via `getDirectoryHandle(...)`.
+    - For standalone folders, display a guided 1-click **"Connect Expected Folder: `<FolderName>`"** prompt on startup until the handle is granted and persisted in `IndexedDB`.
+
+---
+
+### 🛡️ Rolling Daily, Pre-Action & Version-Upgrade Workbook Backups (`_Backups/`)
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Maintain a bounded rolling backup ring buffer inside a configurable **Backups Directory** (defaulting to a `_Backups/` subfolder of the Agent Folder, or persisted in `IndexedDB` + `.json` config via `backupsDirName` / `backupsSubPath`; excluded from normal workbook scanning) so storage never balloons:
+    - **1 Daily Snapshot:** Capture one clean `.xlsx` snapshot per workbook on the first load/save of each calendar day (using `SHA-256` content hashing to skip unchanged copies) and prune anything older than the last **5–7 days**.
+    - **App-Version-Upgrade Guard:** Automatically capture a safety snapshot before the first write after an `APP_VERSION` update (e.g., `_pre-v1.19.x.xlsx`) to guarantee instant recovery if a TrackerUI update ever introduces a workbook/OpenXML regression.
+    - **Pre-Destructive-Action Slots:** Keep a 2–3 slot ring buffer (`_pre-rollover`, `_pre-delete`) before Smart Rollover, Batch Delete, or Day Tab deletion.
+    - **In-App Restore UI:** Add **`Restore Workbook from Backup...`** inside **`⚙️ Tools & Setup ▾`** listing available snapshots with timestamps and file sizes for 1-click restoration.
 
 ---
 
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
 |---|---|---|---|
+| **Rolling Daily & Version-Upgrade Backups (`_Backups/`)** | *Workbook I/O / Safety* | 📋 Planned | Capped 5–7 day `.xlsx` ring buffer + `SHA-256` dedup + automatic pre-version-upgrade & pre-rollover/delete safety snapshots with an in-app **Restore from Backup** picker. |
+| **Directory Paths & Startup `.json` Auto-Check** | *Config / Onboarding* | 📋 Planned | Store per-profile folder names/subpaths in `.json` config and auto-check on startup (`trackerui-config.json`), resolving subfolders from a shared root handle or prompting 1-click folder connection for coworkers. |
 | **Resizable Tracker Table Columns** | *Daily Tracker Table* | 📋 Planned | Draggable column header resize handles in `#tableHead` across Standard & Custom Department trackers, persisted per profile/schema in `localStorage` and `.json` config backups. |
-| **Always-Live Master Buyer Account Sync** | *Request Editors* | 📋 Planned | Always update `Master #` ↔ `Broker Name` (and `Bidder #`) automatically whenever either known account field changes, without requiring both fields to be cleared first. |
 | **Simple Text Editing & Formatting (`Bold`/`Italic`/`Align`)** | *Scratch Sheets* | 📋 Planned | Toolbar toggles & shortcuts (`Ctrl+B` Bold/Unbold toggle to override auto-bolded Row 1 headers, `Ctrl+I`, `Ctrl+U`, Left/Center/Right align, and Clear Formatting) persisted to `.xlsx` `cell.font` / `cell.alignment` with full Undo/Redo support. |
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
@@ -65,7 +80,14 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.1`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.4`)
+
+### 🔄 Always-Live Bidirectional Master Buyer Account Sync, Rollover Status Rules & Scratch Sheet Workflow Upgrades (`v1.19.4`)
+- **Status**: ✅ Implemented in `v1.19.4`
+- **Delivered**:
+  - **Always-Live Bidirectional Master Buyer Account Sync (`js/workbook-io.js`)**: Entering or switching a known `Broker Name` or `Master #` immediately updates the paired field and default `Bidder #` without requiring fields to be cleared first.
+  - **Rollover Status Transitions & Waiting/Hold Exemption (`js/core-ui.js`, `js/rollover.js`)**: Automatically transitions `New` → `In Progress` when carrying forward to a subsequent daily tab, and exempts `Waiting`, `Waiting on Buyer`, and `On Hold` from auto-`Overdue` aging mutation.
+  - **Scratch Sheet Email `<table>` Paste, Transpose, `Auto-increment` Toggle & Newline / Split-Down (`index.html`, `js/scratch-sheets.js`, `css/styles.css`)**: Prioritizes `text/html` `<table>` reconstruction (preserving `<br>` / `<p>` multi-line cells, `colspan`/`rowspan`, and styles), adds `Paste Special → Transpose` & `Transpose Selection`, adds the explicit `#chkScratchAutoIncrement` toolbar checkbox (supporting 11+ digit `BigInt` series stored as text), and adds `Newline (\n)` + `Split Across / Split Down` to `#textToColumnsModal`.
 
 ### 📐 1080p Screen-Space Optimization & Overdue / Waiting Row Backgrounds (`v1.19.1`)
 - **Status**: ✅ Implemented in `v1.19.1`

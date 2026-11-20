@@ -7,6 +7,7 @@
 // --- SCRATCH SHEET EXTENDED INTERACTION STATE (v1.16.0 - v1.19.0) ---
 const SCRATCH_MAX_UNDO_STEPS = 50;
 const SCRATCH_STRIPED_STORAGE_KEY = 'trackerui_scratch_striped_rows';
+const SCRATCH_AUTO_INCREMENT_STORAGE_KEY = 'trackerui_scratch_auto_increment';
 const SCRATCH_LAST_FILL_STORAGE_KEY = 'trackerui_scratch_last_fill_id';
 
 const SCRATCH_FORMAT_DEFS = {
@@ -33,6 +34,7 @@ let lastScratchNativeCopyAt = 0;
 let lastFormulaCoalesceMeta = null; // { key, at }
 let scratchMutationVersion = 0;
 let scratchStripedRowsEnabled = localStorage.getItem(SCRATCH_STRIPED_STORAGE_KEY) !== 'false';
+let scratchAutoIncrementEnabled = localStorage.getItem(SCRATCH_AUTO_INCREMENT_STORAGE_KEY) === 'true';
 let activeScratchFillPresetId = localStorage.getItem(SCRATCH_LAST_FILL_STORAGE_KEY) || 'gold_80';
 let activeTextToColumnsState = null; // { sheetName, col, minRow, maxRow, sourceRows: [{ r, raw }] } | null
 let activeScratchAutoFilterState = null; // { sheetName, headers: [{ col, letter, label }] } | null
@@ -1014,11 +1016,18 @@ function syncScratchStripedRowsUI() {
   }
 }
 
+function syncScratchAutoIncrementUI() {
+  if (chkScratchAutoIncrement) {
+    chkScratchAutoIncrement.checked = scratchAutoIncrementEnabled;
+  }
+}
+
 function syncWorkspaceTabsUI() {
   stopScratchPointerDrag();
   closeScratchFillDropdown();
   closeScratchContextMenu();
   syncScratchStripedRowsUI();
+  syncScratchAutoIncrementUI();
   renderWorkspaceTabsBar();
 
   const isDailyActive = activeWorkspaceTab === DAILY_TRACKER_WS_TAB;
@@ -2385,7 +2394,12 @@ function computeScratchFillTargetRange(srcRange, hoverR, hoverC) {
   return { axis: 'horizontal', dir: -1, minRow: srcRange.minRow, maxRow: srcRange.maxRow, minCol: hoverC, maxCol: srcRange.maxCol };
 }
 
-function buildFillSeriesValues(sourceItems, targetCount, dir, { axis = 'vertical', ctrlKey = false } = {}) {
+function buildFillSeriesValues(
+  sourceItems,
+  targetCount,
+  dir,
+  { axis = 'vertical', ctrlKey = false, autoIncrement = scratchAutoIncrementEnabled } = {}
+) {
   const S = sourceItems.length;
   if (S === 0 || targetCount <= 0) return [];
 
@@ -2393,6 +2407,7 @@ function buildFillSeriesValues(sourceItems, targetCount, dir, { axis = 'vertical
   const allNonEmpty = sourceItems.every(it => it.rawEdit.trim() !== '');
   const anyFormula = sourceItems.some(it => it.isFormula && it.rawEdit.startsWith('='));
   const anyExplicitText = sourceItems.some(it => it.formatId === 'text');
+  const shouldAutoIncrement = Boolean(autoIncrement) !== Boolean(ctrlKey);
 
   // 1. Formulas: shift relative references by step offset
   if (anyFormula) {
@@ -2412,8 +2427,8 @@ function buildFillSeriesValues(sourceItems, targetCount, dir, { axis = 'vertical
     return results;
   }
 
-  // 2. Dates (auto-increment unless explicit Text format or Ctrl held)
-  if (allNonEmpty && !anyExplicitText) {
+  // 2. Dates & Numbers (when Auto-increment enabled xor Ctrl held, and not explicit Text format)
+  if (allNonEmpty && !anyExplicitText && shouldAutoIncrement) {
     const parsedDates = sourceItems.map(it => {
       const allowHyphen = it.formatId === 'date';
       const p = parseFlexibleScratchDate(it.rawEdit || it.display, { allowTwoDigitHyphen: allowHyphen });
@@ -2423,40 +2438,74 @@ function buildFillSeriesValues(sourceItems, targetCount, dir, { axis = 'vertical
       return p;
     });
     if (parsedDates.every(Boolean)) {
-      if (!ctrlKey) {
-        let stepDays = 1;
-        if (S >= 2) {
-          stepDays = Math.round((parsedDates[S - 1].dayEpoch - parsedDates[0].dayEpoch) / (S - 1));
+      let stepDays = 1;
+      if (S >= 2) {
+        stepDays = Math.round((parsedDates[S - 1].dayEpoch - parsedDates[0].dayEpoch) / (S - 1));
+      }
+      for (let m = 1; m <= targetCount; m++) {
+        const srcIdx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
+        const baseSnap = sourceItems[srcIdx].styleSnap || { fill: null, font: null, numFmt: null };
+        const epoch = dir > 0
+          ? parsedDates[S - 1].dayEpoch + m * stepDays
+          : parsedDates[0].dayEpoch - m * stepDays;
+        const dt = new Date(epoch * 86400000);
+        results.push({
+          rawText: formatExcelDateDisplay(dt),
+          styleSnap: {
+            fill: baseSnap.fill,
+            font: baseSnap.font,
+            numFmt: baseSnap.numFmt || 'mm/dd/yyyy'
+          }
+        });
+      }
+      return results;
+    }
+
+    // 3a. Long exact integers (11-30 digits, e.g. sequential tracking numbers) using BigInt
+    //     while applyRawEditToExcelCell continues storing 11+ digit outputs as text strings.
+    const parsedBigInts = sourceItems.map(it => {
+      const trimmed = it.rawEdit.trim();
+      if (!/^-?(?:0|[1-9]\d*)$/.test(trimmed)) return null;
+      const digitLen = trimmed.replace(/^-/, '').length;
+      if (digitLen > 30) return null;
+      return { val: BigInt(trimmed), digitLen };
+    });
+    if (parsedBigInts.every(Boolean) && parsedBigInts.some(x => x.digitLen > 10)) {
+      let stepBig = 1n;
+      if (S >= 2) {
+        const diff = parsedBigInts[S - 1].val - parsedBigInts[0].val;
+        const span = BigInt(S - 1);
+        if (diff % span !== 0n) {
+          stepBig = null;
+        } else {
+          stepBig = diff / span;
         }
+      }
+      if (stepBig !== null) {
         for (let m = 1; m <= targetCount; m++) {
           const srcIdx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
           const baseSnap = sourceItems[srcIdx].styleSnap || { fill: null, font: null, numFmt: null };
-          const epoch = dir > 0
-            ? parsedDates[S - 1].dayEpoch + m * stepDays
-            : parsedDates[0].dayEpoch - m * stepDays;
-          const dt = new Date(epoch * 86400000);
+          const nextVal = dir > 0
+            ? parsedBigInts[S - 1].val + BigInt(m) * stepBig
+            : parsedBigInts[0].val - BigInt(m) * stepBig;
           results.push({
-            rawText: formatExcelDateDisplay(dt),
-            styleSnap: {
-              fill: baseSnap.fill,
-              font: baseSnap.font,
-              numFmt: baseSnap.numFmt || 'mm/dd/yyyy'
-            }
+            rawText: nextVal.toString(),
+            styleSnap: baseSnap
           });
         }
         return results;
       }
     }
 
-    // 3. Numbers / Currency (<= 10 digits, not explicit Text, not Ctrl held)
+    // 3b. Standard Numbers / Currency (<= 15 significant digits)
     const parsedNums = sourceItems.map(it => {
       const cleaned = it.rawEdit.trim().replace(/^\$/, '').replace(/,/g, '');
-      const valid = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(cleaned) && cleaned.replace(/[-.]/g, '').length <= 10;
+      const valid = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(cleaned) && cleaned.replace(/[-.]/g, '').length <= 15;
       if (!valid) return null;
       const decPart = cleaned.includes('.') ? cleaned.split('.')[1].length : 0;
       return { num: Number(cleaned), decimals: decPart };
     });
-    if (parsedNums.every(Boolean) && !ctrlKey) {
+    if (parsedNums.every(Boolean)) {
       let stepNum = 1;
       if (S >= 2) {
         stepNum = (parsedNums[S - 1].num - parsedNums[0].num) / (S - 1);
@@ -2479,7 +2528,7 @@ function buildFillSeriesValues(sourceItems, targetCount, dir, { axis = 'vertical
     }
   }
 
-  // 4. Plain Text / Explicit Text (@) / Ctrl-copy fallback: cycle values without incrementing
+  // 4. Plain Text / Explicit Text (@) / Non-increment copy fallback: cycle values without incrementing
   for (let m = 1; m <= targetCount; m++) {
     const srcIdx = dir > 0 ? ((m - 1) % S) : (S - 1 - ((m - 1) % S));
     const src = sourceItems[srcIdx];
@@ -2516,7 +2565,11 @@ function executeScratchFillHandleDrag(sheetName, sourceRange, fillTargetRange, {
           styleSnap: captureCellStyleSnapshot(ws, r, c)
         });
       }
-      const generated = buildFillSeriesValues(sourceItems, targetCount, dir, { axis: 'vertical', ctrlKey });
+      const generated = buildFillSeriesValues(sourceItems, targetCount, dir, {
+        axis: 'vertical',
+        ctrlKey,
+        autoIncrement: scratchAutoIncrementEnabled
+      });
       for (let m = 0; m < generated.length; m++) {
         const targetRow = dir > 0 ? (sourceRange.maxRow + 1 + m) : (sourceRange.minRow - 1 - m);
         edits.push({ r: targetRow, c, rawText: generated[m].rawText, styleSnap: generated[m].styleSnap });
@@ -2541,7 +2594,11 @@ function executeScratchFillHandleDrag(sheetName, sourceRange, fillTargetRange, {
           styleSnap: captureCellStyleSnapshot(ws, r, c)
         });
       }
-      const generated = buildFillSeriesValues(sourceItems, targetCount, dir, { axis: 'horizontal', ctrlKey });
+      const generated = buildFillSeriesValues(sourceItems, targetCount, dir, {
+        axis: 'horizontal',
+        ctrlKey,
+        autoIncrement: scratchAutoIncrementEnabled
+      });
       for (let m = 0; m < generated.length; m++) {
         const targetCol = dir > 0 ? (sourceRange.maxCol + 1 + m) : (sourceRange.minCol - 1 - m);
         edits.push({ r, c: targetCol, rawText: generated[m].rawText, styleSnap: generated[m].styleSnap });
@@ -3110,15 +3167,32 @@ function applyScratchCellChanges(
   if (bounds.maxRow > maxTargetRow) maxTargetRow = bounds.maxRow;
   if (bounds.maxCol > maxTargetCol) maxTargetCol = bounds.maxCol;
 
-  // Update grid dimensions if paste/edit/spill exceeded current bounds
+  // Update grid dimensions if paste/edit/spill exceeded previously rendered/cached bounds
+  const prevRenderedRows = scratchGridBody ? scratchGridBody.rows.length : 0;
+  const prevRenderedCols = (scratchGridHead && scratchGridHead.rows && scratchGridHead.rows[0])
+    ? Math.max(0, scratchGridHead.rows[0].cells.length - 1)
+    : 0;
+  const prevCachedDims = scratchGridDimensionsMap.get(sheetName) || {
+    rows: prevRenderedRows,
+    cols: prevRenderedCols
+  };
   const curDims = getScratchSheetGridDimensions(ws, sheetName);
-  const needsExpand = maxTargetRow > curDims.rows || maxTargetCol > curDims.cols;
-  if (needsExpand) {
+  const targetRows = Math.max(curDims.rows, maxTargetRow + 5);
+  const targetCols = Math.max(curDims.cols, maxTargetCol + 2);
+  if (targetRows > curDims.rows || targetCols > curDims.cols) {
     scratchGridDimensionsMap.set(sheetName, {
-      rows: Math.max(curDims.rows, maxTargetRow + 5),
-      cols: Math.max(curDims.cols, maxTargetCol + 2)
+      rows: targetRows,
+      cols: targetCols
     });
   }
+  const needsExpand =
+    targetRows > prevRenderedRows ||
+    targetCols > prevRenderedCols ||
+    targetRows > prevCachedDims.rows ||
+    targetCols > prevCachedDims.cols ||
+    maxTargetRow > prevRenderedRows ||
+    maxTargetCol > prevRenderedCols;
+  const touchedRow1 = recordedChanges.some(ch => ch.r === 1);
 
   const meta = scratchSheets.find(s => s.name === sheetName);
   if (meta) {
@@ -3142,7 +3216,7 @@ function applyScratchCellChanges(
 
   const hasActiveSearch = Boolean(scratchSearchInput && scratchSearchInput.value.trim().length > 0);
   if (activeWorkspaceTab === sheetName) {
-    if (needsExpand || (recordedChanges.length + formulaAffectedCoords.length) > 40 || hasActiveSearch) {
+    if (needsExpand || touchedRow1 || (recordedChanges.length + formulaAffectedCoords.length) > 40 || hasActiveSearch) {
       renderActiveScratchSheetGrid();
     } else {
       const toRefresh = new Map();
@@ -3162,6 +3236,9 @@ function applyScratchCellChanges(
   updateScratchSaveBadgeUI();
   renderWorkspaceTabsBar();
   scratchMutationVersion++;
+  if (typeof window !== 'undefined') {
+    window.__lastTrackerScratchEditAt = Date.now();
+  }
   scheduleScratchAutoSave();
   return recordedChanges.length;
 }
@@ -3390,6 +3467,9 @@ function renderActiveScratchSheetGrid() {
     return;
   }
 
+  const prevScrollTop = scratchGridWrap ? scratchGridWrap.scrollTop : 0;
+  const prevScrollLeft = scratchGridWrap ? scratchGridWrap.scrollLeft : 0;
+
   recalculateScratchWorksheetFormulas(ws, activeWorkspaceTab);
   const dims = getScratchSheetGridDimensions(ws, activeWorkspaceTab);
   const anchorSpills = scratchSpillStateMap.get(activeWorkspaceTab);
@@ -3484,6 +3564,11 @@ function renderActiveScratchSheetGrid() {
   }
 
   scratchGridBody.innerHTML = rowsHtml.join('');
+
+  if (scratchGridWrap) {
+    scratchGridWrap.scrollTop = prevScrollTop;
+    scratchGridWrap.scrollLeft = prevScrollLeft;
+  }
 
   if (scratchSearchMatchCount) {
     if (query.length > 0) {
@@ -4004,6 +4089,80 @@ function resolveColorStyleSnapshotFromProps({ bgRaw, fgRaw, weightRaw, tagName =
   return { fill, font, hasVisualStyle: Boolean(fill || font) };
 }
 
+function extractHtmlTableCellText(cellEl) {
+  if (!cellEl) return '';
+  const BLOCK_TAGS = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE']);
+  const SKIP_TAGS = new Set(['STYLE', 'SCRIPT', 'NOSCRIPT', 'META', 'LINK']);
+  let out = '';
+
+  const appendNewlineIfNeeded = () => {
+    if (out.length > 0 && !out.endsWith('\n')) {
+      out += '\n';
+    }
+  };
+
+  const walk = (node, inPre = false) => {
+    if (!node) return;
+    if (node.nodeType === 3) {
+      let txt = String(node.nodeValue || '').replace(/\u00A0/g, ' ');
+      if (inPre) {
+        txt = txt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      } else {
+        txt = txt.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ');
+      }
+      out += txt;
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const tag = String(node.tagName || '').toUpperCase();
+    if (SKIP_TAGS.has(tag)) return;
+    if (tag === 'BR') {
+      out += '\n';
+      return;
+    }
+    const isBlock = BLOCK_TAGS.has(tag);
+    if (isBlock) {
+      appendNewlineIfNeeded();
+    }
+    const childInPre = inPre || tag === 'PRE';
+    const children = node.childNodes ? Array.from(node.childNodes) : [];
+    children.forEach(ch => walk(ch, childInPre));
+    if (isBlock) {
+      appendNewlineIfNeeded();
+    }
+  };
+
+  walk(cellEl, false);
+
+  const lines = out.split('\n').map(line => line.replace(/^[ \t]+|[ \t]+$/g, ''));
+  while (lines.length > 0 && lines[0] === '') lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n');
+}
+
+function extractHtmlCellTextFallback(innerHtml) {
+  let str = String(innerHtml || '');
+  str = str.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+  str = str.replace(/[\r\n\t]+/g, ' ');
+  str = str.replace(/<br\s*\/?>/gi, '\n');
+  str = str.replace(/<\/(?:p|div|li|h[1-6]|blockquote|pre)\s*>/gi, '\n');
+  str = str.replace(/<(?:p|div|li|h[1-6]|blockquote|pre)\b[^>]*>/gi, '');
+  str = str.replace(/<[^>]+>/g, '');
+  str = str
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&#x0*27;/gi, "'")
+    .replace(/&#0*10;|&#x0*a;/gi, '\n');
+  const lines = str.split('\n').map(line => line.replace(/ {2,}/g, ' ').replace(/^[ \t]+|[ \t]+$/g, ''));
+  while (lines.length > 0 && lines[0] === '') lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n');
+}
+
 function parseClipboardHtmlTableToMatrix(htmlText) {
   const raw = String(htmlText || '');
   if (!raw || !/<table[\s>]/i.test(raw)) return null;
@@ -4027,6 +4186,12 @@ function parseClipboardHtmlTableToMatrix(htmlText) {
     }
   }
 
+  let tableSourceHtml = raw;
+  const fragMatch = raw.match(/<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/i);
+  if (fragMatch && /<table[\s>]/i.test(fragMatch[1])) {
+    tableSourceHtml = fragMatch[1];
+  }
+
   const extractBackgroundProp = (decls) => {
     if (!decls) return '';
     if (decls['background-color']) return decls['background-color'];
@@ -4037,19 +4202,30 @@ function parseClipboardHtmlTableToMatrix(htmlText) {
     return '';
   };
 
+  let valueRows = null;
   let styleRows = null;
   let anyStyle = false;
 
   if (typeof DOMParser !== 'undefined') {
     try {
-      const doc = new DOMParser().parseFromString(raw, 'text/html');
+      const doc = new DOMParser().parseFromString(tableSourceHtml, 'text/html');
       const table = doc.querySelector('table');
-      const trs = table ? Array.from(table.querySelectorAll('tr')) : [];
+      const trs = table
+        ? Array.from(table.querySelectorAll('tr')).filter(tr => !tr.closest || tr.closest('table') === table)
+        : [];
       if (trs.length > 0) {
-        styleRows = trs.map(tr => {
-          const cells = Array.from(tr.querySelectorAll('th, td'));
-          const rowOut = [];
+        const occupied = [];
+        valueRows = [];
+        styleRows = [];
+        trs.forEach((tr, rIdx) => {
+          if (!occupied[rIdx]) occupied[rIdx] = [];
+          if (!valueRows[rIdx]) valueRows[rIdx] = [];
+          if (!styleRows[rIdx]) styleRows[rIdx] = [];
+          const rawChildren = tr.children ? Array.from(tr.children) : Array.from(tr.querySelectorAll('th, td'));
+          const cells = rawChildren.filter(el => /^(TH|TD)$/i.test(el.tagName) && (!el.closest || el.closest('tr') === tr));
+          let cCursor = 0;
           cells.forEach(cell => {
+            while (occupied[rIdx][cCursor]) cCursor++;
             const clsDecls = {};
             String(cell.getAttribute('class') || '').split(/\s+/).filter(Boolean).forEach(clsName => {
               const found = classStyleMap.get(clsName);
@@ -4069,36 +4245,60 @@ function parseClipboardHtmlTableToMatrix(htmlText) {
               hasBoldTag
             });
             if (snap.hasVisualStyle) anyStyle = true;
-            const colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1);
-            for (let i = 0; i < colspan; i++) {
-              rowOut.push({ fill: snap.fill, font: snap.font });
+            const cellText = extractHtmlTableCellText(cell);
+            const colspan = Math.min(500, Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1));
+            const rowspan = Math.min(500, Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1));
+            const styleObj = { fill: snap.fill, font: snap.font };
+
+            for (let dr = 0; dr < rowspan; dr++) {
+              const targetR = rIdx + dr;
+              if (!occupied[targetR]) occupied[targetR] = [];
+              if (!valueRows[targetR]) valueRows[targetR] = [];
+              if (!styleRows[targetR]) styleRows[targetR] = [];
+              for (let dc = 0; dc < colspan; dc++) {
+                const targetC = cCursor + dc;
+                occupied[targetR][targetC] = true;
+                valueRows[targetR][targetC] = (dr === 0 && dc === 0) ? cellText : '';
+                styleRows[targetR][targetC] = styleObj;
+              }
             }
+            cCursor += colspan;
           });
-          return rowOut;
         });
       }
     } catch (_) {
+      valueRows = null;
       styleRows = null;
     }
   }
 
-  if (!styleRows) {
+  if (!valueRows) {
     // Lightweight fallback parser when DOMParser is unavailable (e.g. non-browser environment)
-    const trMatches = raw.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+    const tableMatch = tableSourceHtml.match(/<table\b[^>]*>[\s\S]*?<\/table>/i);
+    const fallbackHtml = tableMatch ? tableMatch[0] : tableSourceHtml;
+    const trMatches = fallbackHtml.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
     if (trMatches.length === 0) return null;
-    styleRows = trMatches.map(trStr => {
+    const occupied = [];
+    valueRows = [];
+    styleRows = [];
+    trMatches.forEach((trStr, rIdx) => {
+      if (!occupied[rIdx]) occupied[rIdx] = [];
+      if (!valueRows[rIdx]) valueRows[rIdx] = [];
+      if (!styleRows[rIdx]) styleRows[rIdx] = [];
       const cellMatches = trStr.match(/<(td|th)\b[^>]*>[\s\S]*?<\/\1>/gi) || [];
-      const rowOut = [];
+      let cCursor = 0;
       cellMatches.forEach(cellStr => {
         const tagMatch = cellStr.match(/^<(td|th)\b([^>]*)>([\s\S]*?)<\/\1>/i);
         if (!tagMatch) return;
+        while (occupied[rIdx][cCursor]) cCursor++;
         const tagName = tagMatch[1].toLowerCase();
         const attrs = tagMatch[2] || '';
         const inner = tagMatch[3] || '';
         const clsAttr = (attrs.match(/\bclass\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
         const styleAttr = (attrs.match(/\bstyle\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
         const bgcolorAttr = (attrs.match(/\bbgcolor\s*=\s*["']([^"']*)["']/i) || [])[1] || '';
-        const colspanAttr = parseInt((attrs.match(/\bcolspan\s*=\s*["']?(\d+)/i) || [])[1] || '1', 10) || 1;
+        const colspanAttr = Math.min(500, Math.max(1, parseInt((attrs.match(/\bcolspan\s*=\s*["']?(\d+)/i) || [])[1] || '1', 10) || 1));
+        const rowspanAttr = Math.min(500, Math.max(1, parseInt((attrs.match(/\browspan\s*=\s*["']?(\d+)/i) || [])[1] || '1', 10) || 1));
 
         const clsDecls = {};
         clsAttr.split(/\s+/).filter(Boolean).forEach(clsName => {
@@ -4114,15 +4314,42 @@ function parseClipboardHtmlTableToMatrix(htmlText) {
 
         const snap = resolveColorStyleSnapshotFromProps({ bgRaw, fgRaw, weightRaw, tagName, hasBoldTag });
         if (snap.hasVisualStyle) anyStyle = true;
-        for (let i = 0; i < colspanAttr; i++) {
-          rowOut.push({ fill: snap.fill, font: snap.font });
+        const cellText = extractHtmlCellTextFallback(inner);
+        const styleObj = { fill: snap.fill, font: snap.font };
+
+        for (let dr = 0; dr < rowspanAttr; dr++) {
+          const targetR = rIdx + dr;
+          if (!occupied[targetR]) occupied[targetR] = [];
+          if (!valueRows[targetR]) valueRows[targetR] = [];
+          if (!styleRows[targetR]) styleRows[targetR] = [];
+          for (let dc = 0; dc < colspanAttr; dc++) {
+            const targetC = cCursor + dc;
+            occupied[targetR][targetC] = true;
+            valueRows[targetR][targetC] = (dr === 0 && dc === 0) ? cellText : '';
+            styleRows[targetR][targetC] = styleObj;
+          }
         }
+        cCursor += colspanAttr;
       });
-      return rowOut;
     });
   }
 
-  return styleRows && styleRows.length > 0 && anyStyle ? styleRows : null;
+  if (!valueRows || valueRows.length === 0) return null;
+  const maxCols = valueRows.reduce((mx, row) => Math.max(mx, Array.isArray(row) ? row.length : 0), 0);
+  if (maxCols === 0) return null;
+  for (let r = 0; r < valueRows.length; r++) {
+    if (!valueRows[r]) valueRows[r] = [];
+    if (!styleRows[r]) styleRows[r] = [];
+    for (let c = 0; c < maxCols; c++) {
+      if (valueRows[r][c] === undefined) valueRows[r][c] = '';
+      if (styleRows[r][c] === undefined) styleRows[r][c] = { fill: null, font: null };
+    }
+  }
+
+  return {
+    values: valueRows,
+    styles: anyStyle ? styleRows : null
+  };
 }
 
 function writeScratchClipboardPayloadToSystem(tsv, html) {
@@ -4163,12 +4390,93 @@ function clearScratchSelectionCells(sheetName, range) {
 }
 
 function parseClipboardTSVMatrix(rawText) {
-  const normalized = String(rawText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const lines = normalized.split('\n');
-  if (lines.length > 1 && lines[lines.length - 1] === '') {
-    lines.pop();
+  const normalized = String(rawText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (normalized === '') return [];
+
+  const rows = [];
+  let currentRow = [];
+  let current = '';
+  let inQuotes = false;
+  let atFieldStart = true;
+
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (normalized[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (atFieldStart && ch === '"') {
+      inQuotes = true;
+      atFieldStart = false;
+      continue;
+    }
+
+    if (ch === '\t') {
+      currentRow.push(current);
+      current = '';
+      atFieldStart = true;
+      continue;
+    }
+
+    if (ch === '\n') {
+      currentRow.push(current);
+      rows.push(currentRow);
+      currentRow = [];
+      current = '';
+      atFieldStart = true;
+      continue;
+    }
+
+    current += ch;
+    atFieldStart = false;
   }
-  return lines.map(line => line.split('\t'));
+
+  if (inQuotes) {
+    const lines = normalized.split('\n');
+    if (lines.length > 1 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    return lines.map(line => line.split('\t'));
+  }
+
+  currentRow.push(current);
+  rows.push(currentRow);
+
+  if (rows.length > 1) {
+    const last = rows[rows.length - 1];
+    if (last.length === 1 && last[0] === '') {
+      rows.pop();
+    }
+  }
+  return rows;
+}
+
+function transpose2DMatrix(matrix, padValue = '') {
+  if (!Array.isArray(matrix) || matrix.length === 0) return [];
+  const rowCount = matrix.length;
+  const colCount = matrix.reduce((mx, row) => Math.max(mx, Array.isArray(row) ? row.length : 0), 0);
+  if (colCount === 0) return [];
+  const out = [];
+  for (let c = 0; c < colCount; c++) {
+    const newRow = [];
+    for (let r = 0; r < rowCount; r++) {
+      const row = matrix[r];
+      const val = (Array.isArray(row) && c < row.length && row[c] !== undefined) ? row[c] : padValue;
+      newRow.push(val);
+    }
+    out.push(newRow);
+  }
+  return out;
 }
 
 function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemClipboard = true } = {}) {
@@ -4230,33 +4538,58 @@ function performScratchCopyOrCut(sheetName, range, { isCut = false, writeSystemC
   return tsv;
 }
 
-function applyScratchPasteFromText(sheetName, rawText, htmlText = '', { clearCopyMarquee = false } = {}) {
+function applyScratchPasteFromText(
+  sheetName,
+  rawText,
+  htmlText = '',
+  { clearCopyMarquee = false, transpose = false } = {}
+) {
   if (!workbook || !sheetName || sheetName === DAILY_TRACKER_WS_TAB) return 0;
-  if (rawText === undefined || rawText === null || rawText === '') return 0;
+  const hasHtmlTable = Boolean(htmlText && /<table[\s>]/i.test(htmlText));
+  if ((rawText === undefined || rawText === null || rawText === '') && !hasHtmlTable) return 0;
 
   const ws = workbook.getWorksheet(sheetName);
   if (!ws) return 0;
 
-  const matrix = parseClipboardTSVMatrix(rawText);
-  if (matrix.length === 0) return 0;
-
   const hasMatchingInternalClip = Boolean(
+    rawText &&
     scratchInternalClipboardState &&
     scratchInternalClipboardState.tsv === rawText
   );
+  let matrix = [];
   let styleMatrix = null;
   let rawEditMatrix = null;
   let srcRange = null;
+
   if (hasMatchingInternalClip) {
     if (Array.isArray(scratchInternalClipboardState.styleMatrix)) {
       styleMatrix = scratchInternalClipboardState.styleMatrix;
     }
     if (Array.isArray(scratchInternalClipboardState.rawEditMatrix)) {
       rawEditMatrix = scratchInternalClipboardState.rawEditMatrix;
+      matrix = rawEditMatrix.map(row => row.map(cell => (cell ? cell.rawEdit : '')));
+    } else {
+      matrix = parseClipboardTSVMatrix(rawText);
     }
     srcRange = scratchInternalClipboardState.sourceRange || null;
-  } else if (htmlText) {
-    styleMatrix = parseClipboardHtmlTableToMatrix(htmlText);
+  } else if (hasHtmlTable) {
+    const parsedHtml = parseClipboardHtmlTableToMatrix(htmlText);
+    if (parsedHtml && Array.isArray(parsedHtml.values) && parsedHtml.values.length > 0) {
+      matrix = parsedHtml.values;
+      styleMatrix = parsedHtml.styles || null;
+    } else {
+      matrix = parseClipboardTSVMatrix(rawText || '');
+    }
+  } else {
+    matrix = parseClipboardTSVMatrix(rawText || '');
+  }
+
+  if (matrix.length === 0) return 0;
+
+  if (transpose) {
+    matrix = transpose2DMatrix(matrix, '');
+    if (styleMatrix) styleMatrix = transpose2DMatrix(styleMatrix, null);
+    if (rawEditMatrix) rawEditMatrix = transpose2DMatrix(rawEditMatrix, null);
   }
 
   const curRange = getScratchSelectionRange(sheetName);
@@ -4289,7 +4622,7 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '', { clearCop
       focusCol: curRange.focusCol
     };
   } else {
-    // Paste 2D TSV block starting from top-left of current selection
+    // Paste 2D block starting from top-left of current selection
     const startRow = curRange.minRow;
     const startCol = curRange.minCol;
     let maxR = startRow;
@@ -4306,11 +4639,9 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '', { clearCop
         const rawEntry = rawRow && rawRow[cOffset] ? rawRow[cOffset] : null;
         let finalVal = rawEntry ? rawEntry.rawEdit : cellVal;
         if (rawEntry && rawEntry.isFormula && finalVal.startsWith('=') && srcRange) {
-          finalVal = shiftFormulaCellReferences(
-            finalVal,
-            r - (srcRange.minRow + rOffset),
-            c - (srcRange.minCol + cOffset)
-          );
+          const origR = transpose ? (srcRange.minRow + cOffset) : (srcRange.minRow + rOffset);
+          const origC = transpose ? (srcRange.minCol + rOffset) : (srcRange.minCol + cOffset);
+          finalVal = shiftFormulaCellReferences(finalVal, r - origR, c - origC);
         }
         const editObj = { r, c, rawText: finalVal };
         if (styleMatrix) {
@@ -4341,13 +4672,18 @@ function applyScratchPasteFromText(sheetName, rawText, htmlText = '', { clearCop
     applyScratchSelectionDOM();
   }
 
-  if (edits.length > 1) {
+  if (transpose && edits.length > 0) {
+    showToast(
+      `Pasted & transposed ${edits.length} cell${edits.length === 1 ? '' : 's'} (${matrix.length}×${matrix[0].length}) into "${sheetName}".`,
+      'info'
+    );
+  } else if (edits.length > 1) {
     showToast(`Pasted ${edits.length} cells into "${sheetName}".`, 'info');
   }
   return changed;
 }
 
-async function handleScratchContextPaste() {
+async function handleScratchContextPaste({ transpose = false } = {}) {
   if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
   const targetSheet = activeWorkspaceTab;
   let clipText = null;
@@ -4379,19 +4715,103 @@ async function handleScratchContextPaste() {
     }
   }
 
-  if ((clipText === null || clipText === '') && scratchInternalClipboardText !== '') {
+  if ((clipText === null || clipText === '') && !clipHtml && scratchInternalClipboardText !== '') {
     clipText = scratchInternalClipboardText;
-    if (!clipHtml && scratchInternalClipboardState && scratchInternalClipboardState.tsv === clipText) {
+    if (scratchInternalClipboardState && scratchInternalClipboardState.tsv === clipText) {
       clipHtml = scratchInternalClipboardState.html || '';
     }
   }
 
-  if (clipText !== null && clipText !== '') {
-    applyScratchPasteFromText(targetSheet, clipText, clipHtml);
+  const hasHtmlTable = Boolean(clipHtml && /<table[\s>]/i.test(clipHtml));
+  if ((clipText !== null && clipText !== '') || hasHtmlTable) {
+    applyScratchPasteFromText(targetSheet, clipText || '', clipHtml, { transpose });
     if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
   } else {
     showToast('Allow clipboard read permission when prompted, or press Ctrl+V to paste.', 'info');
   }
+}
+
+function transposeScratchSelection(sheetName, range) {
+  if (!workbook || !sheetName || sheetName === DAILY_TRACKER_WS_TAB || !range) return 0;
+  const ws = workbook.getWorksheet(sheetName);
+  if (!ws) return 0;
+
+  const effRange = resolveEffectiveScratchCopyRange(ws, range);
+  const rowCount = effRange.maxRow - effRange.minRow + 1;
+  const colCount = effRange.maxCol - effRange.minCol + 1;
+  if (rowCount * colCount <= 1) {
+    showToast('Select 2 or more cells to transpose.', 'info');
+    return 0;
+  }
+
+  const srcGrid = [];
+  for (let r = effRange.minRow; r <= effRange.maxRow; r++) {
+    const rowItems = [];
+    for (let c = effRange.minCol; c <= effRange.maxCol; c++) {
+      const info = extractScratchCellInfo(ws, r, c);
+      rowItems.push({
+        srcR: r,
+        srcC: c,
+        rawEdit: info.rawEdit,
+        isFormula: info.isFormula,
+        styleSnap: captureCellStyleSnapshot(ws, r, c)
+      });
+    }
+    srcGrid.push(rowItems);
+  }
+
+  const edits = [];
+  const writtenCoords = new Set();
+
+  for (let rOff = 0; rOff < rowCount; rOff++) {
+    for (let cOff = 0; cOff < colCount; cOff++) {
+      const destR = effRange.minRow + cOff;
+      const destC = effRange.minCol + rOff;
+      const cellSnap = srcGrid[rOff][cOff];
+      let nextRaw = cellSnap.rawEdit;
+      if (cellSnap.isFormula && nextRaw.startsWith('=')) {
+        nextRaw = shiftFormulaCellReferences(nextRaw, destR - cellSnap.srcR, destC - cellSnap.srcC);
+      }
+      edits.push({
+        r: destR,
+        c: destC,
+        rawText: nextRaw,
+        styleSnap: cellSnap.styleSnap
+      });
+      writtenCoords.add(`${destR}::${destC}`);
+    }
+  }
+
+  for (let r = effRange.minRow; r <= effRange.maxRow; r++) {
+    for (let c = effRange.minCol; c <= effRange.maxCol; c++) {
+      if (!writtenCoords.has(`${r}::${c}`)) {
+        edits.push({
+          r,
+          c,
+          rawText: '',
+          styleSnap: { fill: null, font: null, numFmt: null }
+        });
+      }
+    }
+  }
+
+  scratchClipboardRangeState = null;
+  const nextSelection = {
+    anchorRow: effRange.minRow,
+    anchorCol: effRange.minCol,
+    focusRow: effRange.minRow + colCount - 1,
+    focusCol: effRange.minCol + rowCount - 1
+  };
+  const changed = applyScratchCellChanges(sheetName, edits, {
+    recordUndo: true,
+    selectionAfter: nextSelection
+  });
+  syncScratchFormulaBarFromActiveCell();
+  showToast(
+    `Transposed ${rowCount}×${colCount} → ${colCount}×${rowCount} (${getRangeCoordString(normalizeScratchRangeObj(nextSelection))}).`,
+    'success'
+  );
+  return changed;
 }
 
 // --- EXCEL DEFAULT FILL PALETTE & RIGHT-CLICK CONTEXT MENU ---
@@ -4451,6 +4871,7 @@ function initScratchFillPaletteUI() {
 
   syncScratchFillIndicatorUI();
   syncScratchStripedRowsUI();
+  syncScratchAutoIncrementUI();
 }
 
 function openScratchContextMenuAt(clientX, clientY) {
@@ -4458,6 +4879,10 @@ function openScratchContextMenuAt(clientX, clientY) {
   const range = getScratchSelectionRange(activeWorkspaceTab);
   if (scratchCtxRangeLabel) {
     scratchCtxRangeLabel.textContent = `Selection • ${getRangeCoordString(range)}`;
+  }
+  const transposeSelBtn = scratchContextMenu.querySelector('[data-ctx-action="transpose-selection"]');
+  if (transposeSelBtn) {
+    transposeSelBtn.disabled = range.cellCount <= 1;
   }
 
   scratchContextMenu.style.display = 'block';
@@ -4473,7 +4898,7 @@ function openScratchContextMenuAt(clientX, clientY) {
 
 // --- DATA TO COLUMNS (TEXT TO COLUMNS) WIZARD & ENGINE ---
 function splitScratchLineByDelimiters(rawText, config) {
-  const str = String(rawText ?? '');
+  const str = String(rawText ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const delims = Array.isArray(config.delims)
     ? config.delims.filter(d => typeof d === 'string' && d.length > 0).sort((a, b) => b.length - a.length)
     : [];
@@ -4482,7 +4907,7 @@ function splitScratchLineByDelimiters(rawText, config) {
   }
 
   const quoteCount = (str.match(/"/g) || []).length;
-  const allowQuotedFields = quoteCount >= 2 && quoteCount % 2 === 0;
+  const allowQuotedFields = !delims.includes('\n') && quoteCount >= 2 && quoteCount % 2 === 0;
   const tokens = [];
   let current = '';
   let inQuotes = false;
@@ -4547,18 +4972,23 @@ function getActiveTextToColumnsConfig() {
   if (chkTtcPipe && chkTtcPipe.checked) delims.push('|');
   if (chkTtcHyphen && chkTtcHyphen.checked) delims.push('-');
   if (chkTtcSpace && chkTtcSpace.checked) delims.push(' ');
+  if (chkTtcNewline && chkTtcNewline.checked) delims.push('\n');
   if (chkTtcOther && chkTtcOther.checked && ttcOtherInput && ttcOtherInput.value.length > 0) {
     delims.push(ttcOtherInput.value);
   }
   return {
     delims,
     trim: Boolean(!chkTtcTrim || chkTtcTrim.checked),
-    mergeConsecutive: Boolean(chkTtcConsecutive && chkTtcConsecutive.checked)
+    mergeConsecutive: Boolean(chkTtcConsecutive && chkTtcConsecutive.checked),
+    direction: (radTtcDown && radTtcDown.checked) ? 'down' : 'across'
   };
 }
 
 function autoDetectDelimitersForSamples(samples) {
-  const joined = samples.slice(0, 15).join('\n');
+  const sampleSlice = Array.isArray(samples) ? samples.slice(0, 15) : [];
+  const hasNewline = sampleSlice.some(s => /[\r\n]/.test(String(s || '')));
+  const hasBlankLines = hasNewline && sampleSlice.some(s => /\r?\n[ \t]*\r?\n/.test(String(s || '')));
+  const joined = sampleSlice.join('\n');
   const hasTab = joined.includes('\t');
   const hasComma = joined.includes(',');
   const hasPipe = joined.includes('|');
@@ -4571,10 +5001,20 @@ function autoDetectDelimitersForSamples(samples) {
   if (chkTtcPipe) chkTtcPipe.checked = false;
   if (chkTtcHyphen) chkTtcHyphen.checked = false;
   if (chkTtcSpace) chkTtcSpace.checked = false;
+  if (chkTtcNewline) chkTtcNewline.checked = false;
   if (chkTtcOther) chkTtcOther.checked = false;
   if (chkTtcConsecutive) chkTtcConsecutive.checked = false;
+  if (radTtcAcross) radTtcAcross.checked = true;
+  if (radTtcDown) radTtcDown.checked = false;
 
-  if (hasTab) {
+  if (hasNewline) {
+    if (chkTtcNewline) chkTtcNewline.checked = true;
+    if (hasBlankLines && chkTtcConsecutive) chkTtcConsecutive.checked = true;
+    if (sampleSlice.length === 1 && radTtcDown) {
+      radTtcDown.checked = true;
+      if (radTtcAcross) radTtcAcross.checked = false;
+    }
+  } else if (hasTab) {
     if (chkTtcTab) chkTtcTab.checked = true;
   } else if (hasComma) {
     if (chkTtcComma) chkTtcComma.checked = true;
@@ -4606,10 +5046,81 @@ function renderTextToColumnsPreview() {
   if (!ws) return;
 
   const config = getActiveTextToColumnsConfig();
+  const isDown = config.direction === 'down';
+  const colLetter = colIndexToExcelLetter(col);
+
+  if (ttcSubtitle) {
+    ttcSubtitle.textContent = isDown
+      ? `Splitting ${sourceRows.length} non-empty cell${sourceRows.length === 1 ? '' : 's'} from Column ${colLetter} downward into consecutive rows`
+      : `Splitting ${sourceRows.length} non-empty cell${sourceRows.length === 1 ? '' : 's'} from Column ${colLetter} into adjacent columns to the right`;
+  }
+  if (btnConfirmTextToColumns) {
+    btnConfirmTextToColumns.textContent = isDown ? 'Split into Rows' : 'Split into Columns';
+  }
+
   if (config.delims.length === 0) {
-    ttcPreviewBox.innerHTML = `<div class="ttc-preview-empty">Select at least one delimiter above to preview split columns.</div>`;
+    ttcPreviewBox.innerHTML = `<div class="ttc-preview-empty">Select at least one delimiter above to preview split ${isDown ? 'rows' : 'columns'}.</div>`;
     if (ttcOverwriteBanner) ttcOverwriteBanner.style.display = 'none';
     if (btnConfirmTextToColumns) btnConfirmTextToColumns.disabled = true;
+    return;
+  }
+
+  if (btnConfirmTextToColumns) {
+    btnConfirmTextToColumns.disabled = false;
+  }
+
+  if (isDown) {
+    const flatParts = [];
+    sourceRows.forEach(item => {
+      splitScratchLineByDelimiters(item.raw, config).forEach(part => {
+        flatParts.push(part);
+      });
+    });
+
+    const startRow = sourceRows[0].r;
+    const sourceRowSet = new Set(sourceRows.map(s => s.r));
+    let overwriteCount = 0;
+    let firstOverwrittenRow = 0;
+    let lastOverwrittenRow = 0;
+
+    for (let i = 0; i < flatParts.length; i++) {
+      const targetR = startRow + i;
+      if (sourceRowSet.has(targetR)) continue;
+      const existingDisp = extractScratchCellInfo(ws, targetR, col).display.trim();
+      if (existingDisp !== '') {
+        overwriteCount++;
+        if (!firstOverwrittenRow) firstOverwrittenRow = targetR;
+        lastOverwrittenRow = targetR;
+      }
+    }
+
+    if (ttcOverwriteBanner) {
+      if (overwriteCount > 0) {
+        const rowSpanLabel = firstOverwrittenRow === lastOverwrittenRow
+          ? `Row ${firstOverwrittenRow}`
+          : `Rows ${firstOverwrittenRow}–${lastOverwrittenRow}`;
+        ttcOverwriteBanner.textContent = `Heads up: Splitting down will overwrite ${overwriteCount} existing non-empty cell${overwriteCount === 1 ? '' : 's'} in Column ${colLetter} (${rowSpanLabel}). You can undo anytime with Ctrl+Z.`;
+        ttcOverwriteBanner.style.display = 'block';
+      } else {
+        ttcOverwriteBanner.style.display = 'none';
+      }
+    }
+
+    if (ttcPreviewTitle) {
+      ttcPreviewTitle.textContent = `Data Preview (${sourceRows.length} cell${sourceRows.length === 1 ? '' : 's'} → ${flatParts.length} row${flatParts.length === 1 ? '' : 's'} in Col ${colLetter})`;
+    }
+
+    const previewLimit = Math.min(12, flatParts.length);
+    const headHtml = `<tr><th class="ttc-row-num-col">#</th><th>Col ${colLetter}</th></tr>`;
+    const bodyRows = [];
+    for (let i = 0; i < previewLimit; i++) {
+      const val = flatParts[i] !== undefined ? flatParts[i] : '';
+      bodyRows.push(`<tr><td class="ttc-row-num-col">${startRow + i}</td><td title="${escapeHtml(val)}">${escapeHtml(val)}</td></tr>`);
+    }
+    if (flatParts.length > previewLimit) {
+      bodyRows.push(`<tr><td class="ttc-row-num-col">…</td><td style="color:var(--text-muted);">+${flatParts.length - previewLimit} more row(s)</td></tr>`);
+    }
+    ttcPreviewBox.innerHTML = `<table class="ttc-preview-table"><thead>${headHtml}</thead><tbody>${bodyRows.join('')}</tbody></table>`;
     return;
   }
 
@@ -4619,10 +5130,6 @@ function renderTextToColumnsPreview() {
     if (parts.length > maxCols) maxCols = parts.length;
     return { r: item.r, parts };
   });
-
-  if (btnConfirmTextToColumns) {
-    btnConfirmTextToColumns.disabled = false;
-  }
 
   // Check if splitting into adjacent columns (col + 1 .. col + maxCols - 1) overwrites existing non-empty cells
   let overwriteCount = 0;
@@ -4758,6 +5265,52 @@ function executeTextToColumnsSplit() {
   const { sheetName, col, minRow, maxRow, sourceRows } = activeTextToColumnsState;
   const config = getActiveTextToColumnsConfig();
   if (config.delims.length === 0) return;
+
+  if (config.direction === 'down') {
+    const flatParts = [];
+    sourceRows.forEach(item => {
+      splitScratchLineByDelimiters(item.raw, config).forEach(part => {
+        flatParts.push(part);
+      });
+    });
+
+    const startRow = sourceRows[0].r;
+    const edits = flatParts.map((val, idx) => ({
+      r: startRow + idx,
+      c: col,
+      rawText: val
+    }));
+
+    const endWrittenRow = startRow + flatParts.length - 1;
+    sourceRows.forEach(item => {
+      if (item.r > endWrittenRow) {
+        edits.push({ r: item.r, c: col, rawText: '' });
+      }
+    });
+
+    const endRow = startRow + Math.max(1, flatParts.length) - 1;
+    const nextSelection = {
+      anchorRow: startRow,
+      anchorCol: col,
+      focusRow: endRow,
+      focusCol: col
+    };
+
+    closeTextToColumnsModal();
+    applyScratchCellChanges(sheetName, edits, {
+      recordUndo: true,
+      selectionAfter: nextSelection
+    });
+
+    showToast(
+      `Split ${sourceRows.length} cell${sourceRows.length === 1 ? '' : 's'} down into ${flatParts.length} row${flatParts.length === 1 ? '' : 's'} (${getRangeCoordString(normalizeScratchRangeObj(nextSelection))}).`,
+      'success'
+    );
+    if (scratchGridWrap) {
+      scratchGridWrap.focus({ preventScroll: true });
+    }
+    return;
+  }
 
   const edits = [];
   let maxSplitCols = 1;
@@ -5508,6 +6061,18 @@ if (chkScratchStripedRows) {
       localStorage.setItem(SCRATCH_STRIPED_STORAGE_KEY, String(scratchStripedRowsEnabled));
     } catch (_) { /* ignore */ }
     syncScratchStripedRowsUI();
+    if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
+  });
+}
+
+if (chkScratchAutoIncrement) {
+  chkScratchAutoIncrement.addEventListener('change', () => {
+    scratchAutoIncrementEnabled = Boolean(chkScratchAutoIncrement.checked);
+    try {
+      localStorage.setItem(SCRATCH_AUTO_INCREMENT_STORAGE_KEY, String(scratchAutoIncrementEnabled));
+    } catch (_) { /* ignore */ }
+    syncScratchAutoIncrementUI();
+    if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
   });
 }
 
@@ -5607,7 +6172,7 @@ if (scratchAutoFilterForm) {
 }
 
 // Data to Columns Modal Listeners
-[chkTtcComma, chkTtcTab, chkTtcSemicolon, chkTtcPipe, chkTtcHyphen, chkTtcSpace, chkTtcOther, chkTtcTrim, chkTtcConsecutive].forEach(el => {
+[chkTtcComma, chkTtcTab, chkTtcSemicolon, chkTtcPipe, chkTtcHyphen, chkTtcSpace, chkTtcNewline, chkTtcOther, chkTtcTrim, chkTtcConsecutive, radTtcAcross, radTtcDown].forEach(el => {
   if (el) {
     el.addEventListener('change', renderTextToColumnsPreview);
   }
@@ -5670,6 +6235,13 @@ if (scratchContextMenu) {
         break;
       case 'paste':
         handleScratchContextPaste();
+        break;
+      case 'paste-transpose':
+        handleScratchContextPaste({ transpose: true });
+        break;
+      case 'transpose-selection':
+        transposeScratchSelection(activeWorkspaceTab, range);
+        if (scratchGridWrap) scratchGridWrap.focus({ preventScroll: true });
         break;
       case 'text-to-columns':
         openTextToColumnsModal();
@@ -6373,17 +6945,45 @@ if (scratchGridWrap) {
   });
 
   // Multi-Cell TSV / Excel / HTML Clipboard Paste Handler (Ctrl+V + 1-Cell Repeat-Fill)
+  function isScratchPasteBlockedByInputEl(el) {
+    if (!el || !el.tagName) return false;
+    if (el.isContentEditable) return true;
+    const tag = el.tagName.toUpperCase();
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (tag === 'INPUT') {
+      const type = String(el.type || 'text').toLowerCase();
+      return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type);
+    }
+    return false;
+  }
+
+  function handleScratchGridPasteEvent(e) {
+    const cb = e.clipboardData || window.clipboardData;
+    if (!cb) return false;
+    const text = cb.getData('text/plain');
+    const html = cb.getData('text/html') || '';
+    const hasHtmlTable = Boolean(html && /<table[\s>]/i.test(html));
+    if ((text === undefined || text === null || text === '') && !hasHtmlTable) return false;
+    e.preventDefault();
+
+    applyScratchPasteFromText(activeWorkspaceTab, text || '', html);
+    return true;
+  }
+
   scratchGridWrap.addEventListener('paste', (e) => {
     if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
     if (scratchInlineEditState) return; // Let inline editor handle single-cell text paste
+    handleScratchGridPasteEvent(e);
+  });
 
-    const cb = e.clipboardData || window.clipboardData;
-    const text = cb.getData('text/plain');
-    const html = cb.getData('text/html') || '';
-    if (text === undefined || text === null || text === '') return;
-    e.preventDefault();
-
-    applyScratchPasteFromText(activeWorkspaceTab, text, html);
+  // Document-level paste fallback when Scratch Sheet is active but focus slipped onto toolbar/body
+  document.addEventListener('paste', (e) => {
+    if (e.defaultPrevented) return;
+    if (activeWorkspaceTab === DAILY_TRACKER_WS_TAB || !workbook) return;
+    if (scratchInlineEditState) return;
+    if (typeof document.querySelector === 'function' && document.querySelector('.modal-backdrop.open')) return;
+    if (isScratchPasteBlockedByInputEl(e.target) || isScratchPasteBlockedByInputEl(document.activeElement)) return;
+    handleScratchGridPasteEvent(e);
   });
 }
 

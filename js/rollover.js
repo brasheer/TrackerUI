@@ -384,24 +384,43 @@ function buildConsolidatedRolloverItem(entries, baseRow, targetTabName = '') {
 
   const fallbackRefTab = (entries[entries.length - 1] && entries[entries.length - 1].sheetName) || baseRow.sheetName;
   const overdueMetrics = typeof evaluateRequestOverdueMetrics === 'function'
-    ? evaluateRequestOverdueMetrics(entries, targetTabName || fallbackRefTab)
-    : { ageDays: 0, carryCount: entries.length, firstSheet: fallbackRefTab, qualifiesForAutoOverdue: false };
+    ? evaluateRequestOverdueMetrics(entries, targetTabName || fallbackRefTab, resolvedCustomStatus)
+    : { ageDays: 0, carryCount: entries.length, firstSheet: fallbackRefTab, isWaitingOrHold: false, qualifiesForAutoOverdue: false };
   const isActive = typeof isRolloverActiveStatus === 'function'
     ? isRolloverActiveStatus(resolvedCustomStatus)
     : !isCompletedStatus(resolvedCustomStatus);
+  const isWaitingOrHold = typeof isWaitingOrHoldStatus === 'function' && isWaitingOrHoldStatus(resolvedCustomStatus);
+  const qualifiesOverdue = Boolean(isActive && !isWaitingOrHold && overdueMetrics.qualifiesForAutoOverdue);
   const autoMutatedToOverdue = Boolean(
-    isActive &&
-    overdueMetrics.qualifiesForAutoOverdue &&
+    qualifiesOverdue &&
     typeof isOverdueStatus === 'function' &&
     !isOverdueStatus(resolvedCustomStatus)
   );
-  const effectiveStatus = (isActive && overdueMetrics.qualifiesForAutoOverdue)
+  const targetTime = targetTabName ? parseDateTab(targetTabName) : 0;
+  const baseTime = baseRow && baseRow.sheetName ? parseDateTab(baseRow.sheetName) : 0;
+  const isCarryingForwardToLaterTab = Boolean(
+    targetTabName &&
+    (!baseRow.sheetName || baseRow.sheetName !== targetTabName) &&
+    (!targetTime || !baseTime || targetTime > baseTime)
+  );
+  const autoProgressedFromNew = Boolean(
+    isActive &&
+    !qualifiesOverdue &&
+    !isWaitingOrHold &&
+    typeof isNewStatus === 'function' &&
+    isNewStatus(resolvedCustomStatus) &&
+    isCarryingForwardToLaterTab
+  );
+  const nextInProgressLabel = typeof resolveInProgressStatusLabel === 'function'
+    ? resolveInProgressStatusLabel()
+    : 'In Progress';
+  const effectiveStatus = qualifiesOverdue
     ? 'Overdue'
-    : resolvedCustomStatus;
+    : (autoProgressedFromNew ? nextInProgressLabel : resolvedCustomStatus);
   const isOverdueFlag = Boolean(
-    isActive && (
+    isActive && !isWaitingOrHold && (
       (typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveStatus)) ||
-      overdueMetrics.qualifiesForAutoOverdue
+      qualifiesOverdue
     )
   );
 
@@ -467,6 +486,7 @@ function buildConsolidatedRolloverItem(entries, baseRow, targetTabName = '') {
     _ageDays: overdueMetrics.ageDays,
     _carryCount: overdueMetrics.carryCount,
     _autoOverdue: autoMutatedToOverdue,
+    _autoProgressedFromNew: autoProgressedFromNew,
     _previousStatus: resolvedCustomStatus,
     _isOverdue: isOverdueFlag
   };
@@ -659,11 +679,13 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         : !isCompletedStatus(targetRow.status);
       const isTargetComplete = !targetIsActive;
       const targetOverdueMetrics = typeof evaluateRequestOverdueMetrics === 'function'
-        ? evaluateRequestOverdueMetrics([...group.entries, targetRow], targetTabName)
-        : { qualifiesForAutoOverdue: false, ageDays: 0, carryCount: group.entries.length + 1 };
+        ? evaluateRequestOverdueMetrics([...group.entries, targetRow], targetTabName, targetRow.status)
+        : { qualifiesForAutoOverdue: false, ageDays: 0, carryCount: group.entries.length + 1, isWaitingOrHold: false };
+      const targetIsWaiting = typeof isWaitingOrHoldStatus === 'function' && isWaitingOrHoldStatus(targetRow.status);
       const autoOverdueOnTarget = Boolean(
         inSelectedSourceScope &&
         targetIsActive &&
+        !targetIsWaiting &&
         targetOverdueMetrics.qualifiesForAutoOverdue &&
         typeof isOverdueStatus === 'function' &&
         !isOverdueStatus(targetRow.status)
@@ -782,10 +804,10 @@ function updateRolloverModalPreview() {
   if (rolloverSourceDesc) {
     if (rolloverSourceMode === 'previous') {
       rolloverSourceDesc.textContent = immediatePrev
-        ? `Carries forward unfinished requests from ${immediatePrev} only (including Waiting / On Hold; Complete / Closed excluded). Items > 5 days old or carried 7+ times auto-update to Overdue.`
+        ? `Carries forward unfinished requests from ${immediatePrev} only (Complete / Closed excluded). "New" transitions to "In Progress", Waiting / On Hold stay preserved (exempt from Overdue), and other items > 5 days old or carried 7+ times auto-update to Overdue.`
         : `No daily sheet exists prior to ${targetVal}. Create or select a later date, or include future-dated tabs below.`;
     } else {
-      rolloverSourceDesc.textContent = `Scans all ${priorTabs.length} daily tab(s) prior to ${targetVal} chronologically (including Waiting / On Hold; Complete / Closed excluded). Items > 5 days old or carried 7+ times auto-update to Overdue.`;
+      rolloverSourceDesc.textContent = `Scans all ${priorTabs.length} daily tab(s) prior to ${targetVal} chronologically (Complete / Closed excluded). "New" transitions to "In Progress", Waiting / On Hold stay preserved (exempt from Overdue), and other items > 5 days old or carried 7+ times auto-update to Overdue.`;
     }
   }
 
@@ -838,7 +860,9 @@ function updateRolloverModalPreview() {
         : 'badge-pending';
       const badgeLabel = item._autoOverdue
         ? `⚠️ ${escapeHtml(item._previousStatus)} → Overdue (${item._ageDays}d / ${item._carryCount}x)`
-        : escapeHtml(item.status);
+        : (item._autoProgressedFromNew
+            ? `${escapeHtml(item._previousStatus)} → ${escapeHtml(item.status)}`
+            : escapeHtml(item.status));
       html += `
         <div class="preview-item${statusHighlightClass}">
           <div class="preview-item-main">
@@ -1012,6 +1036,7 @@ rolloverForm.addEventListener('submit', async (e) => {
     let alreadyPresentCount = existingTargetList.length;
     let reopenedCount = 0;
     let autoOverdueCount = 0;
+    let autoProgressedCount = 0;
     let notesSyncedCount = 0;
 
     for (const item of itemsToCarry) {
@@ -1028,6 +1053,12 @@ rolloverForm.addEventListener('submit', async (e) => {
         addedCount++;
         if (item._autoOverdue) {
           autoOverdueCount++;
+        }
+        if (item._autoProgressedFromNew) {
+          autoProgressedCount++;
+          if (typeof ensureStatusOptionExists === 'function') {
+            ensureStatusOptionExists(item.status);
+          }
         }
         if (typeof isOverdueStatus === 'function' && isOverdueStatus(item.status) && typeof ensureStatusOptionExists === 'function') {
           ensureStatusOptionExists('Overdue');
@@ -1073,6 +1104,7 @@ rolloverForm.addEventListener('submit', async (e) => {
       const detailsParts = [`${alreadyPresentCount} already present`];
       if (notesSyncedCount > 0) detailsParts.push(`${notesSyncedCount} enriched with prior notes`);
       if (reopenedCount > 0) detailsParts.push(`${reopenedCount} reopened`);
+      if (autoProgressedCount > 0) detailsParts.push(`${autoProgressedCount} New → In Progress`);
       if (autoOverdueCount > 0) detailsParts.push(`${autoOverdueCount} marked Overdue`);
       const actionLabel = createdNewSheet ? `Created & synced ${targetTabName}` : `Synced ${targetTabName}`;
       const msg = `${actionLabel}: Rolled over ${addedCount} unique request(s) (${detailsParts.join(', ')}).`;

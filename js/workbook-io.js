@@ -3658,22 +3658,48 @@ if (useDevMockAccounts) {
 populateReferenceControls();
 updateDevMockAccountsUI();
 
+function syncAccountAuxiliaryFields(bidderInputEl, yardInputEl, match, prevAccount, accountChanged) {
+  if (bidderInputEl) {
+    if (match.bidder) {
+      if (!bidderInputEl.value.trim() || accountChanged) {
+        bidderInputEl.value = match.bidder;
+      }
+    } else if (
+      accountChanged &&
+      prevAccount &&
+      prevAccount.bidder &&
+      bidderInputEl.value.trim().toLowerCase() === prevAccount.bidder.trim().toLowerCase()
+    ) {
+      bidderInputEl.value = '';
+    }
+  }
+  if (yardInputEl && match.yard) {
+    const currentYardNorm = yardInputEl.value.trim().toLowerCase();
+    const prevYardNorm = prevAccount && prevAccount.yard ? prevAccount.yard.trim().toLowerCase() : '';
+    if (!currentYardNorm || (accountChanged && prevYardNorm && currentYardNorm === prevYardNorm)) {
+      yardInputEl.value = match.yard;
+    }
+  }
+}
+
 function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl, bidderInputEl, yardInputEl = null) {
   if (!brokerInputEl || !Array.isArray(masterAccountsMap) || masterAccountsMap.length === 0) return;
   const typedBroker = brokerInputEl.value.trim().toLowerCase();
   if (!typedBroker) return;
 
-  const match = masterAccountsMap.find(m => m.broker && m.broker.toLowerCase() === typedBroker);
+  const match = masterAccountsMap.find(m => m.broker && m.broker.trim().toLowerCase() === typedBroker);
   if (match) {
-    if (masterInputEl && !masterInputEl.value.trim() && match.master) {
+    const currentMasterNorm = masterInputEl ? masterInputEl.value.trim().toLowerCase() : '';
+    const matchMasterNorm = String(match.master || '').trim().toLowerCase();
+    const accountChanged = Boolean(matchMasterNorm && currentMasterNorm !== matchMasterNorm);
+    const prevAccount = currentMasterNorm
+      ? masterAccountsMap.find(m => m.master && m.master.trim().toLowerCase() === currentMasterNorm)
+      : null;
+
+    if (masterInputEl && match.master) {
       masterInputEl.value = match.master;
     }
-    if (bidderInputEl && !bidderInputEl.value.trim() && match.bidder) {
-      bidderInputEl.value = match.bidder;
-    }
-    if (yardInputEl && !yardInputEl.value.trim() && match.yard) {
-      yardInputEl.value = match.yard;
-    }
+    syncAccountAuxiliaryFields(bidderInputEl, yardInputEl, match, prevAccount, accountChanged);
   }
 }
 
@@ -3682,17 +3708,19 @@ function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl, bidderIn
   const typedMaster = masterInputEl.value.trim().toLowerCase();
   if (!typedMaster) return;
 
-  const match = masterAccountsMap.find(m => m.master && m.master.toLowerCase() === typedMaster);
+  const match = masterAccountsMap.find(m => m.master && m.master.trim().toLowerCase() === typedMaster);
   if (match) {
-    if (brokerInputEl && !brokerInputEl.value.trim() && match.broker) {
+    const currentBrokerNorm = brokerInputEl ? brokerInputEl.value.trim().toLowerCase() : '';
+    const matchBrokerNorm = String(match.broker || '').trim().toLowerCase();
+    const accountChanged = Boolean(matchBrokerNorm && currentBrokerNorm !== matchBrokerNorm);
+    const prevAccount = currentBrokerNorm
+      ? masterAccountsMap.find(m => m.broker && m.broker.trim().toLowerCase() === currentBrokerNorm)
+      : null;
+
+    if (brokerInputEl && match.broker) {
       brokerInputEl.value = match.broker;
     }
-    if (bidderInputEl && !bidderInputEl.value.trim() && match.bidder) {
-      bidderInputEl.value = match.bidder;
-    }
-    if (yardInputEl && !yardInputEl.value.trim() && match.yard) {
-      yardInputEl.value = match.yard;
-    }
+    syncAccountAuxiliaryFields(bidderInputEl, yardInputEl, match, prevAccount, accountChanged);
   }
 }
 
@@ -4226,10 +4254,17 @@ async function saveWorkbookToDiskInternal() {
   }
 
   // 1. Primary Working File Write (with IndexedDB Fail-Safe Staging when Desktop Excel locks the file)
+  if (typeof window !== 'undefined') {
+    window.__trackerDiskWriteInFlight = true;
+    window.__lastTrackerWorkbookWriteAt = Date.now();
+  }
   try {
     const writable = await workingFileHandle.createWritable();
     await writable.write(buffer);
     await writable.close();
+    if (typeof window !== 'undefined') {
+      window.__lastTrackerWorkbookWriteAt = Date.now();
+    }
 
     try {
       const postSaveFile = await workingFileHandle.getFile();
@@ -4275,11 +4310,27 @@ async function saveWorkbookToDiskInternal() {
       variant: 'danger'
     });
     return false;
+  } finally {
+    if (typeof window !== 'undefined') {
+      window.__trackerDiskWriteInFlight = false;
+      window.__lastTrackerWorkbookWriteAt = Date.now();
+    }
   }
 
   // 2. Dual-Write Mirroring to (VIEW ONLY).xlsx with Auto-Retry & Manual Retry fallback
-  const mirrorOk = await attemptMirrorWrite(buffer, false);
-  return mirrorOk ? true : 'mirror-locked';
+  if (typeof window !== 'undefined') {
+    window.__trackerDiskWriteInFlight = true;
+    window.__lastTrackerWorkbookWriteAt = Date.now();
+  }
+  try {
+    const mirrorOk = await attemptMirrorWrite(buffer, false);
+    return mirrorOk ? true : 'mirror-locked';
+  } finally {
+    if (typeof window !== 'undefined') {
+      window.__trackerDiskWriteInFlight = false;
+      window.__lastTrackerWorkbookWriteAt = Date.now();
+    }
+  }
 }
 
 function saveWorkbookToDisk() {

@@ -153,6 +153,79 @@ function isLocalhostDevEnvironment() {
     window.location.protocol === 'file:'
   );
 }
+
+// Guard against VS Code Live Server auto-reloading the browser page when TrackerUI
+// auto-saves a working/test .xlsx file inside the project workspace (e.g. assets/Testing/*.xlsx).
+if (typeof window !== 'undefined' && isLocalhostDevEnvironment() && typeof window.WebSocket === 'function') {
+  const NativeWebSocket = window.WebSocket;
+  const shouldSuppressLiveServerReload = () => {
+    const now = Date.now();
+    if (window.__trackerDiskWriteInFlight) return true;
+    if (typeof window.__lastTrackerWorkbookWriteAt === 'number' && now - window.__lastTrackerWorkbookWriteAt < 5000) {
+      return true;
+    }
+    if (typeof window.__lastTrackerScratchEditAt === 'number' && now - window.__lastTrackerScratchEditAt < 6000) {
+      return true;
+    }
+    return false;
+  };
+
+  function GuardedWebSocket(url, protocols) {
+    const wsInstance = protocols !== undefined
+      ? new NativeWebSocket(url, protocols)
+      : new NativeWebSocket(url);
+    const urlStr = String(url || '');
+    if (/\/ws(?:\?|$)/i.test(urlStr)) {
+      const origAddEventListener = wsInstance.addEventListener.bind(wsInstance);
+      wsInstance.addEventListener = function (type, listener, options) {
+        if (type === 'message' && typeof listener === 'function') {
+          const wrapped = function (evt) {
+            if (evt && evt.data === 'reload' && shouldSuppressLiveServerReload()) {
+              console.info('[TrackerUI] Suppressed Live Server page reload triggered by in-workspace .xlsx auto-save.');
+              return;
+            }
+            return listener.call(this, evt);
+          };
+          return origAddEventListener(type, wrapped, options);
+        }
+        return origAddEventListener(type, listener, options);
+      };
+
+      let assignedOnMessage = null;
+      Object.defineProperty(wsInstance, 'onmessage', {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return assignedOnMessage;
+        },
+        set(fn) {
+          if (assignedOnMessage) {
+            wsInstance.removeEventListener('message', assignedOnMessage);
+          }
+          if (typeof fn !== 'function') {
+            assignedOnMessage = null;
+            return;
+          }
+          assignedOnMessage = function (evt) {
+            if (evt && evt.data === 'reload' && shouldSuppressLiveServerReload()) {
+              console.info('[TrackerUI] Suppressed Live Server page reload triggered by in-workspace .xlsx auto-save.');
+              return;
+            }
+            return fn.call(this, evt);
+          };
+          origAddEventListener('message', assignedOnMessage);
+        }
+      });
+    }
+    return wsInstance;
+  }
+  GuardedWebSocket.prototype = NativeWebSocket.prototype;
+  GuardedWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+  GuardedWebSocket.OPEN = NativeWebSocket.OPEN;
+  GuardedWebSocket.CLOSING = NativeWebSocket.CLOSING;
+  GuardedWebSocket.CLOSED = NativeWebSocket.CLOSED;
+  window.WebSocket = GuardedWebSocket;
+}
 const storedDevMockPref = localStorage.getItem(DEV_MOCK_STORAGE_KEY);
 let useDevMockAccounts = storedDevMockPref !== null
   ? storedDevMockPref === 'true'
@@ -299,6 +372,18 @@ function isOverdueStatus(status) {
   return norm === 'overdue' || /^overdue\b/i.test(norm);
 }
 
+function isNewStatus(status) {
+  return String(status || '').trim().toLowerCase() === 'new';
+}
+
+function resolveInProgressStatusLabel() {
+  if (typeof validationStatuses !== 'undefined' && Array.isArray(validationStatuses)) {
+    const match = validationStatuses.find(s => String(s || '').trim().toLowerCase() === 'in progress');
+    if (match) return String(match).trim();
+  }
+  return 'In Progress';
+}
+
 function isCompletedStatus(status) {
   const norm = String(status || '').trim().toLowerCase();
   if (!norm) return false;
@@ -340,27 +425,42 @@ function getStatusBadgeClass(status) {
   return 'badge-pending';
 }
 
-function evaluateRequestOverdueMetrics(entries, referenceTabOrTime = null) {
+function evaluateRequestOverdueMetrics(entries, referenceTabOrTime = null, currentStatus = '') {
   const list = Array.isArray(entries) ? entries.filter(Boolean) : [];
   let firstTime = 0;
   let firstSheet = '';
   let latestTime = 0;
+  let latestEntryStatus = '';
   const distinctSheets = new Set();
 
   list.forEach(entry => {
-    if (!entry || !entry.sheetName) return;
-    distinctSheets.add(entry.sheetName);
-    const t = parseDateTab(entry.sheetName);
+    if (!entry) return;
+    if (entry.sheetName) {
+      distinctSheets.add(entry.sheetName);
+    }
+    const t = entry.sheetName ? parseDateTab(entry.sheetName) : 0;
     if (t > 0) {
       if (!firstTime || t < firstTime) {
         firstTime = t;
         firstSheet = entry.sheetName;
       }
-      if (t > latestTime) {
+      if (t >= latestTime) {
         latestTime = t;
+        if (entry.status && String(entry.status).trim() !== '') {
+          latestEntryStatus = String(entry.status).trim();
+        }
       }
+    } else if (!latestTime && entry.status && String(entry.status).trim() !== '') {
+      latestEntryStatus = String(entry.status).trim();
     }
   });
+
+  if (!latestEntryStatus && list.length > 0) {
+    const tail = list[list.length - 1];
+    if (tail && tail.status) {
+      latestEntryStatus = String(tail.status).trim();
+    }
+  }
 
   let refTime = 0;
   if (typeof referenceTabOrTime === 'number' && Number.isFinite(referenceTabOrTime)) {
@@ -377,11 +477,18 @@ function evaluateRequestOverdueMetrics(entries, referenceTabOrTime = null) {
     : 0;
   const carryCount = Math.max(list.length, distinctSheets.size);
 
+  const resolvedStatus = String(currentStatus || latestEntryStatus || '').trim();
+  const isWaitingOrHold = isWaitingOrHoldStatus(resolvedStatus);
+  const qualifiesForAutoOverdue = !isWaitingOrHold && (
+    ageDays > SMART_OVERDUE_MAX_AGE_DAYS || carryCount >= SMART_OVERDUE_MIN_CARRIES
+  );
+
   return {
     ageDays,
     carryCount,
     firstSheet,
-    qualifiesForAutoOverdue: ageDays > SMART_OVERDUE_MAX_AGE_DAYS || carryCount >= SMART_OVERDUE_MIN_CARRIES
+    isWaitingOrHold,
+    qualifiesForAutoOverdue
   };
 }
 
@@ -817,6 +924,7 @@ const scratchActiveSheetBadge = document.getElementById('scratchActiveSheetBadge
 const scratchStatsMeta = document.getElementById('scratchStatsMeta');
 const scratchSaveStateBadge = document.getElementById('scratchSaveStateBadge');
 const chkScratchStripedRows = document.getElementById('chkScratchStripedRows');
+const chkScratchAutoIncrement = document.getElementById('chkScratchAutoIncrement');
 const scratchSearchInput = document.getElementById('scratchSearchInput');
 const scratchSearchMatchCount = document.getElementById('scratchSearchMatchCount');
 const chkScratchFilterRows = document.getElementById('chkScratchFilterRows');
@@ -860,10 +968,13 @@ const chkTtcSemicolon = document.getElementById('chkTtcSemicolon');
 const chkTtcPipe = document.getElementById('chkTtcPipe');
 const chkTtcHyphen = document.getElementById('chkTtcHyphen');
 const chkTtcSpace = document.getElementById('chkTtcSpace');
+const chkTtcNewline = document.getElementById('chkTtcNewline');
 const chkTtcOther = document.getElementById('chkTtcOther');
 const ttcOtherInput = document.getElementById('ttcOtherInput');
 const chkTtcTrim = document.getElementById('chkTtcTrim');
 const chkTtcConsecutive = document.getElementById('chkTtcConsecutive');
+const radTtcAcross = document.getElementById('radTtcAcross');
+const radTtcDown = document.getElementById('radTtcDown');
 const ttcOverwriteBanner = document.getElementById('ttcOverwriteBanner');
 const ttcPreviewTitle = document.getElementById('ttcPreviewTitle');
 const ttcPreviewBox = document.getElementById('ttcPreviewBox');
@@ -1610,7 +1721,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.3';
+const APP_VERSION = 'v1.19.4';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;

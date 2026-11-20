@@ -3828,8 +3828,9 @@ button.ws-app-tab.active:hover {
   box-shadow: none;
 }
 
-/* Striped Rows Toolbar Toggle */
-.scratch-striped-toggle {
+/* Striped Rows & Auto-Increment Toolbar Toggles */
+.scratch-striped-toggle,
+.scratch-autoincrement-toggle {
   margin-left: 0.25rem;
   padding-left: 0.55rem;
   border-left: 1px solid var(--border);
@@ -4148,6 +4149,20 @@ button.ws-app-tab.active:hover {
   flex-wrap: wrap;
   gap: 0.55rem 1.25rem;
   padding-top: 0.58rem;
+}
+
+.ttc-direction-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1.25rem;
+  padding-top: 0.58rem;
+  margin-top: 0.58rem;
+  border-top: 1px solid var(--border);
+}
+
+.ttc-direction-label {
+  margin-bottom: 0;
 }
 
 .ttc-overwrite-banner {
