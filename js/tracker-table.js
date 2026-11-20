@@ -442,7 +442,10 @@ function onActiveSheetChanged() {
   updateSheetStepperState();
   renderSheetTabsBar();
   if (!dockEditingTarget) {
-    setBottomDockNewMode();
+    if (typeof hasUnsavedNewDockDraft === 'function' && hasUnsavedNewDockDraft()) {
+      saveNewDockDraftToStorage();
+    }
+    setBottomDockNewMode(false, { restoreSavedDraft: true });
   }
   renderList();
 }
@@ -477,9 +480,9 @@ function getRowCompositeId(sheetName, rowNumber) {
 
 function getActiveTableColSpan() {
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
-    return 5 + activeSchemaConfig.columns.length;
+    return 4 + activeSchemaConfig.columns.length;
   }
-  return 13;
+  return 12;
 }
 
 function renderTableHeader() {
@@ -488,10 +491,9 @@ function renderTableHeader() {
 
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
     // Reset incompatible sortState if left over from standard schema
-    if (sortState.column && !['date', 'key'].includes(sortState.column) && !sortState.column.startsWith('col_')) {
+    if (sortState.column && !['date', 'key', 'accessed'].includes(sortState.column) && !sortState.column.startsWith('col_')) {
       sortState = { column: null, direction: 'asc' };
     }
-    const trkLetter = colNumberToExcelLetters(activeSchemaConfig.trackingCol || (activeSchemaConfig.columns.length + 1));
     const customThsHtml = activeSchemaConfig.columns.map(c => {
       const sortKey = `col_${c.colIndex}`;
       return `
@@ -510,11 +512,12 @@ function renderTableHeader() {
         <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
           <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
         </th>
-        <th class="sortable-th" data-sort="key" title="Click to sort by Tracking ID">
-          <span>Tracking ID (Col ${escapeHtml(trkLetter)})</span><span class="sort-indicator" data-ind="key">↕</span>
-        </th>
         ${customThsHtml}
-        <th>Actions</th>
+        <th class="sortable-th tracker-actions-th" data-sort="accessed" title="Sort by Last Accessed or Tracking ID">
+          <span class="th-sub-sort" data-sort="accessed" title="Sort by Last Accessed">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span>
+          <span class="th-sep">/</span>
+          <span class="th-sub-sort" data-sort="key" title="Sort by Tracking ID (UUIDv4)">ID<span class="sort-indicator" data-ind="key">↕</span></span>
+        </th>
       </tr>
     `;
     syncSelectAllCheckboxes();
@@ -534,10 +537,7 @@ function renderTableHeader() {
       <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
         <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
       </th>
-      <th class="sortable-th" data-sort="key" title="Click to sort by Tracking ID">
-        <span>Tracking ID (Col K)</span><span class="sort-indicator" data-ind="key">↕</span>
-      </th>
-      <th class="sortable-th" data-sort="subject" title="Click to sort by Subject">
+      <th class="sortable-th tracker-subject-th" data-sort="subject" title="Click to sort by Subject">
         <span>Subject</span><span class="sort-indicator" data-ind="subject">↕</span>
       </th>
       <th class="sortable-th" data-sort="ticket" title="Click to sort by Ticket #">
@@ -565,7 +565,11 @@ function renderTableHeader() {
       <th class="sortable-th" data-sort="status" title="Click to sort by Status">
         <span>Status</span><span class="sort-indicator" data-ind="status">↕</span>
       </th>
-      <th>Actions</th>
+      <th class="sortable-th tracker-actions-th" data-sort="accessed" title="Sort by Last Accessed or Tracking ID">
+        <span class="th-sub-sort" data-sort="accessed" title="Sort by Last Accessed">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span>
+        <span class="th-sep">/</span>
+        <span class="th-sub-sort" data-sort="key" title="Sort by Tracking ID (UUIDv4)">ID<span class="sort-indicator" data-ind="key">↕</span></span>
+      </th>
     </tr>
   `;
   syncSelectAllCheckboxes();
@@ -618,7 +622,8 @@ const SORT_COLUMN_LABELS = {
   yard: 'Yard #',
   lots: 'Lot Numbers',
   notes: 'Action Notes',
-  status: 'Status'
+  status: 'Status',
+  accessed: 'Last Accessed'
 };
 
 function getSortColumnLabel(colKey) {
@@ -774,6 +779,18 @@ function sortRowsList(rows) {
       return primary * dirMultiplier;
     }
 
+    if (col === 'accessed') {
+      const accA = typeof getRowLastAccessedMs === 'function' ? getRowLastAccessedMs(a.key) : 0;
+      const accB = typeof getRowLastAccessedMs === 'function' ? getRowLastAccessedMs(b.key) : 0;
+      if (!accA && !accB) {
+        return parseDateTab(b.sheetName) - parseDateTab(a.sheetName) || (a.rowNumber - b.rowNumber);
+      }
+      if (!accA) return 1;
+      if (!accB) return -1;
+      const diff = accA - accB;
+      return (diff !== 0 ? diff : a.rowNumber - b.rowNumber) * dirMultiplier;
+    }
+
     const valA = getItemSortCellValue(a, col);
     const valB = getItemSortCellValue(b, col);
 
@@ -802,7 +819,8 @@ function updateSortAndFilterUI(matchCount) {
       const thSort = th.dataset.sort;
       const isCompositeMatch =
         (thSort === 'master' && (sortState.column === 'master' || sortState.column === 'bidder')) ||
-        (thSort === 'yard' && (sortState.column === 'yard' || sortState.column === 'lots'));
+        (thSort === 'yard' && (sortState.column === 'yard' || sortState.column === 'lots')) ||
+        (thSort === 'accessed' && (sortState.column === 'accessed' || sortState.column === 'key'));
       const isDirectMatch = thSort === sortState.column;
       th.classList.toggle('sorted-active', isDirectMatch || isCompositeMatch);
     });
@@ -867,6 +885,14 @@ function clearAllSortAndFilters() {
 
 function buildItemSearchHaystack(item) {
   const customParts = item.customValues ? Object.values(item.customValues) : [];
+  let accessedText = '';
+  if (typeof getRowLastAccessedMs === 'function' && typeof formatRowLastAccessedLabel === 'function') {
+    const accMs = getRowLastAccessedMs(item.key);
+    if (accMs > 0) {
+      const fmt = formatRowLastAccessedLabel(accMs);
+      accessedText = `${fmt.short} ${fmt.full}`;
+    }
+  }
   return [
     item.subject,
     item.ticket,
@@ -880,7 +906,8 @@ function buildItemSearchHaystack(item) {
     item.status,
     ...customParts,
     item.key,
-    item.sheetName
+    item.sheetName,
+    accessedText
   ].join(' ').toLowerCase();
 }
 
@@ -998,13 +1025,21 @@ function renderList() {
 
   sorted.forEach((item, idx) => {
     const tr = document.createElement('tr');
+    tr.classList.add('tracker-main-row');
     tr.dataset.sheet = item.sheetName;
     tr.dataset.row = String(item.rowNumber);
+
+    const metaTr = document.createElement('tr');
+    metaTr.classList.add('tracker-meta-row');
+    metaTr.dataset.sheet = item.sheetName;
+    metaTr.dataset.row = String(item.rowNumber);
 
     const compId = getRowCompositeId(item.sheetName, item.rowNumber);
     const isRowChecked = selectedForDelete.has(compId);
     if (isRowChecked) {
-      tr.classList.add(isDeleteMode ? 'selected-for-delete' : 'selected-for-batch');
+      const selCls = isDeleteMode ? 'selected-for-delete' : 'selected-for-batch';
+      tr.classList.add(selCls);
+      metaTr.classList.add(selCls);
     }
     if (
       dockEditingTarget &&
@@ -1012,6 +1047,7 @@ function renderList() {
       dockEditingTarget.rowNumber === item.rowNumber
     ) {
       tr.classList.add('active-editing-row');
+      metaTr.classList.add('active-editing-row');
     }
 
     const normItemKey = String(item.key || '').trim().toLowerCase();
@@ -1050,20 +1086,40 @@ function renderList() {
       );
     if (isRowOverdue) {
       tr.classList.add('overdue-outline-red');
+      metaTr.classList.add('overdue-outline-red');
     } else if (isRowWaiting) {
       tr.classList.add('waiting-outline-purple');
+      metaTr.classList.add('waiting-outline-purple');
     }
 
     const noteText = item.notes || '—';
     const isLongNote = noteText.length > 45 || noteText.includes('\n');
     const shortGuid = item.key.length > 8 ? `${item.key.slice(0, 8)}...` : item.key;
 
-    const rowNumCell = `<th scope="row" class="tracker-row-num-cell" title="Line ${idx + 1} (Excel Row ${item.rowNumber} on ${escapeHtml(item.sheetName)})">${idx + 1}</th>`;
-    const rowCheckboxCell = `<td class="${isDeleteMode ? 'delete-cell' : 'select-cell'}">
+    const rowNumCell = `<th scope="row" rowspan="2" class="tracker-row-num-cell" title="Line ${idx + 1} (Excel Row ${item.rowNumber} on ${escapeHtml(item.sheetName)})">${idx + 1}</th>`;
+    const rowCheckboxCell = `<td rowspan="2" class="${isDeleteMode ? 'delete-cell' : 'select-cell'}">
       <input type="checkbox" class="chk-delete-row" data-comp="${escapeHtml(compId)}" data-key="${escapeHtml(item.key)}" ${isRowChecked ? 'checked' : ''} aria-label="Select request row ${item.rowNumber} on ${escapeHtml(item.sheetName)}">
     </td>`;
-
+    const accessedInfo = (typeof getRowLastAccessedMs === 'function' && typeof formatRowLastAccessedLabel === 'function')
+      ? formatRowLastAccessedLabel(getRowLastAccessedMs(item.key))
+      : { ms: 0, short: '—', full: 'Not accessed yet' };
     const keyActiveClass = isFieldFilterActive('key', item.key) ? ' active-filter-match' : '';
+    const metaBarColSpan = Math.max(1, colSpan - 2);
+    const metaAccessedInner = accessedInfo.ms
+      ? `<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-pill">${escapeHtml(accessedInfo.short)}</span>`
+      : '<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-empty">—</span>';
+    metaTr.innerHTML = `
+      <td colspan="${metaBarColSpan}" class="tracker-meta-bar-cell">
+        <div class="tracker-meta-bar">
+          <span class="key-chip key-chip-compact${keyActiveClass}" title="Click to filter by Tracking ID: ${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
+            🔍 ${escapeHtml(item.key)}
+          </span>
+          <span class="tracker-meta-accessed" data-accessed-key="${escapeHtml(normItemKey)}" title="${escapeHtml(accessedInfo.full)}">
+            ${metaAccessedInner}
+          </span>
+        </div>
+      </td>
+    `;
 
     if (isCustomSchema) {
       const customCellsHtml = activeSchemaConfig.columns.map(c => {
@@ -1132,11 +1188,6 @@ function renderList() {
             ${escapeHtml(item.sheetName)}
           </button>
         </td>
-        <td>
-          <span class="key-chip${keyActiveClass}" title="Click to filter by Tracking ID: ${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
-            🔍 ${escapeHtml(shortGuid)}
-          </span>
-        </td>
         ${customCellsHtml}
         <td>
           <div class="row-actions-group">
@@ -1146,6 +1197,7 @@ function renderList() {
         </td>
       `;
       listBody.appendChild(tr);
+      listBody.appendChild(metaTr);
       return;
     }
 
@@ -1196,12 +1248,7 @@ function renderList() {
           ${escapeHtml(item.sheetName)}
         </button>
       </td>
-      <td>
-        <span class="key-chip${keyActiveClass}" title="Click to filter by Tracking ID: ${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
-          🔍 ${escapeHtml(shortGuid)}
-        </span>
-      </td>
-      <td>${subjectHtml}</td>
+      <td class="tracker-subject-cell">${subjectHtml}</td>
       <td>${ticketHtml}</td>
       <td>${brokerHtml}</td>
       <td class="cell-mono-sm">
@@ -1228,6 +1275,7 @@ function renderList() {
       </td>
     `;
     listBody.appendChild(tr);
+    listBody.appendChild(metaTr);
   });
 
   const shadowRow = createShadowNewRowElement(colSpan, currentSheet);
@@ -1397,17 +1445,22 @@ listBody.addEventListener('change', (e) => {
   if (!compId) return;
 
   const tr = chk.closest('tr');
+  const pairedMetaTr = (tr && tr.nextElementSibling && tr.nextElementSibling.classList.contains('tracker-meta-row'))
+    ? tr.nextElementSibling
+    : null;
   if (chk.checked) {
     selectedForDelete.add(compId);
-    if (tr) {
-      tr.classList.toggle('selected-for-delete', isDeleteMode);
-      tr.classList.toggle('selected-for-batch', !isDeleteMode);
-    }
+    [tr, pairedMetaTr].forEach(rowEl => {
+      if (!rowEl) return;
+      rowEl.classList.toggle('selected-for-delete', isDeleteMode);
+      rowEl.classList.toggle('selected-for-batch', !isDeleteMode);
+    });
   } else {
     selectedForDelete.delete(compId);
-    if (tr) {
-      tr.classList.remove('selected-for-delete', 'selected-for-batch');
-    }
+    [tr, pairedMetaTr].forEach(rowEl => {
+      if (!rowEl) return;
+      rowEl.classList.remove('selected-for-delete', 'selected-for-batch');
+    });
   }
   updateDeleteSelectionUI();
 });
@@ -1907,8 +1960,24 @@ if (tableHead) {
   });
 }
 
+function refreshRowLastAccessedDOM(trackingKey) {
+  const normKey = String(trackingKey || '').trim().toLowerCase();
+  if (!normKey || !listBody || typeof getRowLastAccessedMs !== 'function' || typeof formatRowLastAccessedLabel !== 'function') {
+    return;
+  }
+  const info = formatRowLastAccessedLabel(getRowLastAccessedMs(normKey));
+  listBody.querySelectorAll('[data-accessed-key]').forEach(el => {
+    if (el.dataset.accessedKey === normKey) {
+      el.title = info.full;
+      el.innerHTML = info.ms
+        ? `<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-pill">${escapeHtml(info.short)}</span>`
+        : '<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-empty">—</span>';
+    }
+  });
+}
+
 // Delegate clicks for Shadow New Request Row, Date Tab jump, Key Chip, Like-Item chips, Collapsible Notes, Details button, Edit button, and Row Selection
-listBody.addEventListener('click', (e) => {
+listBody.addEventListener('click', async (e) => {
   const copyBtn = e.target.closest('.btn-inline-copy');
   if (copyBtn) {
     e.stopPropagation();
@@ -1922,7 +1991,12 @@ listBody.addEventListener('click', (e) => {
   const shadowRow = e.target.closest('.shadow-new-row');
   if (shadowRow) {
     if (bottomEditorDock && bottomEditorDock.style.display !== 'none') {
-      setBottomDockNewMode(true);
+      if (!dockEditingTarget && typeof hasUnsavedNewDockDraft === 'function' && hasUnsavedNewDockDraft()) {
+        if (isBottomDockCollapsed) setBottomDockCollapsed(false);
+        if (typeof focusFirstEditorInput === 'function') focusFirstEditorInput('dock');
+      } else {
+        setBottomDockNewMode(true, { restoreSavedDraft: true });
+      }
     } else {
       openNewRequestModal();
     }
@@ -1969,13 +2043,24 @@ listBody.addEventListener('click', (e) => {
 
   const detailsBtn = e.target.closest('.btn-details');
   if (detailsBtn) {
-    openTicketDetailsModal(detailsBtn.dataset.sheet, Number(detailsBtn.dataset.row));
+    const detSheet = detailsBtn.dataset.sheet;
+    const detRow = Number(detailsBtn.dataset.row);
+    const detItem = allRows.find(r => r.sheetName === detSheet && r.rowNumber === detRow);
+    if (detItem && detItem.key && typeof recordRowLastAccessed === 'function') {
+      recordRowLastAccessed(detItem.key);
+      refreshRowLastAccessedDOM(detItem.key);
+    }
+    openTicketDetailsModal(detSheet, detRow);
     return;
   }
 
   const editBtn = e.target.closest('.btn-edit');
   if (editBtn) {
     if (bottomEditorDock && bottomEditorDock.style.display !== 'none') {
+      if (typeof confirmSwitchAwayFromUnsavedNewDraft === 'function') {
+        const proceed = await confirmSwitchAwayFromUnsavedNewDraft('open that row for editing');
+        if (!proceed) return;
+      }
       loadRowIntoBottomDock(editBtn.dataset.sheet, Number(editBtn.dataset.row), true);
     } else {
       openEditModal(editBtn.dataset.sheet, Number(editBtn.dataset.row));
@@ -2000,6 +2085,10 @@ listBody.addEventListener('click', (e) => {
   if (!isDeleteMode && !e.target.closest('.chk-delete-row')) {
     const rowTr = e.target.closest('tr[data-sheet][data-row]');
     if (rowTr && bottomEditorDock && bottomEditorDock.style.display !== 'none') {
+      if (typeof confirmSwitchAwayFromUnsavedNewDraft === 'function') {
+        const proceed = await confirmSwitchAwayFromUnsavedNewDraft('open that row');
+        if (!proceed) return;
+      }
       loadRowIntoBottomDock(rowTr.dataset.sheet, Number(rowTr.dataset.row), false);
     }
   }

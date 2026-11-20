@@ -104,9 +104,74 @@ function loadSavedJsonMapFromStorage(storageKey) {
 }
 
 const FORM_LAYOUTS_STORAGE_KEY = 'trackerui_form_layouts_v1';
+const ROW_LAST_ACCESSED_STORAGE_KEY = 'trackerui_row_last_accessed_v1';
+const ROW_LAST_ACCESSED_MAX_ENTRIES = 5000;
 let schemaOverridesStore = loadSavedJsonMapFromStorage(SCHEMA_OVERRIDES_STORAGE_KEY);
 let actionCategoryOverridesStore = loadSavedJsonMapFromStorage(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY);
 let formLayoutsStore = loadSavedJsonMapFromStorage(FORM_LAYOUTS_STORAGE_KEY);
+let rowLastAccessedStore = loadSavedJsonMapFromStorage(ROW_LAST_ACCESSED_STORAGE_KEY);
+
+function saveRowLastAccessedStore() {
+  try {
+    const keys = Object.keys(rowLastAccessedStore || {});
+    if (keys.length > ROW_LAST_ACCESSED_MAX_ENTRIES) {
+      const sorted = keys
+        .map(k => [k, Number(rowLastAccessedStore[k]) || 0])
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, ROW_LAST_ACCESSED_MAX_ENTRIES);
+      rowLastAccessedStore = Object.fromEntries(sorted);
+    }
+    localStorage.setItem(ROW_LAST_ACCESSED_STORAGE_KEY, JSON.stringify(rowLastAccessedStore || {}));
+  } catch (_) { /* ignore */ }
+}
+
+function recordRowLastAccessed(trackingKey, tsMs = Date.now()) {
+  const normKey = String(trackingKey || '').trim().toLowerCase();
+  if (!normKey) return 0;
+  const stamp = Number.isFinite(Number(tsMs)) ? Number(tsMs) : Date.now();
+  if (!rowLastAccessedStore || typeof rowLastAccessedStore !== 'object') {
+    rowLastAccessedStore = {};
+  }
+  rowLastAccessedStore[normKey] = stamp;
+  saveRowLastAccessedStore();
+  return stamp;
+}
+
+function getRowLastAccessedMs(trackingKey) {
+  const normKey = String(trackingKey || '').trim().toLowerCase();
+  if (!normKey || !rowLastAccessedStore || typeof rowLastAccessedStore !== 'object') return 0;
+  const val = Number(rowLastAccessedStore[normKey]);
+  return Number.isFinite(val) && val > 0 ? val : 0;
+}
+
+function formatRowLastAccessedLabel(tsMs) {
+  const num = Number(tsMs);
+  if (!Number.isFinite(num) || num <= 0) {
+    return { ms: 0, short: '—', full: 'Not accessed yet' };
+  }
+  const dt = new Date(num);
+  if (isNaN(dt.getTime())) {
+    return { ms: 0, short: '—', full: 'Not accessed yet' };
+  }
+  const now = new Date();
+  const timeShort = dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const isSameDay =
+    dt.getFullYear() === now.getFullYear() &&
+    dt.getMonth() === now.getMonth() &&
+    dt.getDate() === now.getDate();
+  const short = isSameDay
+    ? timeShort
+    : `${dt.getMonth() + 1}/${dt.getDate()} ${timeShort}`;
+  const full = `Last accessed: ${dt.toLocaleString([], {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit'
+  })}`;
+  return { ms: num, short, full };
+}
 
 function saveFormLayoutsStore() {
   try {
@@ -819,6 +884,8 @@ const dockHeaderToggleZone = document.getElementById('dockHeaderToggleZone');
 const dockModeBadge = document.getElementById('dockModeBadge');
 const dockTargetLabel = document.getElementById('dockTargetLabel');
 const dockKeyBadge = document.getElementById('dockKeyBadge');
+const dockDraftBadge = document.getElementById('dockDraftBadge');
+const btnDockResumeDraft = document.getElementById('btnDockResumeDraft');
 const btnDockPullPrior = document.getElementById('btnDockPullPrior');
 const btnDockSyncForward = document.getElementById('btnDockSyncForward');
 const btnDockTicketDetails = document.getElementById('btnDockTicketDetails');
@@ -1721,7 +1788,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.4';
+const APP_VERSION = 'v1.19.5';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;

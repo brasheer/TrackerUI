@@ -1205,6 +1205,237 @@ if (dockHeaderToggleZone) {
   });
 }
 
+// --- UNSAVED NEW REQUEST DRAFT AUTOSAVE & OVERWRITE PROTECTION ---
+const DOCK_NEW_DRAFT_STORAGE_KEY = 'trackerui_dock_new_draft_v1';
+let dockDraftSaveTimer = null;
+
+function getActiveDockDraftScopeKey() {
+  const prof = (typeof activeProfileId === 'string' && activeProfileId) ? activeProfileId : 'default';
+  const wbName = (typeof workingFileHandle !== 'undefined' && workingFileHandle && workingFileHandle.name)
+    ? workingFileHandle.name
+    : '__no_workbook__';
+  const schemaTag = (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) ? 'custom' : 'standard';
+  return `${prof}::${wbName}::${schemaTag}`;
+}
+
+function readAllSavedDockDraftsMap() {
+  try {
+    const raw = localStorage.getItem(DOCK_NEW_DRAFT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    }
+  } catch (_) { /* ignore */ }
+  return {};
+}
+
+function writeAllSavedDockDraftsMap(mapObj) {
+  try {
+    localStorage.setItem(DOCK_NEW_DRAFT_STORAGE_KEY, JSON.stringify(mapObj || {}));
+  } catch (_) { /* ignore */ }
+}
+
+function readNewDockDraftSnapshot() {
+  const isCustom = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema);
+  if (isCustom) {
+    const customValues = {};
+    if (dockDynamicFieldsGrid) {
+      dockDynamicFieldsGrid.querySelectorAll('[data-custom-col]').forEach(el => {
+        const colIdx = Number(el.dataset.customCol);
+        if (colIdx >= 1) {
+          customValues[`col_${colIdx}`] = String(el.value || '');
+        }
+      });
+    }
+    return {
+      savedAt: Date.now(),
+      isStandard: false,
+      customValues
+    };
+  }
+  return {
+    savedAt: Date.now(),
+    isStandard: true,
+    fields: {
+      subject: dockSubject ? dockSubject.value : '',
+      ticket: dockTicket ? dockTicket.value : '',
+      broker: dockBroker ? dockBroker.value : '',
+      master: dockMaster ? dockMaster.value : '',
+      bidder: dockBidder ? dockBidder.value : '',
+      action: dockAction ? dockAction.value : '',
+      yard: dockYard ? dockYard.value : '',
+      lots: dockLots ? dockLots.value : '',
+      notes: dockNotes ? dockNotes.value : '',
+      status: dockStatus ? dockStatus.value : ''
+    }
+  };
+}
+
+function isNewDockDraftSnapshotNonEmpty(snap) {
+  if (!snap || typeof snap !== 'object') return false;
+  if (snap.isStandard && snap.fields) {
+    const f = snap.fields;
+    return [f.subject, f.ticket, f.broker, f.master, f.bidder, f.action, f.yard, f.lots, f.notes]
+      .some(v => String(v || '').trim() !== '');
+  }
+  if (!snap.isStandard && snap.customValues) {
+    const stColKey = (activeSchemaConfig && activeSchemaConfig.statusCol) ? `col_${activeSchemaConfig.statusCol}` : '';
+    return Object.entries(snap.customValues).some(([k, v]) => {
+      if (k === stColKey) return false;
+      return String(v || '').trim() !== '';
+    });
+  }
+  return false;
+}
+
+function hasUnsavedNewDockDraft() {
+  if (dockEditingTarget || !bottomEditorDock || bottomEditorDock.style.display === 'none') {
+    return false;
+  }
+  return isNewDockDraftSnapshotNonEmpty(readNewDockDraftSnapshot());
+}
+
+function getNewDockDraftSummaryLabel(snap) {
+  if (!snap) return 'Untitled Draft';
+  let preview = '';
+  if (snap.isStandard && snap.fields) {
+    preview = String(snap.fields.subject || snap.fields.ticket || snap.fields.broker || snap.fields.notes || '').trim();
+  } else if (snap.customValues) {
+    const stColKey = (activeSchemaConfig && activeSchemaConfig.statusCol) ? `col_${activeSchemaConfig.statusCol}` : '';
+    for (const [k, v] of Object.entries(snap.customValues)) {
+      if (k === stColKey) continue;
+      const t = String(v || '').trim();
+      if (t) {
+        preview = t;
+        break;
+      }
+    }
+  }
+  if (!preview) return 'Untitled Draft';
+  return preview.length > 48 ? `${preview.slice(0, 48)}…` : preview;
+}
+
+function loadSavedNewDockDraft() {
+  const map = readAllSavedDockDraftsMap();
+  const snap = map[getActiveDockDraftScopeKey()];
+  return isNewDockDraftSnapshotNonEmpty(snap) ? snap : null;
+}
+
+function saveNewDockDraftToStorage() {
+  if (dockEditingTarget) return false;
+  const snap = readNewDockDraftSnapshot();
+  const map = readAllSavedDockDraftsMap();
+  const scopeKey = getActiveDockDraftScopeKey();
+  if (isNewDockDraftSnapshotNonEmpty(snap)) {
+    map[scopeKey] = snap;
+    writeAllSavedDockDraftsMap(map);
+    syncDockDraftIndicatorsUI();
+    return true;
+  } else {
+    if (map[scopeKey]) {
+      delete map[scopeKey];
+      writeAllSavedDockDraftsMap(map);
+    }
+    syncDockDraftIndicatorsUI();
+    return false;
+  }
+}
+
+function clearSavedNewDockDraft() {
+  if (dockDraftSaveTimer) {
+    clearTimeout(dockDraftSaveTimer);
+    dockDraftSaveTimer = null;
+  }
+  const map = readAllSavedDockDraftsMap();
+  const scopeKey = getActiveDockDraftScopeKey();
+  if (map[scopeKey]) {
+    delete map[scopeKey];
+    writeAllSavedDockDraftsMap(map);
+  }
+  syncDockDraftIndicatorsUI();
+}
+
+function applySavedDraftToBottomDock(snap) {
+  if (!snap || typeof snap !== 'object') return false;
+  if (snap.isStandard && snap.fields && (!activeSchemaConfig || activeSchemaConfig.isStandardSchema)) {
+    const f = snap.fields;
+    if (dockSubject) dockSubject.value = f.subject || '';
+    if (dockTicket) dockTicket.value = f.ticket || '';
+    if (dockBroker) dockBroker.value = f.broker || '';
+    if (dockMaster) dockMaster.value = f.master || '';
+    if (dockBidder) dockBidder.value = f.bidder || '';
+    if (dockAction) dockAction.value = f.action || '';
+    if (dockYard) dockYard.value = f.yard || '';
+    if (dockLots) dockLots.value = f.lots || '';
+    if (dockNotes) dockNotes.value = f.notes || '';
+    if (dockStatus && f.status) {
+      ensureStatusOptionExists(f.status);
+      dockStatus.value = f.status;
+    }
+    return true;
+  }
+  if (!snap.isStandard && snap.customValues && activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
+    populateDynamicGridFromItem(dockDynamicFieldsGrid, { customValues: snap.customValues });
+    return true;
+  }
+  return false;
+}
+
+function syncDockDraftIndicatorsUI() {
+  const savedDraft = loadSavedNewDockDraft();
+  const isNewModeWithDraft = !dockEditingTarget && (hasUnsavedNewDockDraft() || Boolean(savedDraft));
+  if (dockDraftBadge) {
+    if (isNewModeWithDraft) {
+      dockDraftBadge.style.display = 'inline-flex';
+      const tsStr = savedDraft && savedDraft.savedAt
+        ? new Date(savedDraft.savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : '';
+      dockDraftBadge.textContent = tsStr ? `● Draft Autosaved (${tsStr})` : '● Draft Autosaved';
+    } else {
+      dockDraftBadge.style.display = 'none';
+    }
+  }
+  if (btnDockResumeDraft) {
+    if (dockEditingTarget && savedDraft) {
+      btnDockResumeDraft.style.display = 'inline-block';
+      btnDockResumeDraft.title = `Resume unsaved new request draft: "${getNewDockDraftSummaryLabel(savedDraft)}"`;
+    } else {
+      btnDockResumeDraft.style.display = 'none';
+    }
+  }
+}
+
+async function confirmSwitchAwayFromUnsavedNewDraft(actionDesc = 'switch to another row') {
+  if (!hasUnsavedNewDockDraft()) return true;
+  saveNewDockDraftToStorage();
+  const snap = readNewDockDraftSnapshot();
+  const summary = getNewDockDraftSummaryLabel(snap);
+  return await showModalConfirm({
+    title: 'Unsaved New Request in Progress',
+    badge: 'Draft Auto-Saved',
+    message:
+      `You have an unsaved new request in the bottom editor dock ("${summary}").\n\n` +
+      `Your draft has been auto-saved in browser storage so you won't lose your work. ` +
+      `Do you want to ${actionDesc} now? (You can return to your draft anytime via "📝 Resume Draft".)`,
+    confirmText: 'Switch & Keep Draft',
+    cancelText: 'Stay on New Request',
+    variant: 'primary'
+  });
+}
+
+if (dockEntryForm) {
+  const scheduleDraftAutosave = () => {
+    if (dockEditingTarget) return;
+    if (dockDraftSaveTimer) clearTimeout(dockDraftSaveTimer);
+    dockDraftSaveTimer = setTimeout(() => {
+      dockDraftSaveTimer = null;
+      saveNewDockDraftToStorage();
+    }, 200);
+  };
+  dockEntryForm.addEventListener('input', scheduleDraftAutosave);
+  dockEntryForm.addEventListener('change', scheduleDraftAutosave);
+}
+
 function syncBottomDockStateAfterLoad() {
   if (!bottomEditorDock) return;
   if (!workbook || dateSheets.length === 0) {
@@ -1222,11 +1453,11 @@ function syncBottomDockStateAfterLoad() {
         (r.rowNumber === dockEditingTarget.rowNumber || r.key === dockEditingTarget.key)
     );
     if (updatedMatch) {
-      loadRowIntoBottomDock(updatedMatch.sheetName, updatedMatch.rowNumber, false, { expandIfCollapsed: false });
+      loadRowIntoBottomDock(updatedMatch.sheetName, updatedMatch.rowNumber, false, { expandIfCollapsed: false, recordAccess: false });
       return;
     }
   }
-  setBottomDockNewMode(false);
+  setBottomDockNewMode(false, { restoreSavedDraft: true });
 }
 
 function focusFirstEditorInput(scopeMode = 'dock') {
@@ -1241,9 +1472,13 @@ function focusFirstEditorInput(scopeMode = 'dock') {
   if (stdFirst) stdFirst.focus();
 }
 
-function setBottomDockNewMode(focusInput = false) {
+function setBottomDockNewMode(focusInput = false, { restoreSavedDraft = false, clearDraft = false } = {}) {
   dockEditingTarget = null;
   if (!bottomEditorDock) return;
+
+  if (clearDraft) {
+    clearSavedNewDockDraft();
+  }
 
   if (focusInput && isBottomDockCollapsed) {
     setBottomDockCollapsed(false);
@@ -1290,6 +1525,15 @@ function setBottomDockNewMode(focusInput = false) {
   }
   populateDynamicGridFromItem(dockDynamicFieldsGrid, null);
 
+  if (restoreSavedDraft) {
+    const savedDraft = loadSavedNewDockDraft();
+    if (savedDraft) {
+      applySavedDraftToBottomDock(savedDraft);
+    }
+  }
+
+  syncDockDraftIndicatorsUI();
+
   if (listBody) {
     listBody.querySelectorAll('tr.active-editing-row').forEach(tr => tr.classList.remove('active-editing-row'));
   }
@@ -1299,9 +1543,16 @@ function setBottomDockNewMode(focusInput = false) {
   }
 }
 
-function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expandIfCollapsed = true } = {}) {
+function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expandIfCollapsed = true, recordAccess = true } = {}) {
   const item = allRows.find(r => r.sheetName === sheetName && r.rowNumber === rowNumber);
   if (!item || !bottomEditorDock) return;
+
+  if (recordAccess && item.key && typeof recordRowLastAccessed === 'function') {
+    recordRowLastAccessed(item.key);
+    if (typeof refreshRowLastAccessedDOM === 'function') {
+      refreshRowLastAccessedDOM(item.key);
+    }
+  }
 
   bottomEditorDock.style.display = 'block';
   if (expandIfCollapsed && isBottomDockCollapsed) {
@@ -1357,6 +1608,8 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     if (dockStatus) dockStatus.value = item.status;
   }
 
+  syncDockDraftIndicatorsUI();
+
   if (listBody) {
     listBody.querySelectorAll('tr').forEach(tr => {
       const isMatch = tr.dataset.sheet === sheetName && Number(tr.dataset.row) === rowNumber;
@@ -1369,15 +1622,39 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
   }
 }
 
+if (btnDockResumeDraft) {
+  btnDockResumeDraft.addEventListener('click', () => {
+    setBottomDockNewMode(true, { restoreSavedDraft: true });
+    showToast('Restored your auto-saved new request draft.', 'info');
+  });
+}
+
 if (btnDockNewClear) {
-  btnDockNewClear.addEventListener('click', () => {
-    setBottomDockNewMode(true);
+  btnDockNewClear.addEventListener('click', async () => {
+    if (!dockEditingTarget && hasUnsavedNewDockDraft()) {
+      const clearConfirmed = await showModalConfirm({
+        title: 'Discard Unsaved New Request Draft?',
+        badge: 'Clear Form',
+        message: 'Clearing the New Request form will discard your current auto-saved draft. Continue?',
+        confirmText: 'Clear & Discard Draft',
+        cancelText: 'Keep Draft',
+        variant: 'danger'
+      });
+      if (!clearConfirmed) return;
+      setBottomDockNewMode(true, { clearDraft: true });
+      return;
+    }
+    const hasDraft = Boolean(loadSavedNewDockDraft());
+    setBottomDockNewMode(true, { restoreSavedDraft: hasDraft });
+    if (hasDraft) {
+      showToast('Switched to New Request and restored your auto-saved draft.', 'info');
+    }
   });
 }
 
 if (btnDockCancelEdit) {
   btnDockCancelEdit.addEventListener('click', () => {
-    setBottomDockNewMode(false);
+    setBottomDockNewMode(false, { restoreSavedDraft: true });
   });
 }
 
@@ -1622,12 +1899,14 @@ if (dockEntryForm) {
     const ok = await saveRequestToWorkbook(dockEditingTarget, payload);
     if (ok) {
       if (!wasEditing) {
+        clearSavedNewDockDraft();
         setBottomDockNewMode(false);
         showToast('New request added and saved.', 'success');
       } else {
         showToast('Request changes saved to workbook.', 'success');
       }
     } else if (pendingPrimarySaveState && !wasEditing) {
+      clearSavedNewDockDraft();
       setBottomDockNewMode(false);
     }
   });

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.4</title>
+  <title>TrackerUI v1.19.5</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.4">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.5">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.4 — Click to check for updates &amp; refresh app cache">v1.19.4</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.5 — Click to check for updates &amp; refresh app cache">v1.19.5</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.4</span>
+              <span class="menu-item-meta" data-app-version>v1.19.5</span>
             </button>
           </div>
         </div>
@@ -675,8 +675,12 @@
         <span id="dockModeBadge" class="dock-mode-badge new-mode">＋ New Request</span>
         <span id="dockTargetLabel" class="dock-target-label">Select a row above to edit, or enter a new request below</span>
         <span id="dockKeyBadge" class="key-chip" style="display:none; cursor:default;" title="Immutable Tracking ID (Excluded from editable inputs)"></span>
+        <span id="dockDraftBadge" class="dock-draft-badge" style="display:none;" title="Unsaved new request draft is automatically saved in browser storage">● Draft Saved</span>
       </div>
       <div class="bottom-editor-header-actions">
+        <button type="button" id="btnDockResumeDraft" class="btn-dock-secondary btn-dock-draft-resume" style="display:none;" title="Return to your auto-saved unsaved new request draft">
+          📝 Resume Draft
+        </button>
         <button type="button" id="btnDockPullPrior" class="btn-dock-secondary" title="Look backward across earlier daily tabs and fill any blank fields on this entry">
           📥 Pull Prior
         </button>
@@ -1855,7 +1859,7 @@
             <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.4</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.5</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -1974,16 +1978,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.4</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.5</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.4"></script>
-  <script src="js/core-ui.js?v=1.19.4"></script>
-  <script src="js/workbook-io.js?v=1.19.4"></script>
-  <script src="js/tracker-table.js?v=1.19.4"></script>
-  <script src="js/request-editors.js?v=1.19.4"></script>
-  <script src="js/scratch-sheets.js?v=1.19.4"></script>
-  <script src="js/rollover.js?v=1.19.4"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.5"></script>
+  <script src="js/core-ui.js?v=1.19.5"></script>
+  <script src="js/workbook-io.js?v=1.19.5"></script>
+  <script src="js/tracker-table.js?v=1.19.5"></script>
+  <script src="js/request-editors.js?v=1.19.5"></script>
+  <script src="js/scratch-sheets.js?v=1.19.5"></script>
+  <script src="js/rollover.js?v=1.19.5"></script>
 </body>
 </html>

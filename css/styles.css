@@ -1232,29 +1232,34 @@ tbody#listBody tr {
 }
 
 .tracker-row-num-th {
-  width: 2.35rem;
-  min-width: 2.2rem;
+  width: 1%;
+  min-width: 1.45rem;
+  max-width: 2rem;
   text-align: center !important;
   color: var(--text-muted);
   border-right: 1px solid var(--border);
-  padding-left: 0.35rem !important;
-  padding-right: 0.35rem !important;
+  padding-left: 0.2rem !important;
+  padding-right: 0.2rem !important;
+  font-size: 0.68rem;
+  white-space: nowrap;
   user-select: none;
 }
 
 tbody#listBody th.tracker-row-num-cell {
-  width: 2.35rem;
-  min-width: 2.2rem;
+  width: 1%;
+  min-width: 1.45rem;
+  max-width: 2rem;
   text-align: center;
   vertical-align: middle;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   background: var(--table-bg);
   border-bottom: 1px solid var(--border);
   border-right: 1px solid var(--border);
-  padding: 0.5rem 0.35rem;
+  padding: 0.36rem 0.2rem;
+  white-space: nowrap;
   user-select: none;
 }
 
@@ -1291,25 +1296,155 @@ tbody#listBody tr.active-editing-row th.tracker-row-num-cell:first-child {
 
 .select-col, .select-cell,
 .delete-col, .delete-cell {
-  width: 2.3rem;
+  width: 1%;
+  min-width: 1.5rem;
+  max-width: 1.75rem;
+  padding-left: 0.2rem !important;
+  padding-right: 0.2rem !important;
+  border-right: 1px solid var(--border);
   text-align: center;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .select-col input[type="checkbox"],
 .select-cell input[type="checkbox"] {
-  width: 0.95rem;
-  height: 0.95rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: 0;
+  vertical-align: middle;
   cursor: pointer;
   accent-color: var(--accent);
 }
 
 .delete-col input[type="checkbox"],
 .delete-cell input[type="checkbox"] {
-  width: 0.95rem;
-  height: 0.95rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: 0;
+  vertical-align: middle;
   cursor: pointer;
   accent-color: var(--danger);
+}
+
+.tracker-subject-th {
+  min-width: 15rem;
+}
+
+.tracker-subject-cell {
+  min-width: 15rem;
+}
+
+.tracker-actions-th {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* Two-Row Unified Item + Bottom Metadata Bar (UUIDv4 + Last Accessed) */
+tbody#listBody tr.tracker-main-row td {
+  border-bottom: none;
+  padding-bottom: 0.24rem;
+}
+
+tbody#listBody tr.tracker-main-row th.tracker-row-num-cell,
+tbody#listBody tr.tracker-main-row td.select-cell,
+tbody#listBody tr.tracker-main-row td.delete-cell {
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody#listBody tr.tracker-meta-row {
+  cursor: pointer;
+}
+
+tbody#listBody tr.tracker-meta-row td.tracker-meta-bar-cell {
+  padding: 0.12rem 0.55rem 0.24rem;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+tbody#listBody tr.tracker-main-row:hover td,
+tbody#listBody tr.tracker-main-row:hover th.tracker-row-num-cell,
+tbody#listBody tr.tracker-main-row:hover + tr.tracker-meta-row td.tracker-meta-bar-cell,
+tbody#listBody tr.tracker-main-row:has(+ tr.tracker-meta-row:hover) td,
+tbody#listBody tr.tracker-main-row:has(+ tr.tracker-meta-row:hover) th.tracker-row-num-cell,
+tbody#listBody tr.tracker-meta-row:hover td.tracker-meta-bar-cell {
+  background: var(--surface-hover);
+}
+
+tbody#listBody tr.tracker-main-row.active-editing-row td,
+tbody#listBody tr.tracker-main-row.active-editing-row th.tracker-row-num-cell,
+tbody#listBody tr.tracker-meta-row.active-editing-row td.tracker-meta-bar-cell {
+  background: var(--accent-soft);
+}
+
+.tracker-meta-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.key-chip.key-chip-compact {
+  font-size: 0.64rem;
+  padding: 0.05rem 0.34rem;
+  line-height: 1.25;
+}
+
+.tracker-meta-accessed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.tracker-meta-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.accessed-ts-pill {
+  display: inline-block;
+  padding: 0.05rem 0.32rem;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.accessed-ts-empty {
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.dock-draft-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.48rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  white-space: nowrap;
+}
+
+.btn-dock-draft-resume {
+  background: var(--warning-soft) !important;
+  border-color: var(--warning-border) !important;
+  color: var(--warning-text) !important;
+  font-weight: 600;
 }
 
 tr.selected-for-batch td,
@@ -1603,62 +1738,78 @@ tr.shadow-new-row:hover .shadow-action-pill {
 }
 
 /* Overdue Row Red Background & Outline + Waiting / On Hold Purple Background & Outline */
-tbody#listBody tr.overdue-outline-red {
-  outline: 2px solid var(--danger);
-  outline-offset: -2px;
+tbody#listBody tr.tracker-main-row.overdue-outline-red td,
+tbody#listBody tr.tracker-main-row.overdue-outline-red th.tracker-row-num-cell,
+tbody#listBody tr.tracker-meta-row.overdue-outline-red td {
+  background: var(--danger-soft);
 }
 
-tbody#listBody tr.overdue-outline-red td,
-tbody#listBody tr[data-sheet].overdue-outline-red td,
-tbody#listBody tr.overdue-outline-red th.tracker-row-num-cell,
-tbody#listBody tr[data-sheet].overdue-outline-red th.tracker-row-num-cell {
-  background: var(--danger-soft);
+tbody#listBody tr.tracker-main-row.overdue-outline-red td {
+  box-shadow: inset 0 1.5px 0 var(--danger);
+}
+
+tbody#listBody tr.tracker-main-row.overdue-outline-red td.select-cell,
+tbody#listBody tr.tracker-main-row.overdue-outline-red td.delete-cell {
   box-shadow: inset 0 1.5px 0 var(--danger), inset 0 -1.5px 0 var(--danger);
 }
 
-tbody#listBody tr.overdue-outline-red:hover td,
-tbody#listBody tr[data-sheet].overdue-outline-red:hover td,
-tbody#listBody tr.overdue-outline-red:hover th.tracker-row-num-cell,
-tbody#listBody tr[data-sheet].overdue-outline-red:hover th.tracker-row-num-cell {
-  background: var(--danger-soft-hover);
-}
-
-tbody#listBody tr.overdue-outline-red td:first-child,
-tbody#listBody tr.overdue-outline-red th.tracker-row-num-cell:first-child {
+tbody#listBody tr.tracker-main-row.overdue-outline-red th.tracker-row-num-cell:first-child {
   box-shadow: inset 3px 0 0 var(--danger), inset 0 1.5px 0 var(--danger), inset 0 -1.5px 0 var(--danger);
 }
 
-tbody#listBody tr.overdue-outline-red td:last-child {
-  box-shadow: inset -3px 0 0 var(--danger), inset 0 1.5px 0 var(--danger), inset 0 -1.5px 0 var(--danger);
+tbody#listBody tr.tracker-main-row.overdue-outline-red td:last-child {
+  box-shadow: inset -3px 0 0 var(--danger), inset 0 1.5px 0 var(--danger);
 }
 
-tbody#listBody tr.waiting-outline-purple {
-  outline: 2px solid var(--waiting);
-  outline-offset: -2px;
+tbody#listBody tr.tracker-meta-row.overdue-outline-red td.tracker-meta-bar-cell {
+  box-shadow: inset -3px 0 0 var(--danger), inset 0 -1.5px 0 var(--danger);
+  border-top-color: var(--danger-border);
 }
 
-tbody#listBody tr.waiting-outline-purple td,
-tbody#listBody tr[data-sheet].waiting-outline-purple td,
-tbody#listBody tr.waiting-outline-purple th.tracker-row-num-cell,
-tbody#listBody tr[data-sheet].waiting-outline-purple th.tracker-row-num-cell {
+tbody#listBody tr.tracker-main-row.overdue-outline-red:hover td,
+tbody#listBody tr.tracker-main-row.overdue-outline-red:hover th.tracker-row-num-cell,
+tbody#listBody tr.tracker-main-row.overdue-outline-red:hover + tr.tracker-meta-row.overdue-outline-red td,
+tbody#listBody tr.tracker-main-row.overdue-outline-red:has(+ tr.tracker-meta-row:hover) td,
+tbody#listBody tr.tracker-main-row.overdue-outline-red:has(+ tr.tracker-meta-row:hover) th.tracker-row-num-cell,
+tbody#listBody tr.tracker-meta-row.overdue-outline-red:hover td {
+  background: var(--danger-soft-hover);
+}
+
+tbody#listBody tr.tracker-main-row.waiting-outline-purple td,
+tbody#listBody tr.tracker-main-row.waiting-outline-purple th.tracker-row-num-cell,
+tbody#listBody tr.tracker-meta-row.waiting-outline-purple td {
   background: var(--waiting-soft);
+}
+
+tbody#listBody tr.tracker-main-row.waiting-outline-purple td {
+  box-shadow: inset 0 1.5px 0 var(--waiting);
+}
+
+tbody#listBody tr.tracker-main-row.waiting-outline-purple td.select-cell,
+tbody#listBody tr.tracker-main-row.waiting-outline-purple td.delete-cell {
   box-shadow: inset 0 1.5px 0 var(--waiting), inset 0 -1.5px 0 var(--waiting);
 }
 
-tbody#listBody tr.waiting-outline-purple:hover td,
-tbody#listBody tr[data-sheet].waiting-outline-purple:hover td,
-tbody#listBody tr.waiting-outline-purple:hover th.tracker-row-num-cell,
-tbody#listBody tr[data-sheet].waiting-outline-purple:hover th.tracker-row-num-cell {
-  background: var(--waiting-soft-hover);
-}
-
-tbody#listBody tr.waiting-outline-purple td:first-child,
-tbody#listBody tr.waiting-outline-purple th.tracker-row-num-cell:first-child {
+tbody#listBody tr.tracker-main-row.waiting-outline-purple th.tracker-row-num-cell:first-child {
   box-shadow: inset 3px 0 0 var(--waiting), inset 0 1.5px 0 var(--waiting), inset 0 -1.5px 0 var(--waiting);
 }
 
-tbody#listBody tr.waiting-outline-purple td:last-child {
-  box-shadow: inset -3px 0 0 var(--waiting), inset 0 1.5px 0 var(--waiting), inset 0 -1.5px 0 var(--waiting);
+tbody#listBody tr.tracker-main-row.waiting-outline-purple td:last-child {
+  box-shadow: inset -3px 0 0 var(--waiting), inset 0 1.5px 0 var(--waiting);
+}
+
+tbody#listBody tr.tracker-meta-row.waiting-outline-purple td.tracker-meta-bar-cell {
+  box-shadow: inset -3px 0 0 var(--waiting), inset 0 -1.5px 0 var(--waiting);
+  border-top-color: var(--waiting-border);
+}
+
+tbody#listBody tr.tracker-main-row.waiting-outline-purple:hover td,
+tbody#listBody tr.tracker-main-row.waiting-outline-purple:hover th.tracker-row-num-cell,
+tbody#listBody tr.tracker-main-row.waiting-outline-purple:hover + tr.tracker-meta-row.waiting-outline-purple td,
+tbody#listBody tr.tracker-main-row.waiting-outline-purple:has(+ tr.tracker-meta-row:hover) td,
+tbody#listBody tr.tracker-main-row.waiting-outline-purple:has(+ tr.tracker-meta-row:hover) th.tracker-row-num-cell,
+tbody#listBody tr.tracker-meta-row.waiting-outline-purple:hover td {
+  background: var(--waiting-soft-hover);
 }
 
 /* Integrated Split-Pill Copy & Filter Controls */
@@ -5056,7 +5207,13 @@ button.manual-toc-item.active:hover {
   }
 
   tbody#listBody th.tracker-row-num-cell {
-    padding: 0.36rem 0.3rem;
+    padding: 0.28rem 0.18rem;
+  }
+
+  .select-col, .select-cell,
+  .delete-col, .delete-cell {
+    padding-left: 0.18rem !important;
+    padding-right: 0.18rem !important;
   }
 
   .bottom-editor-dock {

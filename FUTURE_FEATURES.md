@@ -80,7 +80,14 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.4`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.5`)
+
+### 🕒 Row Last-Accessed Timestamp, Compact `#`/Checkbox Columns & Unsaved New Request Draft Autosave/Warning (`v1.19.5`)
+- **Status**: ✅ Implemented in `v1.19.5`
+- **Delivered**:
+  - **Sortable `Accessed` Column (`js/core-ui.js`, `js/tracker-table.js`)**: Records and displays when each request row was last clicked/opened (persisted per Tracking ID in `localStorage` without altering the `.xlsx` schema), with live DOM updates and full timestamp tooltips.
+  - **Compact `#` & Checkbox Columns (`css/styles.css`)**: Squished row-number and checkbox columns to minimal width with a `1px` right separator on the checkbox column.
+  - **New Request Draft Autosave & Overwrite Guard (`index.html`, `js/request-editors.js`, `js/tracker-table.js`)**: Auto-saves in-progress new requests in `localStorage` (`#dockDraftBadge`, `#btnDockResumeDraft`) and warns before clicking another row overwrites an unsaved new request.
 
 ### 🔄 Always-Live Bidirectional Master Buyer Account Sync, Rollover Status Rules & Scratch Sheet Workflow Upgrades (`v1.19.4`)
 - **Status**: ✅ Implemented in `v1.19.4`

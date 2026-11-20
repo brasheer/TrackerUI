@@ -8,7 +8,19 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.4` (Current — `main` / `meerkat`)
+### `v1.19.5` (Current — `main` / `meerkat`)
+- **🕒 Row Bottom Metadata Bar: UUIDv4 & Last-Accessed Timestamp (`js/core-ui.js`, `js/tracker-table.js`, `js/request-editors.js`, `css/styles.css`)**:
+  - Moved the **Tracking ID (UUIDv4)** chip (now expanded to show the full 36-character UUIDv4) and the new **Last Accessed** timestamp (`2:16 PM` for today, `11/19 2:16 PM` for earlier days, with full date-time tooltip) into a slim bottom metadata bar spanning underneath each daily tracker row (for both Standard and Custom Department schemas), freeing up horizontal table space so the **Subject** column stays wider and flatter.
+  - Both **Accessed** and **ID** remain 1-click sortable via the rightmost **`Accessed ↕ / ID ↕`** header controls and fully searchable via global search (`buildItemSearchHaystack`), with last-accessed timestamps persisted locally per immutable Tracking ID (`trackerui_row_last_accessed_v1`) and updated live on row click / Edit / Details without modifying `.xlsx` columns.
+- **📐 Compact Row-Number & Checkbox Columns (`css/styles.css`)**:
+  - Squished the left-edge `#` row-number column and checkbox selection column to minimal width (`1%` / tight padding / compact `0.85rem` checkbox, spanning cleanly across each row + bottom bar) and added a clean `1px` vertical right border on the checkbox column to separate selection controls from request data.
+- **🛡️ Unsaved New Request Draft Autosave & Switch Warning (`index.html`, `js/core-ui.js`, `js/request-editors.js`, `js/tracker-table.js`, `css/styles.css`)**:
+  - Automatically saves in-progress **New Request** entries in the bottom editor dock (Standard & Custom schemas) to `localStorage` (`trackerui_dock_new_draft_v1`), displaying a live **`● Draft Autosaved`** badge (`#dockDraftBadge`) and a 1-click **`📝 Resume Draft`** button (`#btnDockResumeDraft`) when viewing another row.
+  - Prompts a confirmation warning (`confirmSwitchAwayFromUnsavedNewDraft`) before loading another row when an unsaved new request is being filled out (keeping the draft safely auto-saved even if you choose to switch rows), and confirms before discarding an active draft via `＋ Clear / New`.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v45'` in [`sw.js`](sw.js) and synced `?v=1.19.5` asset query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.4` (`main` / `meerkat`)
 - **🔁 Rollover Status Transitions & Waiting/Hold Overdue Exemption (`js/core-ui.js`, `js/rollover.js`)**:
   - Automatically transitions requests with `"New"` status to `"In Progress"` (`resolveInProgressStatusLabel()`) when carried forward to a subsequent daily tab, displaying `New → In Progress` badges in the Rollover preview and reporting transition counts on completion.
   - Exempts `Waiting`, `Waiting on Buyer`, and `On Hold` requests from `evaluateRequestOverdueMetrics()` (`qualifiesForAutoOverdue`) so aged or frequently carried waiting items remain `Waiting` / `On Hold` with purple styling rather than mutating to `Overdue`.
