@@ -569,10 +569,13 @@ function applyRawEditToExcelCell(ws, rNum, cNum, rawText) {
 
   if (normalized === '') {
     cell.value = null;
-  } else if (normalized.startsWith('=') && normalized.length > 1) {
-    cell.value = { formula: toExcelOpenXmlFormula(normalized.slice(1)) };
   } else if (formatId === 'text') {
     cell.value = normalized;
+  } else if (normalized.startsWith("'") && normalized.length > 1) {
+    // Leading apostrophe escapes formula / number coercion in Auto mode, matching Excel
+    cell.value = normalized.slice(1);
+  } else if (normalized.startsWith('=') && normalized.length > 1) {
+    cell.value = { formula: toExcelOpenXmlFormula(normalized.slice(1)) };
   } else if (formatId === 'date') {
     const parsed = parseFlexibleScratchDate(normalized, { allowTwoDigitHyphen: true });
     if (parsed) {
@@ -586,8 +589,8 @@ function applyRawEditToExcelCell(ws, rNum, cNum, rawText) {
   } else if (formatId === 'number' || formatId === 'currency') {
     const stripped = normalized.trim().replace(/^\$/, '').replace(/,/g, '');
     const isNum =
-      /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(stripped) &&
-      stripped.replace(/[-.]/g, '').length <= 12;
+      /^[+-]?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(stripped) &&
+      stripped.replace(/[+-.]/g, '').length <= 12;
     cell.value = isNum ? Number(stripped) : normalized;
   } else {
     const trimmed = normalized.trim();
@@ -1375,11 +1378,24 @@ function compareFormulaScalars(a, b, op) {
   if (isFormulaError(a)) return a;
   if (isFormulaError(b)) return b;
 
-  const dA = unwrapFormulaDate(a);
-  const dB = unwrapFormulaDate(b);
+  let dA = unwrapFormulaDate(a);
+  let dB = unwrapFormulaDate(b);
+  if (dA && !dB && typeof b === 'string' && b.trim() !== '') {
+    dB = parseFlexibleScratchDate(b.trim(), { allowTwoDigitHyphen: true });
+  } else if (dB && !dA && typeof a === 'string' && a.trim() !== '') {
+    dA = parseFlexibleScratchDate(a.trim(), { allowTwoDigitHyphen: true });
+  }
   if (dA && dB) {
     const cmp = dA.dayEpoch - dB.dayEpoch;
     return evalCmpOp(cmp, op);
+  }
+  if (dA || dB) {
+    if (op === '=' || op === '==' || op === '<>' || op === '!=') {
+      const sDate = formulaValToString(a).trim().toLowerCase();
+      const sOther = formulaValToString(b).trim().toLowerCase();
+      if (sDate === sOther) return evalCmpOp(0, op);
+      return (op === '<>' || op === '!=') ? true : false;
+    }
   }
 
   const aNull = a === null || a === undefined;
@@ -1389,13 +1405,15 @@ function compareFormulaScalars(a, b, op) {
     if (b === '') return evalCmpOp(0, op);
     if (typeof b === 'number') return evalCmpOp(0 - b, op);
     if (typeof b === 'boolean') return evalCmpOp(0 - (b ? 1 : 0), op);
-    return evalCmpOp(''.localeCompare(formulaValToString(b).toLowerCase()), op);
+    const sB = formulaValToString(b).toLowerCase();
+    return evalCmpOp('' === sB ? 0 : ('' < sB ? -1 : 1), op);
   }
   if (bNull) {
     if (a === '') return evalCmpOp(0, op);
     if (typeof a === 'number') return evalCmpOp(a - 0, op);
     if (typeof a === 'boolean') return evalCmpOp((a ? 1 : 0) - 0, op);
-    return evalCmpOp(formulaValToString(a).toLowerCase().localeCompare(''), op);
+    const sA = formulaValToString(a).toLowerCase();
+    return evalCmpOp(sA === '' ? 0 : (sA < '' ? -1 : 1), op);
   }
 
   if (typeof a === 'number' && typeof b === 'number') {
@@ -1448,6 +1466,36 @@ function broadcastBinaryOp(left, right, fn) {
       const lv = lr[c % lr.length];
       const rv = rr[c % rr.length];
       rowOut.push(fn(lv, rv));
+    }
+    out.push(rowOut);
+  }
+  return makeFormulaMatrix(out);
+}
+
+function broadcastTernaryOp(cond, tVal, fVal, fn) {
+  const cMat = isFormulaMatrix(cond);
+  const tMat = isFormulaMatrix(tVal);
+  const fMat = isFormulaMatrix(fVal);
+  if (!cMat && !tMat && !fMat) {
+    return fn(cond, tVal, fVal);
+  }
+  const cRows = cMat ? cond.rows : [[cond]];
+  const tRows = tMat ? tVal.rows : [[tVal]];
+  const fRows = fMat ? fVal.rows : [[fVal]];
+  const rowCount = Math.max(cRows.length, tRows.length, fRows.length);
+  const colCount = Math.max(
+    cRows[0] ? cRows[0].length : 1,
+    tRows[0] ? tRows[0].length : 1,
+    fRows[0] ? fRows[0].length : 1
+  );
+  const out = [];
+  for (let r = 0; r < rowCount; r++) {
+    const cr = cRows[r % cRows.length];
+    const tr = tRows[r % tRows.length];
+    const fr = fRows[r % fRows.length];
+    const rowOut = [];
+    for (let c = 0; c < colCount; c++) {
+      rowOut.push(fn(cr[c % cr.length], tr[c % tr.length], fr[c % fr.length]));
     }
     out.push(rowOut);
   }
@@ -1519,7 +1567,7 @@ function tokenizeScratchFormula(expr) {
 
     // Two-character comparison operators
     const two = s.slice(i, i + 2);
-    if (two === '<>' || two === '!=' || two === '<=' || two === '>=') {
+    if (two === '<>' || two === '!=' || two === '<=' || two === '>=' || two === '==') {
       tokens.push({ type: 'OP', value: two });
       i += 2;
       continue;
@@ -1812,10 +1860,7 @@ function evalFormulaTokens(tokens, ctx) {
         const cond = args[0];
         const tVal = args[1];
         const fVal = args.length >= 3 ? args[2] : false;
-        if (!isFormulaMatrix(cond) && !isFormulaMatrix(tVal) && !isFormulaMatrix(fVal)) {
-          return formulaValToBool(cond) ? tVal : fVal;
-        }
-        return broadcastBinaryOp(cond, tVal, (cVal, tv) => (formulaValToBool(cVal) ? tv : (!isFormulaMatrix(fVal) ? fVal : '')));
+        return broadcastTernaryOp(cond, tVal, fVal, (cVal, tv, fv) => (formulaValToBool(cVal) ? tv : fv));
       }
 
       case 'ISBLANK':
@@ -1937,12 +1982,20 @@ function evalFormulaTokens(tokens, ctx) {
         const vals = flattenMatrixValues(args[0]);
         const crit = args[1];
         const critStr = formulaValToString(crit);
-        const opMatch = critStr.match(/^(<>|!=|<=|>=|=|<|>)(.*)$/);
+        const opMatch = critStr.match(/^(<>|!=|<=|>=|==|=|<|>)(.*)$/);
         let cnt = 0;
         vals.forEach(v => {
           if (opMatch) {
             const op = opMatch[1];
             const rhsRaw = opMatch[2];
+            if ((op === '=' || op === '==') && rhsRaw === '') {
+              if (isEmptyFormulaVal(v)) cnt++;
+              return;
+            }
+            if ((op === '<>' || op === '!=') && rhsRaw === '') {
+              if (!isEmptyFormulaVal(v)) cnt++;
+              return;
+            }
             const rhs = rhsRaw !== '' && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(rhsRaw.trim())
               ? Number(rhsRaw.trim())
               : rhsRaw;
@@ -1951,8 +2004,8 @@ function evalFormulaTokens(tokens, ctx) {
             const escaped = crit.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
             if (new RegExp(`^${escaped}$`, 'i').test(formulaValToString(v))) cnt++;
           } else {
-            const sV = formulaValToString(v).toLowerCase();
-            const sC = critStr.toLowerCase();
+            const sV = formulaValToString(v).trim().toLowerCase();
+            const sC = critStr.trim().toLowerCase();
             if (sV === sC) cnt++;
           }
         });
@@ -2948,7 +3001,7 @@ async function flushPendingScratchEditsToDisk({
   scratchIsSaving = true;
   updateScratchSaveBadgeUI();
 
-  const saved = await saveWorkbookToDisk();
+  const saved = await saveWorkbookToDisk({ silentLockAlert: silentToast });
   scratchIsSaving = false;
 
   // Restore grid keyboard focus if browser dropped activeElement to body during async file write
@@ -2972,13 +3025,13 @@ async function flushPendingScratchEditsToDisk({
     }
     updateScratchSaveBadgeUI();
     renderWorkspaceTabsBar();
-    if (reloadAfter) {
+    if (reloadAfter && saved !== 'staged-primary') {
       await loadWorkbookFromDisk(sheetSelect.value, {
         preserveStatus: saved === 'mirror-locked',
         skipFlushPendingScratch: true
       });
     }
-    if (!silentToast) {
+    if (!silentToast && saved !== 'staged-primary') {
       showToast('Scratch sheet saved to workbook & mirror.', 'success');
     }
     return true;
@@ -3459,6 +3512,9 @@ function startScratchInlineEdit(rNum, cNum, initialChar = null) {
 function renderActiveScratchSheetGrid() {
   if (!scratchGridHead || !scratchGridBody || !workbook || activeWorkspaceTab === DAILY_TRACKER_WS_TAB) {
     return;
+  }
+  if (scratchInlineEditState) {
+    commitActiveScratchInlineEdit();
   }
   const ws = workbook.getWorksheet(activeWorkspaceTab);
   if (!ws) {
@@ -5707,6 +5763,60 @@ function migrateScratchSheetRuntimeMaps(oldName, newName) {
       scratchClipboardRangeState = null;
     }
   }
+}
+
+function captureScratchRuntimeSnapshot() {
+  const cloneNestedMap = (outerMap) => {
+    const out = new Map();
+    if (!(outerMap instanceof Map)) return out;
+    for (const [k, inner] of outerMap.entries()) {
+      if (inner instanceof Map) {
+        out.set(k, new Map(JSON.parse(JSON.stringify(Array.from(inner.entries())))));
+      } else {
+        out.set(k, JSON.parse(JSON.stringify(inner)));
+      }
+    }
+    return out;
+  };
+  return {
+    gridDimensions: cloneNestedMap(scratchGridDimensionsMap),
+    activeCells: cloneNestedMap(scratchActiveCellMap),
+    selectionRanges: cloneNestedMap(scratchSelectionRangeMap),
+    undoStacks: cloneNestedMap(scratchUndoStackMap),
+    redoStacks: cloneNestedMap(scratchRedoStackMap),
+    pendingEdits: cloneNestedMap(scratchPendingEdits),
+    pendingFills: cloneNestedMap(scratchPendingFills),
+    pendingColWidths: cloneNestedMap(scratchPendingColWidths),
+    spillStates: cloneNestedMap(scratchSpillStateMap),
+    spilledCells: cloneNestedMap(scratchSpilledCellsMap),
+    clipboardRange: scratchClipboardRangeState ? { ...scratchClipboardRangeState } : null
+  };
+}
+
+function restoreScratchRuntimeSnapshot(snap) {
+  resetScratchWorkbookRuntimeState();
+  if (!snap || typeof snap !== 'object') return;
+  const copyMapInto = (srcMap, destMap) => {
+    if (!(srcMap instanceof Map)) return;
+    for (const [k, v] of srcMap.entries()) {
+      if (v instanceof Map) {
+        destMap.set(k, new Map(JSON.parse(JSON.stringify(Array.from(v.entries())))));
+      } else {
+        destMap.set(k, JSON.parse(JSON.stringify(v)));
+      }
+    }
+  };
+  copyMapInto(snap.gridDimensions, scratchGridDimensionsMap);
+  copyMapInto(snap.activeCells, scratchActiveCellMap);
+  copyMapInto(snap.selectionRanges, scratchSelectionRangeMap);
+  copyMapInto(snap.undoStacks, scratchUndoStackMap);
+  copyMapInto(snap.redoStacks, scratchRedoStackMap);
+  copyMapInto(snap.pendingEdits, scratchPendingEdits);
+  copyMapInto(snap.pendingFills, scratchPendingFills);
+  copyMapInto(snap.pendingColWidths, scratchPendingColWidths);
+  copyMapInto(snap.spillStates, scratchSpillStateMap);
+  copyMapInto(snap.spilledCells, scratchSpilledCellsMap);
+  scratchClipboardRangeState = snap.clipboardRange ? { ...snap.clipboardRange } : null;
 }
 
 function resetScratchWorkbookRuntimeState() {

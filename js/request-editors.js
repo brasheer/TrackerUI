@@ -7,32 +7,38 @@
 
 // --- 6. BOTTOM EDITOR DOCK + MODAL EDITOR + CROSS-TAB SYNC & DYNAMIC FORMS ---
 function ensureSelectOptionExists(selectEl, statusValue) {
-  if (!selectEl || !statusValue) return;
-  const cleanVal = String(statusValue).trim();
-  if (!cleanVal || UUID_REGEX.test(cleanVal)) return;
-  const exists = Array.from(selectEl.options).some(opt => opt.value === cleanVal);
-  if (!exists) {
-    const opt = document.createElement('option');
-    opt.value = cleanVal;
-    opt.textContent = cleanVal;
-    selectEl.appendChild(opt);
+  if (!selectEl || !statusValue) return '';
+  const cleanVal = String(statusValue).replace(/\s+/g, ' ').trim();
+  if (!cleanVal || UUID_REGEX.test(cleanVal)) return '';
+  const cleanLower = cleanVal.toLowerCase();
+  const existingOpt = Array.from(selectEl.options).find(
+    opt => String(opt.value || '').replace(/\s+/g, ' ').trim().toLowerCase() === cleanLower
+  );
+  if (existingOpt) {
+    return existingOpt.value;
   }
+  const opt = document.createElement('option');
+  opt.value = cleanVal;
+  opt.textContent = cleanVal;
+  selectEl.appendChild(opt);
+  return cleanVal;
 }
 
 function ensureStatusOptionExists(statusValue) {
-  ensureSelectOptionExists(fStatus, statusValue);
-  ensureSelectOptionExists(dockStatus, statusValue);
-  ensureSelectOptionExists(batchStatusSelect, statusValue);
+  let canonical = ensureSelectOptionExists(fStatus, statusValue);
+  canonical = ensureSelectOptionExists(dockStatus, statusValue) || canonical;
+  canonical = ensureSelectOptionExists(batchStatusSelect, statusValue) || canonical;
   if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.statusCol) {
     if (dockDynamicFieldsGrid) {
       const dockSel = dockDynamicFieldsGrid.querySelector(`select[data-custom-col="${activeSchemaConfig.statusCol}"]`);
-      ensureSelectOptionExists(dockSel, statusValue);
+      canonical = ensureSelectOptionExists(dockSel, statusValue) || canonical;
     }
     if (modalDynamicFieldsGrid) {
       const modSel = modalDynamicFieldsGrid.querySelector(`select[data-custom-col="${activeSchemaConfig.statusCol}"]`);
-      ensureSelectOptionExists(modSel, statusValue);
+      canonical = ensureSelectOptionExists(modSel, statusValue) || canonical;
     }
   }
+  return canonical || String(statusValue || '').trim();
 }
 
 function formatCurrentTimestampPrefix() {
@@ -135,7 +141,8 @@ function buildDefaultFormLayoutForActiveSchema() {
     const hdr = String(col.header || '');
     const isSubjectLike =
       idx === activeSchemaConfig.primaryCol ||
-      /\b(subject|summary|description|title|detail|reason|message)\b/i.test(hdr);
+      (/\b(subject|summary|description|title|detail|reason|message)\b/i.test(hdr) &&
+        !/\btitle\s*(status|state|type|#|no|number|received|sent|date)\b/i.test(hdr));
     const isTicket = idx === activeSchemaConfig.ticketCol;
     const isMedText = /\b(broker|dealer|customer|company|vendor|account\s*name|action|type|category|status|disposition)\b/i.test(hdr);
 
@@ -489,8 +496,11 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
     const inputId = `${scopePrefix}CustomCol_${idx}`;
     const isPrimary = idx === activeSchemaConfig.primaryCol;
     const isStatus = idx === activeSchemaConfig.statusCol;
-    const isNotes = idx === activeSchemaConfig.notesCol;
+    const isNotes = idx === activeSchemaConfig.notesCol || col.dataType === 'notes';
     const isTicket = idx === activeSchemaConfig.ticketCol;
+    const colDataType = col.dataType || 'auto';
+    const colValSource = col.validationSource || 'auto';
+    const colControlMode = col.controlMode || (isStatus ? 'select' : 'datalist');
     const fullTitleAttr = `${escapeHtml(col.header)} (Column ${escapeHtml(colLetter)})`;
     const labelInnerHtml = `<span class="field-lbl-main">${escapeHtml(col.header)}</span> <span class="field-col-tag">Col ${escapeHtml(colLetter)}</span>`;
 
@@ -509,17 +519,19 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
       `;
     }
 
-    if (isStatus) {
-      const cleanColOpts = Array.isArray(col.dropdownOptions)
-        ? col.dropdownOptions.filter(s => s && !UUID_REGEX.test(String(s).trim()))
-        : [];
+    const cleanColOpts = Array.isArray(col.dropdownOptions)
+      ? col.dropdownOptions.filter(s => s && !UUID_REGEX.test(String(s).trim()))
+      : [];
+
+    if (isStatus || (colControlMode === 'select' && cleanColOpts.length > 0)) {
       const baseStatusOpts = cleanColOpts.length > 0
         ? cleanColOpts
         : defaultStatusesList;
-      const statusOpts = typeof mergeRequiredOperationalStatuses === 'function'
+      const statusOpts = isStatus && typeof mergeRequiredOperationalStatuses === 'function'
         ? mergeRequiredOperationalStatuses(baseStatusOpts)
         : baseStatusOpts;
-      const optionsHtml = statusOpts
+      const emptyOptHtml = !isStatus ? '<option value="">— Select —</option>' : '';
+      const optionsHtml = emptyOptHtml + statusOpts
         .map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`)
         .join('');
       return `
@@ -532,13 +544,13 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
       `;
     }
 
-    const cleanDatalistOpts = Array.isArray(col.dropdownOptions)
-      ? col.dropdownOptions.filter(v => v && !UUID_REGEX.test(String(v).trim()))
-      : [];
-    const hasDatalist = cleanDatalistOpts.length > 0;
-    const datalistId = hasDatalist ? `${scopePrefix}CustomList_${idx}` : '';
-    const datalistHtml = hasDatalist
-      ? `<datalist id="${datalistId}">${cleanDatalistOpts.map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`
+    const isYardSource =
+      colValSource === 'yard_list' ||
+      (colValSource === 'auto' && /\b(yard|yards|yard\s*#|yard\s*name)\b/i.test(String(col.header || '')) && Array.isArray(validationYards) && validationYards.length > 0);
+    const hasDatalist = isYardSource ? (Array.isArray(validationYards) && validationYards.length > 0) : cleanColOpts.length > 0;
+    const datalistId = isYardSource ? 'yardList' : (hasDatalist ? `${scopePrefix}CustomList_${idx}` : '');
+    const datalistHtml = (!isYardSource && hasDatalist)
+      ? `<datalist id="${datalistId}">${cleanColOpts.map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`
       : '';
     const groupClass = isPrimary
       ? (isDock ? 'form-group dock-col-subject' : 'form-group full')
@@ -553,10 +565,15 @@ function buildDynamicFieldsHtmlForScope(scopePrefix) {
          </div>`
       : `<label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>`;
 
+    const inputModeAttr = (colDataType === 'number' || colDataType === 'currency') ? ' inputmode="decimal"' : '';
+    const placeholderSuffix = colDataType === 'date'
+      ? ' (MM/DD/YYYY)'
+      : (colDataType === 'currency' ? ' ($0.00)' : '...');
+
     return `
       <div class="${groupClass}" data-field-id="${fieldId}">
         ${headerLabelBlock}
-        <input type="text" id="${inputId}" data-custom-col="${idx}" ${hasDatalist ? `list="${datalistId}"` : ''} placeholder="${escapeHtml(col.header)}...">
+        <input type="text" id="${inputId}" data-custom-col="${idx}" data-col-type="${escapeHtml(colDataType)}"${inputModeAttr} ${hasDatalist ? `list="${datalistId}"` : ''} placeholder="${escapeHtml(col.header)}${placeholderSuffix}">
         ${datalistHtml}
       </div>
     `;
@@ -635,8 +652,8 @@ function populateDynamicGridFromItem(gridEl, itemOrNull) {
     const key = `col_${colIdx}`;
     if (!itemOrNull) {
       if (colIdx === activeSchemaConfig.statusCol) {
-        ensureSelectOptionExists(inputEl, defaultSt);
-        inputEl.value = defaultSt;
+        const canonicalDefault = ensureSelectOptionExists(inputEl, defaultSt) || defaultSt;
+        inputEl.value = canonicalDefault;
       } else {
         inputEl.value = '';
       }
@@ -649,8 +666,8 @@ function populateDynamicGridFromItem(gridEl, itemOrNull) {
     if (colIdx === activeSchemaConfig.statusCol) {
       const candSt = val || (itemOrNull.status && !UUID_REGEX.test(String(itemOrNull.status).trim()) ? itemOrNull.status : '');
       const st = candSt || defaultSt;
-      ensureSelectOptionExists(inputEl, st);
-      inputEl.value = st;
+      const canonicalSt = ensureSelectOptionExists(inputEl, st) || st;
+      inputEl.value = canonicalSt;
     } else {
       inputEl.value = val;
     }
@@ -665,9 +682,15 @@ function readFormPayloadFromScope(scopeMode) {
     if (gridEl) {
       gridEl.querySelectorAll('[data-custom-col]').forEach(el => {
         const idx = Number(el.dataset.customCol);
+        const colObj = activeSchemaConfig.columns.find(c => c.colIndex === idx);
         let val = String(el.value || '').trim();
+        if (colObj && (colObj.validationSource === 'yard_list' || /\b(yard|yards)\b/i.test(String(colObj.header || ''))) && typeof resolveYardValueFromTypedInput === 'function') {
+          val = resolveYardValueFromTypedInput(val);
+        }
         if (idx === activeSchemaConfig.ticketCol && val) {
           val = val.toUpperCase();
+        } else if (colObj && colObj.dataType && colObj.dataType !== 'auto' && typeof formatValueForColumnDataType === 'function') {
+          val = formatValueForColumnDataType(val, colObj.dataType);
         }
         customValues[`col_${idx}`] = val;
       });
@@ -694,16 +717,29 @@ function readFormPayloadFromScope(scopeMode) {
     };
   }
 
+  const stdSettings = (activeSchemaConfig && activeSchemaConfig.colSettings) || {};
+  const fmtStd = (colIdx, rawVal) => {
+    let v = String(rawVal || '').trim();
+    if (colIdx === 7 && typeof resolveYardValueFromTypedInput === 'function') {
+      v = resolveYardValueFromTypedInput(v);
+    }
+    const cfg = stdSettings[colIdx];
+    if (cfg && cfg.dataType && cfg.dataType !== 'auto' && typeof formatValueForColumnDataType === 'function') {
+      return formatValueForColumnDataType(v, cfg.dataType);
+    }
+    return v;
+  };
+
   return {
     isCustomSchema: false,
-    subject: (isDock ? dockSubject.value : fSubject.value) || '',
-    ticket: (isDock ? dockTicket.value : fTicket.value) || '',
-    broker: (isDock ? dockBroker.value : fBroker.value) || '',
-    master: (isDock ? dockMaster.value : fMaster.value) || '',
-    bidder: (isDock ? dockBidder.value : fBidder.value) || '',
-    action: (isDock ? dockAction.value : fAction.value) || '',
-    yard: (isDock ? dockYard.value : fYard.value) || '',
-    lots: (isDock ? dockLots.value : fLots.value) || '',
+    subject: fmtStd(1, isDock ? dockSubject.value : fSubject.value),
+    ticket: fmtStd(2, isDock ? dockTicket.value : fTicket.value),
+    broker: fmtStd(3, isDock ? dockBroker.value : fBroker.value),
+    master: fmtStd(4, isDock ? dockMaster.value : fMaster.value),
+    bidder: fmtStd(5, isDock ? dockBidder.value : fBidder.value),
+    action: fmtStd(6, isDock ? dockAction.value : fAction.value),
+    yard: fmtStd(7, isDock ? dockYard.value : fYard.value),
+    lots: fmtStd(8, isDock ? dockLots.value : fLots.value),
     notes: (isDock ? dockNotes.value : fNotes.value) || '',
     status: (isDock ? dockStatus.value : fStatus.value) || getDefaultStatus()
   };
@@ -1369,8 +1405,8 @@ function applySavedDraftToBottomDock(snap) {
     if (dockLots) dockLots.value = f.lots || '';
     if (dockNotes) dockNotes.value = f.notes || '';
     if (dockStatus && f.status) {
-      ensureStatusOptionExists(f.status);
-      dockStatus.value = f.status;
+      const canonicalDraftSt = ensureStatusOptionExists(f.status);
+      dockStatus.value = canonicalDraftSt;
     }
     return true;
   }
@@ -1604,8 +1640,8 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     if (dockLots) dockLots.value = item.lots;
     if (dockNotes) dockNotes.value = item.notes;
 
-    ensureStatusOptionExists(item.status);
-    if (dockStatus) dockStatus.value = item.status;
+    const canonicalDockSt = ensureStatusOptionExists(item.status);
+    if (dockStatus) dockStatus.value = canonicalDockSt;
   }
 
   syncDockDraftIndicatorsUI();
@@ -1741,8 +1777,8 @@ function openEditModal(sheetName, rowNumber) {
     fLots.value = item.lots;
     fNotes.value = item.notes;
 
-    ensureStatusOptionExists(item.status);
-    fStatus.value = item.status;
+    const canonicalModalSt = ensureStatusOptionExists(item.status);
+    fStatus.value = canonicalModalSt;
   }
 
   editModal.classList.add('open');
@@ -2275,19 +2311,27 @@ async function openViewOnlyTrackerModal() {
       const ws = mirrorWb.getWorksheet(sName);
       if (!ws) return;
       if (viewOnlyState.isCustomSchema) {
+        const defaultMirrorSt = getDefaultStatus();
         ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
           if (rowNumber === 1) return;
           const customValues = {};
           let hasAny = false;
           viewOnlyState.customColumns.forEach(c => {
-            const v = cellText(row, c.colIndex);
+            const rawV = cellText(row, c.colIndex);
+            const v = (rawV && UUID_REGEX.test(rawV.trim())) ? '' : rawV;
             customValues[`col_${c.colIndex}`] = v;
             if (v !== '') hasAny = true;
           });
           if (!hasAny) return;
+          const rawSt = activeSchemaConfig.statusCol
+            ? (customValues[`col_${activeSchemaConfig.statusCol}`] || '')
+            : '';
           const status = activeSchemaConfig.statusCol
-            ? (customValues[`col_${activeSchemaConfig.statusCol}`] || 'Pending')
+            ? ((rawSt && !UUID_REGEX.test(rawSt.trim())) ? rawSt : defaultMirrorSt)
             : 'Open';
+          if (activeSchemaConfig.statusCol) {
+            customValues[`col_${activeSchemaConfig.statusCol}`] = status;
+          }
           viewOnlyState.rows.push({
             sheetName: sName,
             rowNumber,

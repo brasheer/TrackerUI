@@ -103,11 +103,26 @@ function loadSavedJsonMapFromStorage(storageKey) {
   return {};
 }
 
+function normalizeActionCategoryOverridesMap(rawObj) {
+  const out = {};
+  if (!rawObj || typeof rawObj !== 'object' || Array.isArray(rawObj)) return out;
+  Object.entries(rawObj).forEach(([k, v]) => {
+    const normKey = String(k || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const normVal = String(v || '').replace(/\s+/g, ' ').trim();
+    if (normKey && normVal) {
+      out[normKey] = normVal;
+    }
+  });
+  return out;
+}
+
 const FORM_LAYOUTS_STORAGE_KEY = 'trackerui_form_layouts_v1';
 const ROW_LAST_ACCESSED_STORAGE_KEY = 'trackerui_row_last_accessed_v1';
 const ROW_LAST_ACCESSED_MAX_ENTRIES = 5000;
 let schemaOverridesStore = loadSavedJsonMapFromStorage(SCHEMA_OVERRIDES_STORAGE_KEY);
-let actionCategoryOverridesStore = loadSavedJsonMapFromStorage(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY);
+let actionCategoryOverridesStore = normalizeActionCategoryOverridesMap(
+  loadSavedJsonMapFromStorage(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY)
+);
 let formLayoutsStore = loadSavedJsonMapFromStorage(FORM_LAYOUTS_STORAGE_KEY);
 let rowLastAccessedStore = loadSavedJsonMapFromStorage(ROW_LAST_ACCESSED_STORAGE_KEY);
 
@@ -200,10 +215,11 @@ let copiedTrackerRowsClipboard = []; // Cloned row items copied via checkbox sel
 let rolloverSourceMode = 'previous'; // 'previous' (Immediately preceding sheet only) | 'all' (All prior daily tabs)
 
 // Dynamic Reference Data & Dev Mock Mode
-let masterAccountsMap = []; // [{ broker, master, bidder, yard? }]
+let masterAccountsMap = []; // [{ broker, master }]
 let hasMasterAccountsSheet = false;
 let validationActions = [];
 let validationStatuses = [];
+let validationYards = []; // [{ value, name, label }]
 let validationListsByHeader = new Map(); // lowerHeader -> string[]
 let actionCategoryMap = new Map(); // lowerAction -> parentCategory
 
@@ -404,7 +420,11 @@ function isProtectedReferenceSheetName(sheetName) {
     norm === 'validation list' ||
     norm === 'validation lists' ||
     norm === 'master account' ||
-    norm === 'master accounts'
+    norm === 'master accounts' ||
+    norm === 'yard list' ||
+    norm === 'yard lists' ||
+    norm === 'yards' ||
+    norm === 'yard locations'
   );
 }
 
@@ -438,12 +458,12 @@ function isOverdueStatus(status) {
 }
 
 function isNewStatus(status) {
-  return String(status || '').trim().toLowerCase() === 'new';
+  return String(status || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'new';
 }
 
 function resolveInProgressStatusLabel() {
   if (typeof validationStatuses !== 'undefined' && Array.isArray(validationStatuses)) {
-    const match = validationStatuses.find(s => String(s || '').trim().toLowerCase() === 'in progress');
+    const match = validationStatuses.find(s => /^in[\s\-_]*progress$/i.test(String(s || '').trim()));
     if (match) return String(match).trim();
   }
   return 'In Progress';
@@ -528,13 +548,18 @@ function evaluateRequestOverdueMetrics(entries, referenceTabOrTime = null, curre
   }
 
   let refTime = 0;
+  let refTabName = '';
   if (typeof referenceTabOrTime === 'number' && Number.isFinite(referenceTabOrTime)) {
     refTime = referenceTabOrTime;
   } else if (typeof referenceTabOrTime === 'string' && DATE_TAB_REGEX.test(referenceTabOrTime.trim())) {
-    refTime = parseDateTab(referenceTabOrTime.trim());
+    refTabName = referenceTabOrTime.trim();
+    refTime = parseDateTab(refTabName);
   }
   if (!refTime) {
     refTime = latestTime;
+  }
+  if (refTabName && (!latestTime || refTime >= latestTime)) {
+    distinctSheets.add(refTabName);
   }
 
   const ageDays = (firstTime > 0 && refTime > 0 && refTime >= firstTime)
@@ -877,6 +902,7 @@ const modalStandardFieldsGrid = document.getElementById('modalStandardFieldsGrid
 const modalDynamicFieldsGrid = document.getElementById('modalDynamicFieldsGrid');
 const brokerListEl = document.getElementById('brokerList');
 const actionListEl = document.getElementById('actionList');
+const yardListEl = document.getElementById('yardList');
 
 // Bottom Dock Editor DOM Elements
 const bottomEditorDock = document.getElementById('bottomEditorDock');
@@ -1081,6 +1107,9 @@ const schemaTicketColSelect = document.getElementById('schemaTicketColSelect');
 const schemaSecondaryColSelect = document.getElementById('schemaSecondaryColSelect');
 const schemaTrackingColInfo = document.getElementById('schemaTrackingColInfo');
 const schemaDetectedColsPreview = document.getElementById('schemaDetectedColsPreview');
+const btnToggleSchemaAdvanced = document.getElementById('btnToggleSchemaAdvanced');
+const schemaAdvancedPanel = document.getElementById('schemaAdvancedPanel');
+const schemaAdvancedTableBody = document.getElementById('schemaAdvancedTableBody');
 const btnResetSchemaMapper = document.getElementById('btnResetSchemaMapper');
 const btnCancelSchemaMapper = document.getElementById('btnCancelSchemaMapper');
 const btnSaveSchemaMapper = document.getElementById('btnSaveSchemaMapper');
@@ -1605,7 +1634,7 @@ const BUILTIN_ACTION_CATEGORY_RULES = [
 ];
 
 function resolveActionParentCategory(actionStr) {
-  const clean = String(actionStr || '').trim();
+  const clean = String(actionStr || '').replace(/\s+/g, ' ').trim();
   if (!clean || clean === '—') return 'Uncategorized';
   const lower = clean.toLowerCase();
 
@@ -1788,7 +1817,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.5';
+const APP_VERSION = 'v1.19.6';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;
@@ -2113,6 +2142,21 @@ function initMultiTabInstanceLock() {
       }
     });
 
+    const hasUnsavedInFlightWork = () => {
+      if (window.__trackerDiskWriteInFlight) return true;
+      if (typeof scratchIsSaving !== 'undefined' && scratchIsSaving) return true;
+      if (typeof scratchInlineEditState !== 'undefined' && scratchInlineEditState) return true;
+      if (typeof hasAnyPendingScratchMutations === 'function' && hasAnyPendingScratchMutations()) return true;
+      return false;
+    };
+
+    window.addEventListener('beforeunload', (evt) => {
+      if (hasUnsavedInFlightWork()) {
+        evt.preventDefault();
+        evt.returnValue = '';
+      }
+    });
+
     const cleanupOnClose = () => {
       releaseActiveWebLock();
       if (instanceBroadcastChannel) {
@@ -2121,7 +2165,6 @@ function initMultiTabInstanceLock() {
         } catch (_) { /* ignore */ }
       }
     };
-    window.addEventListener('beforeunload', cleanupOnClose);
     window.addEventListener('pagehide', cleanupOnClose);
   }
 
@@ -2248,6 +2291,23 @@ function showPwaUpdateBanner() {
 async function forceClearAppCacheAndReload() {
   closeToolsMenu();
   showToast('Refreshing application cache and loading latest version...', 'info');
+  try {
+    if (typeof commitActiveScratchInlineEdit === 'function') {
+      commitActiveScratchInlineEdit();
+    }
+    if (
+      typeof hasAnyPendingScratchMutations === 'function' &&
+      hasAnyPendingScratchMutations() &&
+      typeof flushPendingScratchEditsToDisk === 'function'
+    ) {
+      await flushPendingScratchEditsToDisk({ reloadAfter: false, silentToast: true });
+    }
+    if (typeof saveWorkbookMutexPromise !== 'undefined' && saveWorkbookMutexPromise) {
+      await saveWorkbookMutexPromise.catch(() => {});
+    }
+  } catch (flushErr) {
+    console.warn('Could not flush pending edits before cache reload:', flushErr);
+  }
   try {
     if ('serviceWorker' in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();

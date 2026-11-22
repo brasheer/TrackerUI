@@ -529,7 +529,8 @@ function resetActiveTrackerUIDisconnectedState() {
   updateTemplatesDirUI();
   const prof = getActiveTrackerProfile();
   const label = prof ? escapeHtml(prof.name) : 'Tracker';
-  listBody.innerHTML = `<tr><td colspan="13" class="empty-table-cell">Click <strong>Select Agent Folder</strong> to connect the workbook directory for <strong>${label}</strong>.</td></tr>`;
+  const colSpan = typeof getActiveTableColSpan === 'function' ? getActiveTableColSpan() : 12;
+  listBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell">Click <strong>Select Agent Folder</strong> to connect the workbook directory for <strong>${label}</strong>.</td></tr>`;
   if (typeof syncWorkspaceTabsUI === 'function') syncWorkspaceTabsUI();
 }
 
@@ -741,9 +742,10 @@ async function scanDirectoryAndLoadWorkbooks(preserveFileName = null) {
     sheetTabsBar.style.display = 'none';
     schemaBanner.style.display = 'none';
     setStatus(`No working .xlsx in ${parentDirHandle.name}`, 'warning');
+    const colSpan = typeof getActiveTableColSpan === 'function' ? getActiveTableColSpan() : 12;
     listBody.innerHTML = `
       <tr>
-        <td colspan="13" style="text-align:center; color:var(--text-muted); padding: 36px;">
+        <td colspan="${colSpan}" style="text-align:center; color:var(--text-muted); padding: 36px;">
           <div style="margin-bottom:12px;">
             No working <code>.xlsx</code> files found in folder <strong>${escapeHtml(parentDirHandle.name)}</strong>.
           </div>
@@ -1184,7 +1186,7 @@ function parseSharedStringsFromXml(ssXml) {
   const siRegex = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
   let m;
   while ((m = siRegex.exec(ssXml)) !== null) {
-    const inner = m[1];
+    const inner = m[1].replace(/<rPh\b[^>]*>[\s\S]*?<\/rPh>/g, '');
     const tParts = [];
     const tRegex = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
     let tm;
@@ -1348,7 +1350,7 @@ async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
               attrs += ' cm="1"';
             }
             const isErrVal = typeof vInner === 'string' && /^#[A-Z0-9/!?]+$/.test(vInner.trim());
-            const isNumVal = vInner !== undefined && vInner !== '' && !isNaN(Number(vInner));
+            const isNumVal = typeof vInner === 'string' && vInner.trim() !== '' && !isNaN(Number(vInner.trim()));
             if (isErrVal) {
               if (!/\bt="/.test(attrs)) attrs += ' t="e"';
             } else if (isNumVal) {
@@ -1420,21 +1422,24 @@ async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
         DATE_TAB_REGEX.test(sheetName.trim());
 
       if (isDailyOrTemplate) {
-        xml = xml.replace(
-          /<c\b([^>]*\br="C(\d+)"[^>]*)>(<f\b[^>]*>[\s\S]*?<\/f>)(<v[^>]*>[\s\S]*?<\/v>|<v\/>)?<\/c>/g,
-          (full, cAttrs, rNumStr, fTag, vFull) => {
-            let cleanAttrs = cAttrs.replace(/\s+cm="[^"]*"/g, '');
-            if (/\bt="[^"]*"/.test(cleanAttrs)) {
-              cleanAttrs = cleanAttrs.replace(/\bt="[^"]*"/, 't="str"');
-            } else {
-              cleanAttrs += ' t="str"';
+        if (!activeSchemaConfig || activeSchemaConfig.isStandardSchema) {
+          xml = xml.replace(
+            /<c\b([^>]*\br="C(\d+)"[^>]*)>(<f\b[^>]*>[\s\S]*?<\/f>)(<v[^>]*>[\s\S]*?<\/v>|<v\/>)?<\/c>/g,
+            (full, cAttrs, rNumStr, fTag, vFull) => {
+              if (!/XLOOKUP|Master Accounts/i.test(fTag)) return full;
+              let cleanAttrs = cAttrs.replace(/\s+cm="[^"]*"/g, '');
+              if (/\bt="[^"]*"/.test(cleanAttrs)) {
+                cleanAttrs = cleanAttrs.replace(/\bt="[^"]*"/, 't="str"');
+              } else {
+                cleanAttrs += ' t="str"';
+              }
+              const cleanFTag = fTag.replace(/^<f\b[^>]*>/, '<f>');
+              let cleanV = vFull || '<v/>';
+              if (cleanV === '<v></v>') cleanV = '<v/>';
+              return `<c${cleanAttrs}>${cleanFTag}${cleanV}</c>`;
             }
-            const cleanFTag = fTag.replace(/^<f\b[^>]*>/, '<f>');
-            let cleanV = vFull || '<v/>';
-            if (cleanV === '<v></v>') cleanV = '<v/>';
-            return `<c${cleanAttrs}>${cleanFTag}${cleanV}</c>`;
-          }
-        );
+          );
+        }
 
         if ( archiveState && archiveState.capturedStdDataValidationsXml ) {
           const targetStdXml = archiveState.capturedStdDataValidationsXml;
@@ -1458,10 +1463,13 @@ async function repairSavedXlsxArchive(excelJsBuffer, archiveState) {
         const customSynthesizedExtLst = (!activeSchemaConfig.isStandardSchema && hasValidationSheetInWb && typeof buildCustomSchemaDataValidationsExtLst === 'function')
           ? buildCustomSchemaDataValidationsExtLst()
           : null;
+        const standardSynthesizedExtLst = (activeSchemaConfig.isStandardSchema && hasValidationSheetInWb && typeof buildStandardSchemaDataValidationsExtLst === 'function')
+          ? buildStandardSchemaDataValidationsExtLst()
+          : null;
 
         let desiredExtLst = (archiveState && archiveState.capturedExtLstXml)
           ? archiveState.capturedExtLstXml
-          : (customSynthesizedExtLst || (activeSchemaConfig.isStandardSchema && hasValidationSheetInWb ? DAILY_SHEET_DATA_VALIDATIONS_EXTLST : null));
+          : (customSynthesizedExtLst || standardSynthesizedExtLst || (activeSchemaConfig.isStandardSchema && hasValidationSheetInWb ? DAILY_SHEET_DATA_VALIDATIONS_EXTLST : null));
 
         // If custom schema has a status column validation on the validation sheet that wasn't in an older capturedExtLstXml, merge or prefer the fuller one
         if (
@@ -1664,14 +1672,41 @@ function getMasterAccountsWorksheet(wb = workbook) {
   return found;
 }
 
+function getYardListWorksheet(wb = workbook) {
+  if (!wb || typeof wb.eachSheet !== 'function') return null;
+  let found = null;
+  wb.eachSheet((ws) => {
+    const lower = String(ws.name || '').trim().toLowerCase();
+    if (
+      lower === 'yard list' ||
+      lower === 'yard lists' ||
+      lower === 'yards' ||
+      lower === 'yard locations'
+    ) {
+      found = ws;
+    }
+  });
+  return found;
+}
+
 function getMockMasterAccountsList() {
   if (typeof window !== 'undefined' && Array.isArray(window.MOCK_MASTER_ACCOUNTS)) {
     return window.MOCK_MASTER_ACCOUNTS.map(item => ({
       broker: String(item.broker || '').trim(),
-      master: String(item.master || '').trim().toUpperCase(),
-      bidder: String(item.bidder || '').trim().toUpperCase(),
-      yard: String(item.yard || '').trim().toUpperCase()
+      master: String(item.master || '').trim().toUpperCase()
     })).filter(m => m.broker || m.master);
+  }
+  return [];
+}
+
+function getMockYardList() {
+  if (typeof window !== 'undefined' && Array.isArray(window.MOCK_YARD_LIST)) {
+    return window.MOCK_YARD_LIST.map(item => {
+      const value = String(item.value || item.yard || '').trim().toUpperCase();
+      const name = String(item.name || '').trim();
+      const label = value && name ? `${value} — ${name}` : (value || name);
+      return { value: value || name, name, label };
+    }).filter(y => y.value);
   }
   return [];
 }
@@ -1800,18 +1835,28 @@ function extractDetectedRow1HeadersFromSheet(ws) {
 
 function findValidationOptionsForHeader(headerLabel) {
   if (!headerLabel || !validationListsByHeader || validationListsByHeader.size === 0) return [];
-  const norm = String(headerLabel).trim().toLowerCase();
+  const norm = String(headerLabel).replace(/\s+/g, ' ').trim().toLowerCase();
   if (!norm) return [];
   if (validationListsByHeader.has(norm)) {
     return (validationListsByHeader.get(norm) || []).filter(v => !UUID_REGEX.test(String(v).trim()));
   }
-  // Singular/plural & partial match (e.g. "Requested Action" <-> "Requested Actions", "Status" <-> "Status Options")
+  const stripHeaderQualifiers = (s) =>
+    String(s || '')
+      .replace(/\b(requested|request|department|dept|options?|lists?|values?|choices?|types?)\b/g, ' ')
+      .replace(/s\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const normCore = stripHeaderQualifiers(norm);
+
+  // Singular/plural, prefix & core-keyword match (e.g. "Request Status" <-> "Status Options", "Department Action" <-> "Requested Actions")
   for (const [vHeader, opts] of validationListsByHeader.entries()) {
+    const vCore = stripHeaderQualifiers(vHeader);
     if (
       vHeader === `${norm}s` ||
       `${vHeader}s` === norm ||
       (norm.length >= 4 && vHeader.startsWith(norm)) ||
-      (vHeader.length >= 4 && norm.startsWith(vHeader))
+      (vHeader.length >= 4 && norm.startsWith(vHeader)) ||
+      (normCore.length >= 3 && vCore.length >= 3 && normCore === vCore)
     ) {
       return (opts || []).filter(v => !UUID_REGEX.test(String(v).trim()));
     }
@@ -2051,6 +2096,127 @@ function inferDefaultCopyableForCustomColumn(col, roles = {}) {
   return /\b(subject|ticket|case|incident|ref|master|account|member|bidder|buyer|dealer|yard|lot|vin|invoice|po|check|wire|phone|email|id|#)\b/i.test(header);
 }
 
+function inferDefaultDataTypeForColumn(col, roles = {}, isStandard = false) {
+  if (!col) return 'auto';
+  const idx = col.colIndex;
+  const header = String(col.header || '').trim();
+  if (isStandard) {
+    if (idx === 2 || idx === 4 || idx === 5 || idx === 7) return 'uppercase';
+    if (idx === (roles.notesCol || 9)) return 'notes';
+    return 'auto';
+  }
+  if (idx === roles.notesCol) return 'notes';
+  if (idx === roles.ticketCol) return 'uppercase';
+  if (idx === roles.statusCol || idx === roles.primaryCol) return 'auto';
+  if (/\b(notes?|comments?|remarks?|action\s*taken|description)\b/i.test(header)) return 'notes';
+  if (/\b(date|due|created|submitted|received|sent|timestamp)\b/i.test(header)) return 'date';
+  if (/\b(amount|price|cost|fee|total|balance|payment|charge|usd|\$)\b/i.test(header)) return 'currency';
+  if (/\b(qty|quantity|count|days|age|miles|mileage|year)\b/i.test(header)) return 'number';
+  if (/\b(ticket|master|bidder|yard|vin|state|code|po\s*#?|check\s*#?|wire\s*#?)\b/i.test(header)) return 'uppercase';
+  return 'auto';
+}
+
+function inferDefaultValidationSourceForColumn(col, roles = {}, isStandard = false) {
+  if (!col) return 'auto';
+  const idx = col.colIndex;
+  const header = String(col.header || '').trim();
+  if (isStandard) {
+    if (idx === 3) return 'broker_list';
+    if (idx === 6) return 'action_list';
+    if (idx === 7) return 'yard_list';
+    if (idx === (roles.statusCol || 10)) return 'status_list';
+    return 'none';
+  }
+  if (idx === roles.statusCol) return 'status_list';
+  if (idx === roles.notesCol) return 'none';
+  if (/\b(yard|yards|yard\s*#|yard\s*name|branch)\b/i.test(header)) return 'yard_list';
+  if (/\b(broker\s*name|broker)\b/i.test(header)) return 'broker_list';
+  if (/\b(requested\s*action|action\s*type|department\s*action)\b/i.test(header)) return 'action_list';
+  return 'auto';
+}
+
+function resolveDropdownOptionsForSource(sourceKey, col, customListStr = '', dvOptsByCol = null) {
+  const src = String(sourceKey || 'auto').trim();
+  if (src === 'none') return [];
+  if (src === 'custom') {
+    return String(customListStr || '')
+      .split(',')
+      .map(s => s.replace(/\s+/g, ' ').trim())
+      .filter(s => s && !UUID_REGEX.test(s));
+  }
+  if (src === 'yard_list') {
+    return (Array.isArray(validationYards) ? validationYards : []).map(y => y.value);
+  }
+  if (src === 'broker_list') {
+    const seen = new Set();
+    const out = [];
+    (Array.isArray(masterAccountsMap) ? masterAccountsMap : []).forEach(m => {
+      const b = String((m && m.broker) || '').trim();
+      if (b && !seen.has(b.toLowerCase())) {
+        seen.add(b.toLowerCase());
+        out.push(b);
+      }
+    });
+    return out;
+  }
+  if (src === 'action_list') {
+    return (validationActions.length > 0 ? validationActions : DEFAULT_ACTIONS)
+      .filter(s => s && !UUID_REGEX.test(String(s).trim()));
+  }
+  if (src === 'status_list') {
+    const base = validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES;
+    return (typeof mergeRequiredOperationalStatuses === 'function' ? mergeRequiredOperationalStatuses(base) : base)
+      .filter(s => s && !UUID_REGEX.test(String(s).trim()));
+  }
+  if (src.startsWith('hdr::')) {
+    const hdrKey = src.slice(5).trim().toLowerCase();
+    if (validationListsByHeader && validationListsByHeader.has(hdrKey)) {
+      return (validationListsByHeader.get(hdrKey) || []).filter(s => s && !UUID_REGEX.test(String(s).trim()));
+    }
+    return [];
+  }
+  // 'auto': check header match in validationListsByHeader, then Yard header match, then worksheet dataValidations
+  if (col) {
+    const headerOpts = findValidationOptionsForHeader(col.header);
+    if (headerOpts.length > 0) return headerOpts;
+    if (/\b(yard|yards|yard\s*#|yard\s*name)\b/i.test(String(col.header || '')) && Array.isArray(validationYards) && validationYards.length > 0) {
+      return validationYards.map(y => y.value);
+    }
+    if (dvOptsByCol && dvOptsByCol.has(col.colIndex)) {
+      return dvOptsByCol.get(col.colIndex);
+    }
+    if (Array.isArray(col.dropdownOptions) && col.dropdownOptions.length > 0) {
+      return col.dropdownOptions;
+    }
+  }
+  return [];
+}
+
+function formatValueForColumnDataType(rawVal, dataType) {
+  const str = String(rawVal !== undefined && rawVal !== null ? rawVal : '').trim();
+  if (!str) return '';
+  if (dataType === 'uppercase') {
+    return str.toUpperCase();
+  }
+  if (dataType === 'currency') {
+    const cleaned = str.replace(/[$,\s]/g, '');
+    const num = Number(cleaned);
+    if (cleaned !== '' && Number.isFinite(num)) {
+      return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return str;
+  }
+  if (dataType === 'number') {
+    const cleaned = str.replace(/,/g, '');
+    const num = Number(cleaned);
+    if (cleaned !== '' && Number.isFinite(num)) {
+      return String(num);
+    }
+    return str;
+  }
+  return str;
+}
+
 function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   const refWs = findPrimarySchemaHeaderWorksheet(wb);
   const detected = extractDetectedRow1HeadersFromSheet(refWs);
@@ -2069,6 +2235,11 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     useStandard = true;
   }
 
+  const savedColSettings = (savedOverride && savedOverride.colSettings && typeof savedOverride.colSettings === 'object')
+    ? savedOverride.colSettings
+    : {};
+  const dvOptsByCol = extractDataValidationOptionsByCol(wb, originalArchiveState);
+
   if (useStandard) {
     const stdMap = refWs ? getStandardWorksheetColumnMapOnly(refWs) : {
       isTemplateLayout: false,
@@ -2077,24 +2248,77 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
       emailSubjCol: null,
       trackingCol: 11
     };
+    const stdCols = detected.columns.length > 0
+      ? detected.columns
+      : STANDARD_HEADERS.slice(0, 10).map((h, i) => ({
+          colIndex: i + 1,
+          fieldKey: `col_${i + 1}`,
+          colLetter: colNumberToExcelLetters(i + 1),
+          header: h,
+          dropdownOptions: []
+        }));
+    const stdRoles = {
+      primaryCol: 1,
+      ticketCol: 2,
+      secondaryCol: 3,
+      statusCol: stdMap.statusCol,
+      notesCol: stdMap.notesCol,
+      trackingCol: stdMap.trackingCol
+    };
+    const hasExplicitStdCopyCols = Boolean(savedOverride && Array.isArray(savedOverride.copyCols));
+    const stdCopyCols = hasExplicitStdCopyCols
+      ? Array.from(new Set(
+          savedOverride.copyCols
+            .map(Number)
+            .filter(n => n >= 1 && n !== stdMap.statusCol && n !== stdMap.notesCol && n !== stdMap.trackingCol)
+        )).sort((a, b) => a - b)
+      : [1, 2, 4, 5, 7, 8];
+
+    const resolvedStdColSettings = {};
+    stdCols.forEach(c => {
+      const cfg = savedColSettings[c.colIndex] || savedColSettings[`col_${c.colIndex}`] || {};
+      const defaultType = inferDefaultDataTypeForColumn(c, stdRoles, true);
+      const defaultValSrc = inferDefaultValidationSourceForColumn(c, stdRoles, true);
+      const dataType = ['auto', 'uppercase', 'number', 'currency', 'date', 'notes'].includes(cfg.dataType)
+        ? cfg.dataType
+        : defaultType;
+      const validationSource = cfg.validationSource || defaultValSrc;
+      const customList = typeof cfg.customList === 'string' ? cfg.customList : '';
+      const controlMode = ['datalist', 'select'].includes(cfg.controlMode)
+        ? cfg.controlMode
+        : (c.colIndex === stdMap.statusCol ? 'select' : 'datalist');
+      c.dataType = dataType;
+      c.validationSource = validationSource;
+      c.customList = customList;
+      c.controlMode = controlMode;
+      c.dropdownOptions = resolveDropdownOptionsForSource(validationSource, c, customList, dvOptsByCol);
+      c.isCopyable = stdCopyCols.includes(c.colIndex);
+      resolvedStdColSettings[c.colIndex] = {
+        dataType,
+        validationSource,
+        customList,
+        controlMode
+      };
+    });
+
     activeSchemaConfig = {
       isStandardSchema: true,
       mode,
       autoDetectedStandard: autoIsStandard,
-      columns: detected.columns,
+      columns: stdCols,
       primaryCol: 1,
       ticketCol: 2,
       secondaryCol: 3,
       statusCol: stdMap.statusCol,
       notesCol: stdMap.notesCol,
       trackingCol: stdMap.trackingCol,
-      copyCols: [1, 2, 4, 5, 7, 8]
+      copyCols: stdCopyCols,
+      colSettings: resolvedStdColSettings
     };
     return activeSchemaConfig;
   }
 
   const cols = detected.columns;
-  const dvOptsByCol = extractDataValidationOptionsByCol(wb, originalArchiveState);
   cols.forEach(col => {
     if ((!col.dropdownOptions || col.dropdownOptions.length === 0) && dvOptsByCol.has(col.colIndex)) {
       col.dropdownOptions = dvOptsByCol.get(col.colIndex);
@@ -2108,15 +2332,19 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     return Number.isFinite(n) && validColSet.has(n) ? n : undefined;
   };
 
-  // Auto-infer semantic roles from column headers
-  const findColByRegex = (regex, excludeSet = new Set()) => {
-    const hit = cols.find(c => !excludeSet.has(c.colIndex) && regex.test(c.header));
+  // Auto-infer semantic roles from column headers with tiered priority
+  const findColByRegex = (regex, excludeSet = new Set(), filterFn = null) => {
+    const hit = cols.find(c => !excludeSet.has(c.colIndex) && regex.test(c.header) && (!filterFn || filterFn(c.header)));
     return hit ? hit.colIndex : null;
   };
 
+  const isNonGeographicStateHeader = (hdr) => !/\b(title|yard|buyer|dealer|account|lot|vehicle|member)\s+state\b/i.test(String(hdr || ''));
+  const isPrimaryTitleCandidate = (hdr) => !/\btitle\s*(status|state|type|#|no|number|received|sent|date|issue|problem)\b/i.test(String(hdr || ''));
+
   const inferredStatusCol =
-    findColByRegex(/\b(status|state|stage|disposition|outcome)\b/i) ||
-    findColByRegex(/status|state/i);
+    findColByRegex(/\b(status|statuses|stage|disposition|outcome)\b/i) ||
+    findColByRegex(/\bstate\b/i, new Set(), isNonGeographicStateHeader) ||
+    findColByRegex(/status/i);
   const statusCol = savedOverride && pickValidOverride(savedOverride.statusCol) !== undefined
     ? pickValidOverride(savedOverride.statusCol)
     : inferredStatusCol;
@@ -2124,7 +2352,7 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   const usedSet = new Set(statusCol ? [statusCol] : []);
 
   const inferredNotesCol =
-    findColByRegex(/\b(notes?|comments?|remarks?|updates?|timeline|action taken)\b/i, usedSet) ||
+    findColByRegex(/\b(notes?|comments?|remarks?|updates?|timeline|action\s*taken)\b/i, usedSet) ||
     findColByRegex(/note|comment|detail/i, usedSet);
   const notesCol = savedOverride && pickValidOverride(savedOverride.notesCol) !== undefined
     ? pickValidOverride(savedOverride.notesCol)
@@ -2138,13 +2366,16 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   if (ticketCol) usedSet.add(ticketCol);
 
   const inferredPrimaryCol =
-    findColByRegex(/\b(subject|title|summary|request|vin|lot|item|issue|topic|account|customer|name)\b/i, usedSet) ||
+    findColByRegex(/\b(subject|summary|issue|request|description|topic)\b/i, usedSet) ||
+    findColByRegex(/\b(lot|vin|item)\b/i, usedSet) ||
+    findColByRegex(/\b(title|account|customer|name)\b/i, usedSet, isPrimaryTitleCandidate) ||
     (cols.find(c => !usedSet.has(c.colIndex)) || cols[0]).colIndex;
   const primaryCol = (savedOverride && pickValidOverride(savedOverride.primaryCol)) || inferredPrimaryCol;
   if (primaryCol) usedSet.add(primaryCol);
 
   const inferredSecondaryCol =
-    findColByRegex(/\b(account|broker|dealer|customer|buyer|assigned|owner|specialist|agent|dept|department|state|master)\b/i, usedSet) ||
+    findColByRegex(/\b(account|broker|dealer|customer|buyer|assigned|owner|specialist|agent|dept|department|master)\b/i, usedSet) ||
+    findColByRegex(/\bstate\b/i, usedSet) ||
     (cols.find(c => !usedSet.has(c.colIndex)) ? cols.find(c => !usedSet.has(c.colIndex)).colIndex : null);
   const secondaryCol = savedOverride && pickValidOverride(savedOverride.secondaryCol) !== undefined
     ? pickValidOverride(savedOverride.secondaryCol)
@@ -2178,8 +2409,33 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
         .map(c => c.colIndex)
         .sort((a, b) => a - b);
 
+  const customRoles = { statusCol, notesCol, trackingCol, ticketCol, secondaryCol, primaryCol };
+  const resolvedCustomColSettings = {};
   cols.forEach(c => {
+    const cfg = savedColSettings[c.colIndex] || savedColSettings[`col_${c.colIndex}`] || {};
+    const defaultType = inferDefaultDataTypeForColumn(c, customRoles, false);
+    const defaultValSrc = inferDefaultValidationSourceForColumn(c, customRoles, false);
+    const dataType = ['auto', 'uppercase', 'number', 'currency', 'date', 'notes'].includes(cfg.dataType)
+      ? cfg.dataType
+      : defaultType;
+    const validationSource = cfg.validationSource || defaultValSrc;
+    const customList = typeof cfg.customList === 'string' ? cfg.customList : '';
+    const controlMode = ['datalist', 'select'].includes(cfg.controlMode)
+      ? cfg.controlMode
+      : (c.colIndex === statusCol ? 'select' : 'datalist');
+    c.dataType = dataType;
+    c.validationSource = validationSource;
+    c.customList = customList;
+    c.controlMode = controlMode;
+    const resolvedOpts = resolveDropdownOptionsForSource(validationSource, c, customList, dvOptsByCol);
+    c.dropdownOptions = resolvedOpts;
     c.isCopyable = copyCols.includes(c.colIndex);
+    resolvedCustomColSettings[c.colIndex] = {
+      dataType,
+      validationSource,
+      customList,
+      controlMode
+    };
   });
 
   activeSchemaConfig = {
@@ -2193,7 +2449,8 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     statusCol: statusCol || null,
     notesCol: notesCol || null,
     trackingCol,
-    copyCols
+    copyCols,
+    colSettings: resolvedCustomColSettings
   };
   return activeSchemaConfig;
 }
@@ -2345,10 +2602,17 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
       });
 
       if (recoverNow) {
+        if (typeof window !== 'undefined') {
+          window.__trackerDiskWriteInFlight = true;
+          window.__lastTrackerWorkbookWriteAt = Date.now();
+        }
         try {
           const writable = await workingFileHandle.createWritable();
           await writable.write(stagedRecord.buffer);
           await writable.close();
+          if (typeof window !== 'undefined') {
+            window.__lastTrackerWorkbookWriteAt = Date.now();
+          }
           await deleteHandleFromIDB(stagedKey);
           clearPrimarySaveRetryUI();
           await attemptMirrorWrite(stagedRecord.buffer, false);
@@ -2369,6 +2633,11 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
           };
           showPrimarySaveRetryUI();
           showToast('Loaded your staged edits in memory (file is still open in Excel — click Retry Primary Save when closed).', 'warning');
+        } finally {
+          if (typeof window !== 'undefined') {
+            window.__trackerDiskWriteInFlight = false;
+            window.__lastTrackerWorkbookWriteAt = Date.now();
+          }
         }
       } else {
         await deleteHandleFromIDB(stagedKey);
@@ -2392,6 +2661,7 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   hasMasterAccountsSheet = false;
   validationActions = [];
   validationStatuses = [];
+  validationYards = [];
   validationListsByHeader = new Map();
   validationSheetMeta = null;
   actionCategoryMap = new Map();
@@ -2401,15 +2671,22 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
   let placeholderDateSheet = null;
   const dailySheetObjs = [];
 
-  // Safety check for optional Master Accounts sheet (removed from new monthly workbook bootstrap)
+  // Safety check for optional Master Accounts & Yard List sheets
   const masterAccountsWs = getMasterAccountsWorksheet(workbook);
+  const yardListWs = getYardListWorksheet(workbook);
   hasMasterAccountsSheet = Boolean(masterAccountsWs);
 
   if (useDevMockAccounts) {
     // Dev / Localhost Mock Mode: bypass Excel 'Master Accounts' sheet lookup and populate dummy test records
     masterAccountsMap = getMockMasterAccountsList();
-  } else if (masterAccountsWs) {
-    parseMasterAccountsSheet(masterAccountsWs);
+    validationYards = getMockYardList();
+  } else {
+    if (masterAccountsWs) {
+      parseMasterAccountsSheet(masterAccountsWs);
+    }
+    if (yardListWs) {
+      parseYardListSheet(yardListWs);
+    }
   }
 
   // Pass 1: Parse Reference Sheets, collect daily MM-DD-YYYY tabs, and discover custom Scratch Sheets
@@ -2461,24 +2738,32 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
     }
   }
 
-  // Enrich masterAccountsMap from existing daily rows when standard schema is active and not running isolated Dev Mock Mode
+  // Enrich masterAccountsMap (Broker <-> Master # only) from existing daily rows when standard schema is active and not running isolated Dev Mock Mode
   if (activeSchemaConfig.isStandardSchema && !useDevMockAccounts) {
     const seenAccountKeys = new Set(
-      masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
+      masterAccountsMap.map(m => `${String(m.broker || '').trim().toLowerCase()}::${String(m.master || '').trim().toLowerCase()}`)
     );
     allRows.forEach(r => {
-      if (!r.broker && !r.master) return;
-      const k = `${r.broker.toLowerCase()}::${r.master.toLowerCase()}`;
+      const cleanBroker = String(r.broker || '').trim();
+      const cleanMaster = String(r.master || '').trim().toUpperCase();
+      if (!cleanBroker && !cleanMaster) return;
+      const k = `${cleanBroker.toLowerCase()}::${cleanMaster.toLowerCase()}`;
       if (!seenAccountKeys.has(k)) {
         seenAccountKeys.add(k);
         masterAccountsMap.push({
-          broker: r.broker,
-          master: r.master.toUpperCase(),
-          bidder: r.bidder ? r.bidder.toUpperCase() : '',
-          yard: r.yard ? r.yard.toUpperCase() : ''
+          broker: cleanBroker,
+          master: cleanMaster
         });
       }
     });
+  }
+
+  // If validationYards is still empty on a Standard workbook, check if Column G (7) has an Excel dataValidation list
+  if (validationYards.length === 0 && !useDevMockAccounts) {
+    const col7ColObj = activeSchemaConfig.columns && activeSchemaConfig.columns.find(c => c.colIndex === 7);
+    if (col7ColObj && Array.isArray(col7ColObj.dropdownOptions) && col7ColObj.dropdownOptions.length > 0) {
+      col7ColObj.dropdownOptions.forEach(raw => addYardListEntry(raw, ''));
+    }
   }
 
   if (typeof renderTableHeader === 'function') {
@@ -2664,7 +2949,7 @@ function buildTemplateBrokerFormula(rowNumber, brokerVal, masterVal) {
 
   if (cleanBroker) {
     const matchedInMaster = cleanMaster && masterAccountsMap.some(
-      m => m.master.toLowerCase() === cleanMaster.toLowerCase()
+      m => String(m.master || '').trim().toLowerCase() === cleanMaster.toLowerCase()
     );
     if (!matchedInMaster) {
       fallbackLiteral = `"${cleanBroker.replace(/"/g, '""')}"`;
@@ -2678,7 +2963,7 @@ function resolveBrokerFromMaster(masterVal, currentBrokerVal) {
   if (cleanBroker) return cleanBroker;
   const cleanMaster = String(masterVal || '').trim().toLowerCase();
   if (!cleanMaster) return '';
-  const match = masterAccountsMap.find(m => m.master.toLowerCase() === cleanMaster);
+  const match = masterAccountsMap.find(m => String(m.master || '').trim().toLowerCase() === cleanMaster);
   return match ? match.broker : '';
 }
 
@@ -3345,33 +3630,109 @@ btnDeleteTab.addEventListener('click', async () => {
   }
 });
 
-// --- 4. DYNAMIC REFERENCE SHEET PARSING (validation lists & Master Accounts) ---
+function addYardListEntry(rawCodeOrCombined, rawName = '') {
+  let code = String(rawCodeOrCombined || '').replace(/\s+/g, ' ').trim();
+  let name = String(rawName || '').replace(/\s+/g, ' ').trim();
+  if (!code && !name) return;
+  if (UUID_REGEX.test(code) || UUID_REGEX.test(name)) return;
+
+  // If a single combined cell like "110 - Atlanta East" or "110 — Atlanta East" was provided without a second column,
+  // extract code and name so both Yard # and Yard Name are searchable while preserving the user's format
+  if (code && !name) {
+    const splitMatch = code.match(/^([A-Za-z0-9#]{1,8})\s*[-–—:]\s*(.+)$/);
+    if (splitMatch) {
+      code = splitMatch[1].trim().toUpperCase();
+      name = splitMatch[2].trim();
+    }
+  } else if (code) {
+    code = code.toUpperCase();
+  }
+
+  const value = code || name;
+  const label = (code && name && code.toLowerCase() !== name.toLowerCase())
+    ? `${code} — ${name}`
+    : value;
+  const dedupeKey = `${value.toLowerCase()}::${name.toLowerCase()}`;
+  if (!Array.isArray(validationYards)) {
+    validationYards = [];
+  }
+  const exists = validationYards.some(
+    y => `${String(y.value || '').toLowerCase()}::${String(y.name || '').toLowerCase()}` === dedupeKey
+  );
+  if (!exists) {
+    validationYards.push({ value, name, label });
+  }
+}
+
+function parseYardListSheet(worksheet) {
+  if (!worksheet) return;
+  const row1 = worksheet.getRow(1);
+  const h1 = cellText(row1, 1).toLowerCase();
+  const h2 = cellText(row1, 2).toLowerCase();
+
+  const isNameFirst =
+    (h1.includes('name') || h1.includes('location') || h1.includes('city')) &&
+    !h1.includes('#') &&
+    !h1.includes('num') &&
+    (h2.includes('#') || h2.includes('num') || h2.includes('code') || h2.includes('id') || h2.includes('yard'));
+
+  const row1LooksLikeHeader =
+    /\b(yard|branch|location|name|number|code|id|#)\b/i.test(h1) ||
+    /\b(yard|branch|location|name|number|code|id|#)\b/i.test(h2);
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1 && row1LooksLikeHeader) return;
+    const c1 = cellText(row, 1);
+    const c2 = cellText(row, 2);
+    if (!c1 && !c2) return;
+    if (isNameFirst && c2) {
+      addYardListEntry(c2, c1);
+    } else {
+      addYardListEntry(c1, c2);
+    }
+  });
+}
 let validationSheetMeta = null;
 
 function parseValidationSheet(worksheet) {
-  const actionsSet = new Set();
-  const statusesColB = new Set();
-  const statusesColE = new Set();
+  const actionsList = [];
+  const actionsSeen = new Set();
+  const statusesColB = [];
+  const statusesColBSeen = new Set();
+  const statusesColE = [];
+  const statusesColESeen = new Set();
   let statusHeaderMatchedCol = null;
 
   const row1 = worksheet.getRow(1);
   const headerByCol = new Map();
-  const setsByCol = new Map();
+  const listByCol = new Map();
+  const seenByCol = new Map();
   const maxRowByCol = new Map();
   let categoryColIndex = null;
+
+  const addUniqueCaseInsensitive = (arr, seenSet, rawVal) => {
+    const clean = String(rawVal || '').replace(/\s+/g, ' ').trim();
+    if (!clean || UUID_REGEX.test(clean)) return;
+    const low = clean.toLowerCase();
+    if (!seenSet.has(low)) {
+      seenSet.add(low);
+      arr.push(clean);
+    }
+  };
 
   const maxHeaderScan = Math.min(Math.max(worksheet.columnCount || 12, 12), 30);
   let row1LooksLikeDataValues = false;
   for (let c = 1; c <= maxHeaderScan; c++) {
     const rawHeader = cellText(row1, c);
     if (!rawHeader || UUID_REGEX.test(rawHeader)) continue;
-    const lowerHeader = rawHeader.toLowerCase();
+    const lowerHeader = rawHeader.replace(/\s+/g, ' ').trim().toLowerCase();
     // Detect if Row 1 is actually a status option value (e.g. "Pending", "In Progress") rather than a column header
     if (KNOWN_STATUS_VALUES.has(lowerHeader) && !/\b(options?|list|status(?:es)?)\b/i.test(lowerHeader)) {
       row1LooksLikeDataValues = true;
     }
     headerByCol.set(c, lowerHeader);
-    setsByCol.set(c, new Set());
+    listByCol.set(c, []);
+    seenByCol.set(c, new Set());
     maxRowByCol.set(c, 1);
     if (!statusHeaderMatchedCol && /\b(status|statuses|state|stage|disposition|outcome)\b/i.test(rawHeader)) {
       statusHeaderMatchedCol = c;
@@ -3392,52 +3753,81 @@ function parseValidationSheet(worksheet) {
     const statusValB = cellText(row, 2);
     const statusValE = cellText(row, 5);
 
-    if (actionVal && !UUID_REGEX.test(actionVal)) actionsSet.add(actionVal);
-    if (statusValB && !UUID_REGEX.test(statusValB)) statusesColB.add(statusValB);
-    if (statusValE && !UUID_REGEX.test(statusValE)) statusesColE.add(statusValE);
+    if (actionVal && !UUID_REGEX.test(actionVal)) addUniqueCaseInsensitive(actionsList, actionsSeen, actionVal);
+    if (statusValB && !UUID_REGEX.test(statusValB)) addUniqueCaseInsensitive(statusesColB, statusesColBSeen, statusValB);
+    if (statusValE && !UUID_REGEX.test(statusValE)) addUniqueCaseInsensitive(statusesColE, statusesColESeen, statusValE);
 
     if (actionVal && !UUID_REGEX.test(actionVal) && categoryColIndex) {
-      const catVal = cellText(row, categoryColIndex);
+      const catVal = cellText(row, categoryColIndex).replace(/\s+/g, ' ').trim();
       if (catVal && !UUID_REGEX.test(catVal)) {
-        actionCategoryMap.set(actionVal.toLowerCase(), catVal);
+        actionCategoryMap.set(actionVal.replace(/\s+/g, ' ').trim().toLowerCase(), catVal);
       }
     }
 
     for (let colIdx = 1; colIdx <= maxHeaderScan; colIdx++) {
       const cellVal = cellText(row, colIdx);
       if (cellVal && !UUID_REGEX.test(cellVal)) {
-        if (!setsByCol.has(colIdx)) setsByCol.set(colIdx, new Set());
-        setsByCol.get(colIdx).add(cellVal);
+        if (!listByCol.has(colIdx)) {
+          listByCol.set(colIdx, []);
+          seenByCol.set(colIdx, new Set());
+        }
+        addUniqueCaseInsensitive(listByCol.get(colIdx), seenByCol.get(colIdx), cellVal);
         maxRowByCol.set(colIdx, Math.max(maxRowByCol.get(colIdx) || 1, rowNumber));
       }
     }
   });
 
   headerByCol.forEach((lowerHeader, colIdx) => {
-    const vals = Array.from(setsByCol.get(colIdx) || []);
+    const vals = listByCol.get(colIdx) || [];
     if (vals.length > 0) {
       validationListsByHeader.set(lowerHeader, vals);
     }
   });
 
-  validationActions = Array.from(actionsSet);
+  // Auto-detect Yard # / Yard Name columns on the 'validation lists' sheet if present
+  if (!useDevMockAccounts) {
+    let yardCodeCol = null;
+    let yardNameCol = null;
+    headerByCol.forEach((lowerHeader, colIdx) => {
+      if (/\b(yard|yards)\b/i.test(lowerHeader)) {
+        if (/\b(name|location|city|branch)\b/i.test(lowerHeader) && !/\b(#|num|number|id|code)\b/i.test(lowerHeader)) {
+          if (!yardNameCol) yardNameCol = colIdx;
+        } else if (!yardCodeCol) {
+          yardCodeCol = colIdx;
+        } else if (!yardNameCol) {
+          yardNameCol = colIdx;
+        }
+      }
+    });
+    if (yardCodeCol || yardNameCol) {
+      worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber === 1 && !row1LooksLikeDataValues) return;
+        const codeVal = yardCodeCol ? cellText(row, yardCodeCol) : '';
+        const nameVal = yardNameCol ? cellText(row, yardNameCol) : '';
+        if (codeVal || nameVal) {
+          addYardListEntry(codeVal || nameVal, yardCodeCol ? nameVal : '');
+        }
+      });
+    }
+  }
+
+  validationActions = actionsList;
 
   let chosenStatusColIdx = null;
   let chosenStatuses = [];
 
-  if (statusHeaderMatchedCol && (setsByCol.get(statusHeaderMatchedCol) || new Set()).size > 0) {
+  if (statusHeaderMatchedCol && (listByCol.get(statusHeaderMatchedCol) || []).length > 0) {
     chosenStatusColIdx = statusHeaderMatchedCol;
-    chosenStatuses = Array.from(setsByCol.get(statusHeaderMatchedCol));
-  } else if (statusesColE.size > 0) {
+    chosenStatuses = listByCol.get(statusHeaderMatchedCol);
+  } else if (statusesColE.length > 0) {
     chosenStatusColIdx = 5;
-    chosenStatuses = Array.from(statusesColE);
-  } else if (statusesColB.size > 0) {
+    chosenStatuses = statusesColE;
+  } else if (statusesColB.length > 0) {
     chosenStatusColIdx = 2;
-    chosenStatuses = Array.from(statusesColB);
+    chosenStatuses = statusesColB;
   } else {
     // Check if any column on the validation sheet contains known status values (e.g. Col A on a single-list validation tab)
-    for (const [colIdx, valSet] of setsByCol.entries()) {
-      const arr = Array.from(valSet);
+    for (const [colIdx, arr] of listByCol.entries()) {
       const knownHits = arr.filter(v => KNOWN_STATUS_VALUES.has(v.toLowerCase())).length;
       if (knownHits >= 1 && arr.length > 0) {
         chosenStatusColIdx = colIdx;
@@ -3450,20 +3840,62 @@ function parseValidationSheet(worksheet) {
   validationStatuses = chosenStatuses.filter(s => s && !UUID_REGEX.test(String(s).trim()));
 
   const startRow = row1LooksLikeDataValues ? 1 : 2;
+  const escapedSheetName = worksheet.name.replace(/'/g, "''");
   let statusRangeFormula = null;
   if (chosenStatusColIdx) {
     const colLet = colNumberToExcelLetters(chosenStatusColIdx);
-    const endRow = Math.max(maxRowByCol.get(chosenStatusColIdx) || 10, chosenStatuses.length + startRow + 2);
-    const escapedSheetName = worksheet.name.replace(/'/g, "''");
+    const endRow = Math.max(maxRowByCol.get(chosenStatusColIdx) || 10, chosenStatuses.length + startRow + 2, 50);
     statusRangeFormula = `'${escapedSheetName}'!$${colLet}$${startRow}:$${colLet}$${endRow}`;
+  }
+  let actionRangeFormula = null;
+  if (validationActions.length > 0 && chosenStatusColIdx !== 1) {
+    const actEndRow = Math.max(maxRowByCol.get(1) || 10, validationActions.length + startRow + 2, 50);
+    actionRangeFormula = `'${escapedSheetName}'!$A$${startRow}:$$A$${actEndRow}`.replace('$$A$', '$A$');
   }
 
   validationSheetMeta = {
     sheetName: worksheet.name,
     startRow,
     statusColIdx: chosenStatusColIdx,
-    statusRangeFormula
+    statusRangeFormula,
+    actionRangeFormula
   };
+}
+
+function buildStandardSchemaDataValidationsExtLst() {
+  if (!activeSchemaConfig || !activeSchemaConfig.isStandardSchema || !validationSheetMeta) {
+    return null;
+  }
+  const escapeXml = (s) => String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  const rules = [];
+  const statusColLet = colNumberToExcelLetters(activeSchemaConfig.statusCol || 10);
+  if (validationSheetMeta.statusRangeFormula) {
+    rules.push(
+      `<x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1">` +
+      `<x14:formula1><xm:f>${escapeXml(validationSheetMeta.statusRangeFormula)}</xm:f></x14:formula1>` +
+      `<xm:sqref>${statusColLet}2:${statusColLet}500</xm:sqref>` +
+      `</x14:dataValidation>`
+    );
+  }
+  if (validationSheetMeta.actionRangeFormula) {
+    rules.push(
+      `<x14:dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1">` +
+      `<x14:formula1><xm:f>${escapeXml(validationSheetMeta.actionRangeFormula)}</xm:f></x14:formula1>` +
+      `<xm:sqref>F2:F500</xm:sqref>` +
+      `</x14:dataValidation>`
+    );
+  }
+  if (rules.length === 0) return null;
+  return (
+    `<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">` +
+    `<x14:dataValidations count="${rules.length}" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">` +
+    `${rules.join('')}` +
+    `</x14:dataValidations></ext></extLst>`
+  );
 }
 
 function buildCustomSchemaDataValidationsExtLst() {
@@ -3499,29 +3931,24 @@ function parseMasterAccountsSheet(worksheet) {
   const row1 = worksheet.getRow(1);
   const h1 = cellText(row1, 1).toLowerCase();
   const h2 = cellText(row1, 2).toLowerCase();
-  const h3 = cellText(row1, 3).toLowerCase();
 
   // In "Tracker Template - Make a Copy.xlsx", Col A is "Master Account" and Col B is "Account Name"
   const isMasterFirst =
     h1.includes('master') ||
     h2.includes('account name') ||
     (h2.includes('broker') && !h1.includes('broker'));
-  const hasBidderInCol3 = h3.includes('bidder');
 
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
     let broker = '';
     let master = '';
-    let bidder = '';
 
     if (isMasterFirst) {
       master = cellText(row, 1).toUpperCase();
       broker = cellText(row, 2);
-      bidder = hasBidderInCol3 ? cellText(row, 3).toUpperCase() : '';
     } else {
       broker = cellText(row, 1);
       master = cellText(row, 2).toUpperCase();
-      bidder = cellText(row, 3).toUpperCase();
     }
 
     if (!broker && !master) return;
@@ -3529,7 +3956,7 @@ function parseMasterAccountsSheet(worksheet) {
     if (seen.has(dedupeKey)) return;
     seen.add(dedupeKey);
 
-    masterAccountsMap.push({ broker, master, bidder });
+    masterAccountsMap.push({ broker, master });
   });
 }
 
@@ -3539,7 +3966,8 @@ function populateSelectWithStatuses(selectEl) {
   const statusesToUse = typeof mergeRequiredOperationalStatuses === 'function'
     ? mergeRequiredOperationalStatuses(baseStatuses)
     : baseStatuses;
-  const currentSelected = selectEl.value;
+  const currentSelected = String(selectEl.value || '').trim();
+  const currentLower = currentSelected.toLowerCase();
   selectEl.innerHTML = '';
   statusesToUse.forEach(st => {
     const opt = document.createElement('option');
@@ -3547,8 +3975,11 @@ function populateSelectWithStatuses(selectEl) {
     opt.textContent = st;
     selectEl.appendChild(opt);
   });
-  if (currentSelected && statusesToUse.includes(currentSelected)) {
-    selectEl.value = currentSelected;
+  if (currentSelected) {
+    const matched = statusesToUse.find(s => String(s || '').trim().toLowerCase() === currentLower);
+    if (matched) {
+      selectEl.value = matched;
+    }
   }
 }
 
@@ -3593,39 +4024,98 @@ function populateReferenceControls() {
 
   brokerListEl.innerHTML = '';
   const safeAccounts = Array.isArray(masterAccountsMap) ? masterAccountsMap : [];
-  const uniqueBrokers = Array.from(new Set(safeAccounts.map(m => m.broker).filter(Boolean)));
+  const seenBrokers = new Set();
+  const uniqueBrokers = [];
+  safeAccounts.forEach(m => {
+    const clean = String((m && m.broker) || '').trim();
+    if (!clean) return;
+    const low = clean.toLowerCase();
+    if (!seenBrokers.has(low)) {
+      seenBrokers.add(low);
+      uniqueBrokers.push(clean);
+    }
+  });
   uniqueBrokers.forEach(broker => {
     const opt = document.createElement('option');
     opt.value = broker;
     brokerListEl.appendChild(opt);
   });
 
+  if (yardListEl) {
+    yardListEl.innerHTML = '';
+    const safeYards = Array.isArray(validationYards) ? validationYards : [];
+    safeYards.forEach(y => {
+      if (!y || !y.value) return;
+      const opt = document.createElement('option');
+      opt.value = y.value;
+      if (y.label && y.label !== y.value) {
+        opt.label = y.label;
+        opt.textContent = y.label;
+      }
+      yardListEl.appendChild(opt);
+    });
+  }
+
+  const hasYardList = Array.isArray(validationYards) && validationYards.length > 0;
+  [fYard, dockYard].forEach(el => {
+    if (!el) return;
+    el.placeholder = hasYardList ? 'Select or type Yard # / Name...' : 'Yard #';
+    el.title = hasYardList
+      ? `Dropdown populated with ${validationYards.length} yard(s) — type Yard # or Yard Name`
+      : 'Enter Yard # (link a Yard List tab or validation lists column for dropdown)';
+  });
+
   updateAutoFillFieldHints();
+}
+
+function resolveYardValueFromTypedInput(rawInput) {
+  const clean = String(rawInput || '').replace(/\s+/g, ' ').trim();
+  if (!clean || !Array.isArray(validationYards) || validationYards.length === 0) return clean;
+  const low = clean.toLowerCase();
+  const match = validationYards.find(y =>
+    String(y.value || '').toLowerCase() === low ||
+    (y.name && String(y.name).toLowerCase() === low) ||
+    (y.label && String(y.label).toLowerCase() === low) ||
+    (y.name && `${String(y.value).toLowerCase()} - ${String(y.name).toLowerCase()}` === low)
+  );
+  return match ? match.value : clean;
 }
 
 function refreshAccountAutoFillSource() {
   masterAccountsMap = [];
   if (useDevMockAccounts) {
     masterAccountsMap = getMockMasterAccountsList();
+    validationYards = getMockYardList();
   } else if (workbook) {
+    validationYards = [];
     const masterWs = getMasterAccountsWorksheet(workbook);
+    const yardWs = getYardListWorksheet(workbook);
     hasMasterAccountsSheet = Boolean(masterWs);
     if (masterWs) {
       parseMasterAccountsSheet(masterWs);
     }
+    if (yardWs) {
+      parseYardListSheet(yardWs);
+    }
+    workbook.eachSheet(ws => {
+      const low = ws.name.trim().toLowerCase();
+      if (low === 'validation lists' || low === 'validation list') {
+        parseValidationSheet(ws);
+      }
+    });
     const seenAccountKeys = new Set(
-      masterAccountsMap.map(m => `${m.broker.toLowerCase()}::${m.master.toLowerCase()}`)
+      masterAccountsMap.map(m => `${String(m.broker || '').trim().toLowerCase()}::${String(m.master || '').trim().toLowerCase()}`)
     );
     allRows.forEach(r => {
-      if (!r.broker && !r.master) return;
-      const k = `${r.broker.toLowerCase()}::${r.master.toLowerCase()}`;
+      const cleanBroker = String(r.broker || '').trim();
+      const cleanMaster = String(r.master || '').trim().toUpperCase();
+      if (!cleanBroker && !cleanMaster) return;
+      const k = `${cleanBroker.toLowerCase()}::${cleanMaster.toLowerCase()}`;
       if (!seenAccountKeys.has(k)) {
         seenAccountKeys.add(k);
         masterAccountsMap.push({
-          broker: r.broker,
-          master: r.master.toUpperCase(),
-          bidder: r.bidder ? r.bidder.toUpperCase() : '',
-          yard: r.yard ? r.yard.toUpperCase() : ''
+          broker: cleanBroker,
+          master: cleanMaster
         });
       }
     });
@@ -3642,7 +4132,7 @@ if (chkDevMockAccounts) {
     refreshAccountAutoFillSource();
     showToast(
       useDevMockAccounts
-        ? `Dev Mock Master Accounts enabled (${masterAccountsMap.length} dummy accounts loaded).`
+        ? `Dev Mock Master Accounts & Yard List enabled (${masterAccountsMap.length} accounts, ${validationYards.length} yards).`
         : (hasMasterAccountsSheet
             ? 'Switched auto-fill back to workbook Master Accounts sheet.'
             : 'Mock data disabled — graceful manual entry / workbook history mode active.'),
@@ -3651,90 +4141,73 @@ if (chkDevMockAccounts) {
   });
 }
 
-// Initialize Dev Mock Master Accounts immediately on startup when enabled (e.g., localhost testing)
+// Initialize Dev Mock Master Accounts & Yard List immediately on startup when enabled (e.g., localhost testing)
 if (useDevMockAccounts) {
   masterAccountsMap = getMockMasterAccountsList();
+  validationYards = getMockYardList();
 }
 populateReferenceControls();
 updateDevMockAccountsUI();
 
-function syncAccountAuxiliaryFields(bidderInputEl, yardInputEl, match, prevAccount, accountChanged) {
-  if (bidderInputEl) {
-    if (match.bidder) {
-      if (!bidderInputEl.value.trim() || accountChanged) {
-        bidderInputEl.value = match.bidder;
-      }
-    } else if (
-      accountChanged &&
-      prevAccount &&
-      prevAccount.bidder &&
-      bidderInputEl.value.trim().toLowerCase() === prevAccount.bidder.trim().toLowerCase()
-    ) {
-      bidderInputEl.value = '';
-    }
-  }
-  if (yardInputEl && match.yard) {
-    const currentYardNorm = yardInputEl.value.trim().toLowerCase();
-    const prevYardNorm = prevAccount && prevAccount.yard ? prevAccount.yard.trim().toLowerCase() : '';
-    if (!currentYardNorm || (accountChanged && prevYardNorm && currentYardNorm === prevYardNorm)) {
-      yardInputEl.value = match.yard;
-    }
-  }
-}
-
-function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl, bidderInputEl, yardInputEl = null) {
+function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl) {
   if (!brokerInputEl || !Array.isArray(masterAccountsMap) || masterAccountsMap.length === 0) return;
   const typedBroker = brokerInputEl.value.trim().toLowerCase();
   if (!typedBroker) return;
 
   const match = masterAccountsMap.find(m => m.broker && m.broker.trim().toLowerCase() === typedBroker);
-  if (match) {
-    const currentMasterNorm = masterInputEl ? masterInputEl.value.trim().toLowerCase() : '';
-    const matchMasterNorm = String(match.master || '').trim().toLowerCase();
-    const accountChanged = Boolean(matchMasterNorm && currentMasterNorm !== matchMasterNorm);
+  if (match && masterInputEl) {
+    const currentMasterNorm = masterInputEl.value.trim().toLowerCase();
     const prevAccount = currentMasterNorm
       ? masterAccountsMap.find(m => m.master && m.master.trim().toLowerCase() === currentMasterNorm)
       : null;
-
-    if (masterInputEl && match.master) {
-      masterInputEl.value = match.master;
+    if (match.master) {
+      masterInputEl.value = String(match.master).trim().toUpperCase();
+    } else if (prevAccount && prevAccount.master && currentMasterNorm === prevAccount.master.trim().toLowerCase()) {
+      masterInputEl.value = '';
     }
-    syncAccountAuxiliaryFields(bidderInputEl, yardInputEl, match, prevAccount, accountChanged);
   }
 }
 
-function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl, bidderInputEl, yardInputEl = null) {
+function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl) {
   if (!masterInputEl || !Array.isArray(masterAccountsMap) || masterAccountsMap.length === 0) return;
   const typedMaster = masterInputEl.value.trim().toLowerCase();
   if (!typedMaster) return;
 
   const match = masterAccountsMap.find(m => m.master && m.master.trim().toLowerCase() === typedMaster);
-  if (match) {
-    const currentBrokerNorm = brokerInputEl ? brokerInputEl.value.trim().toLowerCase() : '';
-    const matchBrokerNorm = String(match.broker || '').trim().toLowerCase();
-    const accountChanged = Boolean(matchBrokerNorm && currentBrokerNorm !== matchBrokerNorm);
+  if (match && brokerInputEl) {
+    const currentBrokerNorm = brokerInputEl.value.trim().toLowerCase();
     const prevAccount = currentBrokerNorm
       ? masterAccountsMap.find(m => m.broker && m.broker.trim().toLowerCase() === currentBrokerNorm)
       : null;
-
-    if (brokerInputEl && match.broker) {
-      brokerInputEl.value = match.broker;
+    if (match.broker) {
+      brokerInputEl.value = String(match.broker).trim();
+    } else if (prevAccount && prevAccount.broker && currentBrokerNorm === prevAccount.broker.trim().toLowerCase()) {
+      brokerInputEl.value = '';
     }
-    syncAccountAuxiliaryFields(bidderInputEl, yardInputEl, match, prevAccount, accountChanged);
   }
 }
 
-fBroker.addEventListener('input', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder, fYard));
-fBroker.addEventListener('change', () => applyBrokerAutoFillToPair(fBroker, fMaster, fBidder, fYard));
-fMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder, fYard));
-fMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(fMaster, fBroker, fBidder, fYard));
+fBroker.addEventListener('input', () => applyBrokerAutoFillToPair(fBroker, fMaster));
+fBroker.addEventListener('change', () => applyBrokerAutoFillToPair(fBroker, fMaster));
+fMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(fMaster, fBroker));
+fMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(fMaster, fBroker));
 
-if (dockBroker && dockMaster && dockBidder) {
-  dockBroker.addEventListener('input', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder, dockYard));
-  dockBroker.addEventListener('change', () => applyBrokerAutoFillToPair(dockBroker, dockMaster, dockBidder, dockYard));
-  dockMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder, dockYard));
-  dockMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker, dockBidder, dockYard));
+if (dockBroker && dockMaster) {
+  dockBroker.addEventListener('input', () => applyBrokerAutoFillToPair(dockBroker, dockMaster));
+  dockBroker.addEventListener('change', () => applyBrokerAutoFillToPair(dockBroker, dockMaster));
+  dockMaster.addEventListener('input', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker));
+  dockMaster.addEventListener('change', () => applyMasterReverseAutoFillToPair(dockMaster, dockBroker));
 }
+
+[fYard, dockYard].forEach(yardEl => {
+  if (!yardEl) return;
+  yardEl.addEventListener('change', () => {
+    const resolved = resolveYardValueFromTypedInput(yardEl.value);
+    if (resolved && resolved !== yardEl.value) {
+      yardEl.value = resolved;
+    }
+  });
+});
 
 function getNextEmptyRow(worksheet) {
   const colMap = getWorksheetColumnMap(worksheet);
@@ -3931,6 +4404,8 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
       }
       if (idx === colMap.ticketCol && val) {
         val = String(val).toUpperCase();
+      } else if (col.dataType && col.dataType !== 'auto' && val) {
+        val = formatValueForColumnDataType(val, col.dataType);
       }
       row.getCell(idx).value = val !== undefined && val !== null ? String(val) : '';
     });
@@ -4022,63 +4497,91 @@ function clearPrimarySaveRetryUI() {
 }
 
 async function retryStagedPrimarySaveNow() {
-  if (!workingFileHandle) return;
-  if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
-    if (typeof ensureActiveTabLockBeforeWrite === 'function') {
-      await ensureActiveTabLockBeforeWrite('retry primary save');
+  const runRetry = async () => {
+    if (!workingFileHandle) return;
+    if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
+      if (typeof ensureActiveTabLockBeforeWrite === 'function') {
+        await ensureActiveTabLockBeforeWrite('retry primary save');
+      }
+      return;
     }
-    return;
-  }
-  if (btnRetryPrimarySave) {
-    btnRetryPrimarySave.textContent = '⏳ Saving...';
-  }
-
-  let bufferToWrite = null;
-  try {
-    if (workbook) {
-      bufferToWrite = await serializeWorkbookBuffer();
-    } else if (pendingPrimarySaveState && pendingPrimarySaveState.buffer) {
-      bufferToWrite = pendingPrimarySaveState.buffer;
+    if (typeof commitActiveScratchInlineEdit === 'function') {
+      commitActiveScratchInlineEdit();
     }
-  } catch (err) {
-    console.error('Failed to serialize workbook during primary retry:', err);
-    showPrimarySaveRetryUI();
-    return;
+    if (btnRetryPrimarySave) {
+      btnRetryPrimarySave.textContent = '⏳ Saving...';
+    }
+
+    let bufferToWrite = null;
+    try {
+      if (workbook) {
+        bufferToWrite = await serializeWorkbookBuffer();
+      } else if (pendingPrimarySaveState && pendingPrimarySaveState.buffer) {
+        bufferToWrite = pendingPrimarySaveState.buffer;
+      }
+    } catch (err) {
+      console.error('Failed to serialize workbook during primary retry:', err);
+      showPrimarySaveRetryUI();
+      return;
+    }
+
+    if (!bufferToWrite) {
+      clearPrimarySaveRetryUI();
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      window.__trackerDiskWriteInFlight = true;
+      window.__lastTrackerWorkbookWriteAt = Date.now();
+    }
+    try {
+      const writable = await workingFileHandle.createWritable();
+      await writable.write(bufferToWrite);
+      await writable.close();
+      if (typeof window !== 'undefined') {
+        window.__lastTrackerWorkbookWriteAt = Date.now();
+      }
+
+      const stagedKey = getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId);
+      await deleteHandleFromIDB(stagedKey);
+      clearPrimarySaveRetryUI();
+      if (typeof scratchPendingEdits !== 'undefined') scratchPendingEdits.clear();
+      if (typeof scratchPendingFills !== 'undefined') scratchPendingFills.clear();
+      if (typeof scratchPendingColWidths !== 'undefined') scratchPendingColWidths.clear();
+
+      const mirrorOk = await attemptMirrorWrite(bufferToWrite, false);
+      await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, {
+        skipFlushPendingScratch: true,
+        skipStagedRecoveryCheck: true,
+        preserveStatus: !mirrorOk
+      });
+      showToast(`✅ Saved "${workingFileHandle.name}" & cleared staged fail-safe cache!`, 'success');
+    } catch (err) {
+      console.warn('Primary file is still locked during retry:', err);
+      const stagedRecord = {
+        profileId: activeProfileId,
+        workbookName: workingFileHandle.name,
+        savedAt: Date.now(),
+        buffer: bufferToWrite
+      };
+      pendingPrimarySaveState = stagedRecord;
+      await saveHandleToIDB(getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId), stagedRecord);
+      showPrimarySaveRetryUI();
+      showToast('⚠️ Working file is still open in Desktop Excel. Close Excel and click Retry Primary Save.', 'warning');
+    } finally {
+      if (typeof window !== 'undefined') {
+        window.__trackerDiskWriteInFlight = false;
+        window.__lastTrackerWorkbookWriteAt = Date.now();
+      }
+    }
+  };
+
+  if (typeof saveWorkbookMutexPromise === 'undefined') {
+    return runRetry();
   }
-
-  if (!bufferToWrite) {
-    clearPrimarySaveRetryUI();
-    return;
-  }
-
-  try {
-    const writable = await workingFileHandle.createWritable();
-    await writable.write(bufferToWrite);
-    await writable.close();
-
-    const stagedKey = getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId);
-    await deleteHandleFromIDB(stagedKey);
-    clearPrimarySaveRetryUI();
-
-    const mirrorOk = await attemptMirrorWrite(bufferToWrite, false);
-    await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, {
-      skipStagedRecoveryCheck: true,
-      preserveStatus: !mirrorOk
-    });
-    showToast(`✅ Saved "${workingFileHandle.name}" & cleared staged fail-safe cache!`, 'success');
-  } catch (err) {
-    console.warn('Primary file is still locked during retry:', err);
-    const stagedRecord = {
-      profileId: activeProfileId,
-      workbookName: workingFileHandle.name,
-      savedAt: Date.now(),
-      buffer: bufferToWrite
-    };
-    pendingPrimarySaveState = stagedRecord;
-    await saveHandleToIDB(getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId), stagedRecord);
-    showPrimarySaveRetryUI();
-    showToast('⚠️ Working file is still open in Desktop Excel. Close Excel and click Retry Primary Save.', 'warning');
-  }
+  const nextPromise = saveWorkbookMutexPromise.then(runRetry, runRetry);
+  saveWorkbookMutexPromise = nextPromise.catch(() => {});
+  return nextPromise;
 }
 
 if (btnRetryPrimarySave) {
@@ -4142,11 +4645,18 @@ async function attemptMirrorWrite(buffer, isRetry = false) {
   if (!targetMirrorDir || !workingFileHandle) return true;
 
   const mirrorFileName = workingFileHandle.name.replace(/\.xlsx$/i, '') + ' (VIEW ONLY).xlsx';
+  if (typeof window !== 'undefined') {
+    window.__trackerDiskWriteInFlight = true;
+    window.__lastTrackerWorkbookWriteAt = Date.now();
+  }
   try {
     const mirrorHandle = await targetMirrorDir.getFileHandle(mirrorFileName, { create: true });
     const mirrorWritable = await mirrorHandle.createWritable();
     await mirrorWritable.write(buffer);
     await mirrorWritable.close();
+    if (typeof window !== 'undefined') {
+      window.__lastTrackerWorkbookWriteAt = Date.now();
+    }
 
     const wasRetrying = Boolean(pendingMirrorBuffer) || isRetry;
     clearMirrorRetryState();
@@ -4167,6 +4677,11 @@ async function attemptMirrorWrite(buffer, isRetry = false) {
       showToast('⚠️ Saved Working File (Mirror in use by Supervisor — auto-retrying every 15s)', 'warning');
     }
     return false;
+  } finally {
+    if (typeof window !== 'undefined') {
+      window.__trackerDiskWriteInFlight = false;
+      window.__lastTrackerWorkbookWriteAt = Date.now();
+    }
   }
 }
 
@@ -4195,7 +4710,7 @@ btnRetryMirror.addEventListener('click', () => {
   retryMirrorSyncNow(false);
 });
 
-async function saveWorkbookToDiskInternal() {
+async function saveWorkbookToDiskInternal({ silentLockAlert = false } = {}) {
   if (!workingFileHandle) return false;
 
   if (typeof isLockedByOtherTab !== 'undefined' && isLockedByOtherTab) {
@@ -4226,6 +4741,9 @@ async function saveWorkbookToDiskInternal() {
         variant: 'danger'
       });
       if (reloadInstead) {
+        if (typeof scratchPendingEdits !== 'undefined') scratchPendingEdits.clear();
+        if (typeof scratchPendingFills !== 'undefined') scratchPendingFills.clear();
+        if (typeof scratchPendingColWidths !== 'undefined') scratchPendingColWidths.clear();
         await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, {
           skipFlushPendingScratch: true,
           skipStagedRecoveryCheck: true
@@ -4290,6 +4808,10 @@ async function saveWorkbookToDiskInternal() {
     clearPrimarySaveRetryUI();
   } catch (err) {
     console.error('Primary file write error:', err);
+    const wasAlreadyStaged = Boolean(
+      pendingPrimarySaveState &&
+      pendingPrimarySaveState.workbookName === workingFileHandle.name
+    );
     const stagedRecord = {
       profileId: activeProfileId,
       workbookName: workingFileHandle.name,
@@ -4299,6 +4821,16 @@ async function saveWorkbookToDiskInternal() {
     pendingPrimarySaveState = stagedRecord;
     await saveHandleToIDB(getStagedPrimarySaveIDBKey(workingFileHandle.name, activeProfileId), stagedRecord);
     showPrimarySaveRetryUI();
+
+    if (silentLockAlert || wasAlreadyStaged) {
+      if (!wasAlreadyStaged) {
+        showToast(
+          `🔒 "${workingFileHandle.name}" is open in Excel — edits safely staged in fail-safe cache. Close Excel & click Retry Primary Save.`,
+          'warning'
+        );
+      }
+      return 'staged-primary';
+    }
 
     await showModalAlert({
       title: '🔒 File Locked in Excel — Edits Safely Staged!',
@@ -4333,8 +4865,8 @@ async function saveWorkbookToDiskInternal() {
   }
 }
 
-function saveWorkbookToDisk() {
-  const run = async () => await saveWorkbookToDiskInternal();
+function saveWorkbookToDisk(options = {}) {
+  const run = async () => await saveWorkbookToDiskInternal(options);
   if (typeof saveWorkbookMutexPromise === 'undefined') {
     return run();
   }
@@ -4373,15 +4905,22 @@ function captureActiveProfileSnapshot() {
     hasMasterAccountsSheet,
     validationActions: [...validationActions],
     validationStatuses: [...validationStatuses],
+    validationYards: [...validationYards],
     validationListsByHeader: new Map(validationListsByHeader),
     actionCategoryMap: new Map(actionCategoryMap),
     pendingMirrorBuffer,
     pendingPrimarySaveState,
-    dockEditingTarget: dockEditingTarget ? { ...dockEditingTarget } : null
+    dockEditingTarget: dockEditingTarget ? { ...dockEditingTarget } : null,
+    scratchRuntimeState: typeof captureScratchRuntimeSnapshot === 'function'
+      ? captureScratchRuntimeSnapshot()
+      : null
   };
 }
 
 function applyProfileSnapshotToGlobals(snap) {
+  if (typeof restoreScratchRuntimeSnapshot === 'function') {
+    restoreScratchRuntimeSnapshot(snap.scratchRuntimeState || null);
+  }
   parentDirHandle = snap.parentDirHandle || null;
   cachedDirHandle = snap.cachedDirHandle || null;
   supervisorDirHandle = snap.supervisorDirHandle || null;
@@ -4398,7 +4937,13 @@ function applyProfileSnapshotToGlobals(snap) {
   dateSheets = Array.isArray(snap.dateSheets) ? [...snap.dateSheets] : [];
   scratchSheets = Array.isArray(snap.scratchSheets) ? [...snap.scratchSheets] : [];
   openScratchTabs = Array.isArray(snap.openScratchTabs) ? [...snap.openScratchTabs] : [];
-  activeWorkspaceTab = DAILY_TRACKER_WS_TAB;
+  const restoredWsTab =
+    snap.activeWorkspaceTab &&
+    snap.activeWorkspaceTab !== DAILY_TRACKER_WS_TAB &&
+    openScratchTabs.includes(snap.activeWorkspaceTab)
+      ? snap.activeWorkspaceTab
+      : DAILY_TRACKER_WS_TAB;
+  activeWorkspaceTab = restoredWsTab;
   activeSchemaConfig = snap.activeSchemaConfig
     ? JSON.parse(JSON.stringify(snap.activeSchemaConfig))
     : {
@@ -4416,6 +4961,7 @@ function applyProfileSnapshotToGlobals(snap) {
   hasMasterAccountsSheet = Boolean(snap.hasMasterAccountsSheet);
   validationActions = Array.isArray(snap.validationActions) ? [...snap.validationActions] : [];
   validationStatuses = Array.isArray(snap.validationStatuses) ? [...snap.validationStatuses] : [];
+  validationYards = Array.isArray(snap.validationYards) ? [...snap.validationYards] : [];
   validationListsByHeader = snap.validationListsByHeader instanceof Map
     ? new Map(snap.validationListsByHeader)
     : new Map();
@@ -4496,7 +5042,7 @@ function applyProfileSnapshotToGlobals(snap) {
     }
     renderList();
     if (typeof setActiveWorkspaceTab === 'function') {
-      setActiveWorkspaceTab(DAILY_TRACKER_WS_TAB);
+      setActiveWorkspaceTab(restoredWsTab);
     }
   } else {
     resetActiveTrackerUIDisconnectedState();
@@ -4543,6 +5089,9 @@ async function switchTrackerProfile(targetProfileId) {
   }
 
   // Fresh profile activation in this session: clear runtime globals and load IDB handles
+  if (typeof resetScratchWorkbookRuntimeState === 'function') {
+    resetScratchWorkbookRuntimeState();
+  }
   parentDirHandle = null;
   cachedDirHandle = null;
   supervisorDirHandle = null;
@@ -4764,6 +5313,12 @@ function refreshSchemaMapperPreviewUI() {
       schemaMapperModeBadge.className = 'badge badge-progress';
     }
   }
+  if (schemaTrackingColInfo) {
+    const trkIdx = effectiveStandard
+      ? (activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.trackingCol || 11) : 11)
+      : schemaMapperDetectedState.trackingCol;
+    schemaTrackingColInfo.textContent = `Col ${colNumberToExcelLetters(trkIdx)} (${trkIdx}) — Hidden UUIDv4 Tracking ID`;
+  }
 
   const pCol = Number(schemaPrimaryColSelect?.value) || null;
   const stCol = Number(schemaStatusColSelect?.value) || null;
@@ -4780,7 +5335,7 @@ function refreshSchemaMapperPreviewUI() {
   const copySet = schemaMapperDetectedState.copyColsSet instanceof Set
     ? schemaMapperDetectedState.copyColsSet
     : new Set();
-  const STANDARD_COPY_COLS = new Set([1, 2, 4, 5, 7, 8]);
+  const colSettingsMap = schemaMapperDetectedState.colSettings || {};
 
   schemaDetectedColsPreview.innerHTML = cols.map(c => {
     const letter = colNumberToExcelLetters(c.colIndex);
@@ -4792,31 +5347,145 @@ function refreshSchemaMapperPreviewUI() {
       if (c.colIndex === tCol) roles.push('Ticket #');
       if (c.colIndex === secCol) roles.push('Secondary');
     }
-    const valOpts = findValidationOptionsForHeader(c.header);
+    const cfg = colSettingsMap[c.colIndex] || {};
+    const valOpts = resolveDropdownOptionsForSource(cfg.validationSource || 'auto', c, cfg.customList || '');
     const roleTag = roles.length > 0
       ? `<span class="schema-col-role-tag">${escapeHtml(roles.join(' + '))}</span>`
       : '';
-    const valTag = valOpts.length > 0
-      ? `<span class="schema-col-role-tag" title="Bound to validation lists dropdown">▾ ${valOpts.length} opts</span>`
+    const typeLabelMap = {
+      uppercase: 'A-Z Code',
+      number: '123',
+      currency: '$',
+      date: 'Date',
+      notes: 'Notes'
+    };
+    const typeTag = (cfg.dataType && typeLabelMap[cfg.dataType])
+      ? `<span class="schema-col-role-tag" title="Column Data Type">${escapeHtml(typeLabelMap[cfg.dataType])}</span>`
       : '';
-    let copyControlHtml = '';
-    if (effectiveStandard) {
-      if (STANDARD_COPY_COLS.has(c.colIndex)) {
-        copyControlHtml = `<span class="schema-col-role-tag" title="Split-pill inline Copy enabled on Standard Daily Tracker">📋 Copy</span>`;
-      }
-    } else {
-      const isExcludedRole = c.colIndex === stCol || c.colIndex === nCol;
-      const isCopyChecked = !isExcludedRole && copySet.has(c.colIndex);
-      copyControlHtml = isExcludedRole
-        ? `<label class="schema-col-copy-toggle disabled" title="Status &amp; Notes columns do not use inline copy buttons"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" disabled>📋 Copy</label>`
-        : `<label class="schema-col-copy-toggle" title="Enable split-pill Copy to Clipboard button on ${escapeHtml(c.header)}"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" ${isCopyChecked ? 'checked' : ''}>📋 Copy</label>`;
-    }
+    const valTag = valOpts.length > 0
+      ? `<span class="schema-col-role-tag" title="Dropdown / validation list options">▾ ${valOpts.length} opts</span>`
+      : '';
+    const effectiveStCol = effectiveStandard ? (activeSchemaConfig.statusCol || 10) : stCol;
+    const effectiveNCol = effectiveStandard ? (activeSchemaConfig.notesCol || 9) : nCol;
+    const isExcludedRole = c.colIndex === effectiveStCol || c.colIndex === effectiveNCol;
+    const isCopyChecked = !isExcludedRole && copySet.has(c.colIndex);
+    const copyControlHtml = isExcludedRole
+      ? `<label class="schema-col-copy-toggle disabled" title="Status &amp; Notes columns do not use inline copy buttons"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" disabled>📋 Copy</label>`
+      : `<label class="schema-col-copy-toggle" title="Enable split-pill Copy to Clipboard button on ${escapeHtml(c.header)}"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" ${isCopyChecked ? 'checked' : ''}>📋 Copy</label>`;
     return `
       <span class="schema-col-chip">
         <span class="col-letter">Col ${letter}</span>
         <span>${escapeHtml(c.header)}</span>
-        ${roleTag}${valTag}${copyControlHtml}
+        ${roleTag}${typeTag}${valTag}${copyControlHtml}
       </span>
+    `;
+  }).join('');
+
+  renderSchemaAdvancedTableUI(effectiveStandard, { pCol, stCol, nCol, tCol, secCol });
+}
+
+function buildValidationSourceOptionsHtml(selectedSource) {
+  const baseOptions = [
+    { value: 'auto', label: 'Auto-Detect from Sheet / Header' },
+    { value: 'none', label: 'None (Free Text)' },
+    { value: 'yard_list', label: `Yard # / Name List (${Array.isArray(validationYards) ? validationYards.length : 0})` },
+    { value: 'broker_list', label: `Master Accounts: Brokers (${Array.isArray(masterAccountsMap) ? masterAccountsMap.length : 0})` },
+    { value: 'action_list', label: `Validation Lists: Actions (${validationActions.length || DEFAULT_ACTIONS.length})` },
+    { value: 'status_list', label: `Validation Lists: Statuses (${validationStatuses.length || DEFAULT_STATUSES.length})` }
+  ];
+  const seenHdrs = new Set();
+  if (validationListsByHeader && validationListsByHeader.size > 0) {
+    validationListsByHeader.forEach((opts, lowerHdr) => {
+      if (!lowerHdr || seenHdrs.has(lowerHdr)) return;
+      seenHdrs.add(lowerHdr);
+      baseOptions.push({
+        value: `hdr::${lowerHdr}`,
+        label: `Validation Column: "${lowerHdr}" (${opts.length})`
+      });
+    });
+  }
+  baseOptions.push({ value: 'custom', label: 'Custom Comma-Separated List...' });
+
+  return baseOptions.map(o => {
+    const sel = o.value === selectedSource ? ' selected' : '';
+    return `<option value="${escapeHtml(o.value)}"${sel}>${escapeHtml(o.label)}</option>`;
+  }).join('');
+}
+
+function renderSchemaAdvancedTableUI(effectiveStandard, rolesObj = {}) {
+  if (!schemaAdvancedTableBody || !schemaMapperDetectedState) return;
+  const cols = schemaMapperDetectedState.columns || [];
+  const copySet = schemaMapperDetectedState.copyColsSet instanceof Set
+    ? schemaMapperDetectedState.copyColsSet
+    : new Set();
+  const colSettingsMap = schemaMapperDetectedState.colSettings || {};
+  const effectiveStCol = effectiveStandard ? (activeSchemaConfig.statusCol || 10) : rolesObj.stCol;
+  const effectiveNCol = effectiveStandard ? (activeSchemaConfig.notesCol || 9) : rolesObj.nCol;
+
+  schemaAdvancedTableBody.innerHTML = cols.map(c => {
+    const idx = c.colIndex;
+    const letter = colNumberToExcelLetters(idx);
+    const cfg = colSettingsMap[idx] || {
+      dataType: 'auto',
+      validationSource: 'auto',
+      customList: '',
+      controlMode: idx === effectiveStCol ? 'select' : 'datalist'
+    };
+    const isExcludedCopy = idx === effectiveStCol || idx === effectiveNCol;
+    const isCopyChecked = !isExcludedCopy && copySet.has(idx);
+    const showCustomInput = cfg.validationSource === 'custom';
+    const disableControlSelect = cfg.validationSource === 'none';
+
+    const typeOptions = [
+      { value: 'auto', label: 'Text (Auto)' },
+      { value: 'uppercase', label: 'Uppercase Code / ID (A-Z, 0-9)' },
+      { value: 'number', label: 'Number (123)' },
+      { value: 'currency', label: 'Currency ($)' },
+      { value: 'date', label: 'Date (MM/DD/YYYY)' },
+      { value: 'notes', label: 'Multi-line Notes' }
+    ].map(o => `<option value="${o.value}"${cfg.dataType === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+
+    const valSourceOptions = buildValidationSourceOptionsHtml(cfg.validationSource || 'auto');
+
+    return `
+      <tr data-adv-col-row="${idx}">
+        <td>
+          <div class="schema-adv-col-cell">
+            <strong>Col ${letter} (${idx})</strong>
+            <span>${escapeHtml(c.header)}</span>
+          </div>
+        </td>
+        <td>
+          <select class="schema-adv-type-select" data-col-index="${idx}">
+            ${typeOptions}
+          </select>
+        </td>
+        <td>
+          <select class="schema-adv-list-select" data-col-index="${idx}">
+            ${valSourceOptions}
+          </select>
+          <input
+            type="text"
+            class="schema-adv-custom-input"
+            data-col-index="${idx}"
+            value="${escapeHtml(cfg.customList || '')}"
+            placeholder="Option 1, Option 2, Option 3..."
+            style="display:${showCustomInput ? 'block' : 'none'};"
+          >
+        </td>
+        <td>
+          <select class="schema-adv-control-select" data-col-index="${idx}" ${disableControlSelect ? 'disabled' : ''}>
+            <option value="datalist"${cfg.controlMode !== 'select' ? ' selected' : ''}>Searchable Input + Dropdown</option>
+            <option value="select"${cfg.controlMode === 'select' ? ' selected' : ''}>Strict Dropdown (&lt;select&gt;)</option>
+          </select>
+        </td>
+        <td>
+          <label class="schema-col-copy-toggle ${isExcludedCopy ? 'disabled' : ''}">
+            <input type="checkbox" class="chk-schema-copy-col" data-col-index="${idx}" ${isCopyChecked ? 'checked' : ''} ${isExcludedCopy ? 'disabled' : ''}>
+            <span>📋 Copy</span>
+          </label>
+        </td>
+      </tr>
     `;
   }).join('');
 }
@@ -4836,42 +5505,94 @@ function openSchemaMapperModal() {
   const currentMode = (savedOverride && savedOverride.mode) ? savedOverride.mode : (activeSchemaConfig.mode || 'auto');
 
   const trackingColEstimate = detected.existingTrackingCol || (Math.max(...cols.map(c => c.colIndex), 0) + 1);
-  const findInfer = (re) => {
-    const hit = cols.find(c => re.test(c.header));
-    return hit ? hit.colIndex : '';
+  const inferUsedSet = new Set();
+  const findInfer = (reOrList, markUsed = false) => {
+    const patterns = Array.isArray(reOrList) ? reOrList : [reOrList];
+    for (const re of patterns) {
+      const hit = cols.find(c => !inferUsedSet.has(c.colIndex) && re.test(c.header));
+      if (hit) {
+        if (markUsed) inferUsedSet.add(hit.colIndex);
+        return hit.colIndex;
+      }
+    }
+    return '';
   };
 
-  const defaultPrimary = activeSchemaConfig.primaryCol || cols[0].colIndex;
-  const defaultStatus = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.statusCol || '');
-  const defaultNotes = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.notesCol || '');
-  const defaultTicket = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.ticketCol || '');
-  const defaultSecondary = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.secondaryCol || '');
+  const inferredSt = findInfer([
+    /^(request\s*status|status|title\s*status|current\s*status|stage|disposition)$/i,
+    /\b(status|stage|disposition)\b/i,
+    /^(state)$/i
+  ], true);
+  const inferredNotes = findInfer([
+    /^(action\s*notes?|notes?|comments?|remarks?|action\s*taken)$/i,
+    /\b(notes?|comments?|remarks?|action\s*taken|updates?|details?)\b/i
+  ], true);
+  const inferredTkt = findInfer([
+    /^(ticket\s*(#|num|number|id)?|case\s*(#|num|number|id)?|incident\s*(#|id)?|ref\s*(#|id)?)$/i,
+    /\b(ticket|case|incident|reference)\b/i
+  ], true);
+  const inferredPrimary = findInfer([
+    /^(email\s*subject|subject|request\s*subject|summary|issue\s*summary)$/i,
+    /\b(subject|summary)\b/i,
+    /^(vin|lot\s*(#|num|number|numbers)?|lot|title\s*(#|num|number)?|item|request)$/i,
+    /\b(vin|lot|request|item|title)\b/i
+  ], true) || cols[0].colIndex;
+  const inferredSec = findInfer([
+    /^(broker\s*name|broker|account\s*name|account|buyer|dealer|customer)$/i,
+    /\b(broker|account|dealer|customer|buyer|owner|assigned|agent|rep|dept|department)\b/i
+  ], true);
+
+  const defaultPrimary = (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.primaryCol) ? activeSchemaConfig.primaryCol : inferredPrimary;
+  const defaultStatus = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.statusCol || inferredSt);
+  const defaultNotes = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.notesCol || inferredNotes);
+  const defaultTicket = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.ticketCol || inferredTkt);
+  const defaultSecondary = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.secondaryCol || inferredSec);
 
   const inferredRolesForCopy = {
-    primaryCol: defaultPrimary || findInfer(/subject|title|request|vin|lot|item|account/i) || cols[0].colIndex,
-    statusCol: defaultStatus !== '' ? Number(defaultStatus) : (findInfer(/status|state|stage|disposition/i) || null),
-    notesCol: defaultNotes !== '' ? Number(defaultNotes) : (findInfer(/note|comment|remark|action taken/i) || null),
-    ticketCol: defaultTicket !== '' ? Number(defaultTicket) : (findInfer(/ticket|case|incident|ref/i) || null),
-    secondaryCol: defaultSecondary !== '' ? Number(defaultSecondary) : (findInfer(/broker|account|dealer|owner|assigned|dept/i) || null),
+    primaryCol: Number(defaultPrimary) || cols[0].colIndex,
+    statusCol: defaultStatus !== '' ? Number(defaultStatus) : null,
+    notesCol: defaultNotes !== '' ? Number(defaultNotes) : null,
+    ticketCol: defaultTicket !== '' ? Number(defaultTicket) : null,
+    secondaryCol: defaultSecondary !== '' ? Number(defaultSecondary) : null,
     trackingCol: trackingColEstimate
   };
 
   let initialCopyCols;
   if (savedOverride && Array.isArray(savedOverride.copyCols)) {
     initialCopyCols = savedOverride.copyCols.map(Number);
-  } else if (!activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.copyCols)) {
+  } else if (Array.isArray(activeSchemaConfig.copyCols) && activeSchemaConfig.copyCols.length > 0) {
     initialCopyCols = activeSchemaConfig.copyCols;
+  } else if (autoIsStandard) {
+    initialCopyCols = [1, 2, 4, 5, 7, 8];
   } else {
     initialCopyCols = cols
       .filter(c => inferDefaultCopyableForCustomColumn(c, inferredRolesForCopy))
       .map(c => c.colIndex);
   }
 
+  const savedColSettings = (savedOverride && savedOverride.colSettings && typeof savedOverride.colSettings === 'object')
+    ? savedOverride.colSettings
+    : (activeSchemaConfig.colSettings || {});
+  const initialColSettings = {};
+  const isStdForDefaults = currentMode === 'standard' || (currentMode === 'auto' && autoIsStandard);
+  cols.forEach(c => {
+    const existing = savedColSettings[c.colIndex] || savedColSettings[`col_${c.colIndex}`] || {};
+    const defaultType = inferDefaultDataTypeForColumn(c, inferredRolesForCopy, isStdForDefaults);
+    const defaultValSrc = inferDefaultValidationSourceForColumn(c, inferredRolesForCopy, isStdForDefaults);
+    initialColSettings[c.colIndex] = {
+      dataType: existing.dataType || c.dataType || defaultType,
+      validationSource: existing.validationSource || c.validationSource || defaultValSrc,
+      customList: typeof existing.customList === 'string' ? existing.customList : (c.customList || ''),
+      controlMode: existing.controlMode || c.controlMode || (c.colIndex === inferredRolesForCopy.statusCol ? 'select' : 'datalist')
+    };
+  });
+
   schemaMapperDetectedState = {
     columns: cols,
     autoIsStandard,
     trackingCol: trackingColEstimate,
-    copyColsSet: new Set(initialCopyCols)
+    copyColsSet: new Set(initialCopyCols),
+    colSettings: initialColSettings
   };
 
   if (schemaMapperSubtitle) {
@@ -4882,22 +5603,22 @@ function openSchemaMapperModal() {
   }
 
   if (schemaPrimaryColSelect) {
-    schemaPrimaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultPrimary || findInfer(/subject|title|request|vin|lot|item|account/i) || cols[0].colIndex, false);
+    schemaPrimaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultPrimary || cols[0].colIndex, false);
   }
   if (schemaStatusColSelect) {
-    schemaStatusColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultStatus !== '' ? defaultStatus : findInfer(/status|state|stage|disposition/i), true);
+    schemaStatusColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultStatus, true);
   }
   if (schemaNotesColSelect) {
-    schemaNotesColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultNotes !== '' ? defaultNotes : findInfer(/note|comment|remark|action taken|update/i), true);
+    schemaNotesColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultNotes, true);
   }
   if (schemaTicketColSelect) {
-    schemaTicketColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultTicket !== '' ? defaultTicket : findInfer(/ticket|case|incident|ref/i), true);
+    schemaTicketColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultTicket, true);
   }
   if (schemaSecondaryColSelect) {
-    schemaSecondaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultSecondary !== '' ? defaultSecondary : findInfer(/broker|account|dealer|owner|assigned|dept/i), true);
+    schemaSecondaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultSecondary, true);
   }
   if (schemaTrackingColInfo) {
-    const trkIdx = activeSchemaConfig.isStandardSchema ? 11 : schemaMapperDetectedState.trackingCol;
+    const trkIdx = activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.trackingCol || 11) : schemaMapperDetectedState.trackingCol;
     schemaTrackingColInfo.textContent = `Col ${colNumberToExcelLetters(trkIdx)} (${trkIdx}) — Hidden UUIDv4 Tracking ID`;
   }
 
@@ -4953,6 +5674,67 @@ if (schemaDetectedColsPreview) {
     } else {
       schemaMapperDetectedState.copyColsSet.delete(colIdx);
     }
+    refreshSchemaMapperPreviewUI();
+  });
+}
+
+if (btnToggleSchemaAdvanced && schemaAdvancedPanel) {
+  btnToggleSchemaAdvanced.addEventListener('click', () => {
+    const isHidden = schemaAdvancedPanel.style.display === 'none';
+    schemaAdvancedPanel.style.display = isHidden ? 'block' : 'none';
+    btnToggleSchemaAdvanced.classList.toggle('active', isHidden);
+    btnToggleSchemaAdvanced.setAttribute('aria-expanded', String(isHidden));
+    btnToggleSchemaAdvanced.textContent = isHidden
+      ? '⚙️ Hide Advanced Column Settings ▴'
+      : '⚙️ Advanced Column Settings ▾';
+  });
+}
+
+if (schemaAdvancedTableBody) {
+  schemaAdvancedTableBody.addEventListener('change', (e) => {
+    if (!schemaMapperDetectedState) return;
+    const target = e.target;
+    const colIdx = parseInt(target.dataset.colIndex, 10);
+    if (!Number.isFinite(colIdx)) return;
+
+    if (target.classList.contains('chk-schema-copy-col')) {
+      if (target.checked) {
+        schemaMapperDetectedState.copyColsSet.add(colIdx);
+      } else {
+        schemaMapperDetectedState.copyColsSet.delete(colIdx);
+      }
+      refreshSchemaMapperPreviewUI();
+      return;
+    }
+
+    if (!schemaMapperDetectedState.colSettings[colIdx]) {
+      schemaMapperDetectedState.colSettings[colIdx] = {
+        dataType: 'auto',
+        validationSource: 'auto',
+        customList: '',
+        controlMode: 'datalist'
+      };
+    }
+    const cfg = schemaMapperDetectedState.colSettings[colIdx];
+    if (target.classList.contains('schema-adv-type-select')) {
+      cfg.dataType = target.value;
+    } else if (target.classList.contains('schema-adv-list-select')) {
+      cfg.validationSource = target.value;
+    } else if (target.classList.contains('schema-adv-control-select')) {
+      cfg.controlMode = target.value;
+    } else if (target.classList.contains('schema-adv-custom-input')) {
+      cfg.customList = target.value;
+    }
+    refreshSchemaMapperPreviewUI();
+  });
+
+  schemaAdvancedTableBody.addEventListener('input', (e) => {
+    if (!schemaMapperDetectedState) return;
+    const target = e.target;
+    if (!target.classList.contains('schema-adv-custom-input')) return;
+    const colIdx = parseInt(target.dataset.colIndex, 10);
+    if (!Number.isFinite(colIdx) || !schemaMapperDetectedState.colSettings[colIdx]) return;
+    schemaMapperDetectedState.colSettings[colIdx].customList = target.value;
   });
 }
 
@@ -4974,6 +5756,9 @@ if (schemaMapperForm) {
           .filter(cIdx => cIdx !== statusColVal && cIdx !== notesColVal && cIdx !== trackingColVal)
           .sort((a, b) => a - b)
       : undefined;
+    const colSettings = (schemaMapperDetectedState && schemaMapperDetectedState.colSettings)
+      ? JSON.parse(JSON.stringify(schemaMapperDetectedState.colSettings))
+      : undefined;
     const override = {
       mode,
       primaryCol: parseOptCol(schemaPrimaryColSelect) || 1,
@@ -4981,12 +5766,13 @@ if (schemaMapperForm) {
       notesCol: notesColVal,
       ticketCol: parseOptCol(schemaTicketColSelect),
       secondaryCol: parseOptCol(schemaSecondaryColSelect),
-      ...(Array.isArray(copyCols) ? { copyCols } : {})
+      ...(Array.isArray(copyCols) ? { copyCols } : {}),
+      ...(colSettings ? { colSettings } : {})
     };
     saveSchemaOverrideForWorkbook(workingFileHandle.name, override, activeProfileId);
     schemaMapperModal.classList.remove('open');
     await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, { skipStagedRecoveryCheck: true });
-    showToast(`Saved column role mapping for "${workingFileHandle.name}".`, 'success');
+    showToast(`Saved column mapping & advanced field settings for "${workingFileHandle.name}".`, 'success');
   });
 }
 
@@ -5126,43 +5912,65 @@ function getOrCreateRollupWorker() {
               cols.push({ c, h });
             }
             if (cols.length > 0) {
-              const pick = (re) => { const f = cols.find(x => re.test(x.h)); return f ? f.c : null; };
-              stCol = pick(/status|state|stage|disposition/i);
-              nCol = pick(/note|comment|remark|action taken|update/i);
-              tCol = pick(/ticket|case|incident|ref/i);
-              actCol = pick(/action|type|category|reason|issue|subtype|request type/i);
-              pCol = pick(/subject|title|summary|request|vin|lot|item/i) || cols[0].c;
-              secCol = pick(/broker|account|dealer|customer|owner|assigned|dept/i) || (cols[1] ? cols[1].c : null);
+              const used = new Set();
+              const pick = (reList) => {
+                const list = Array.isArray(reList) ? reList : [reList];
+                for (const re of list) {
+                  const f = cols.find(x => !used.has(x.c) && re.test(x.h));
+                  if (f) { used.add(f.c); return f.c; }
+                }
+                return null;
+              };
+              stCol = pick([/^(request\\s*status|status|title\\s*status|current\\s*status|stage|disposition)$/i, /\\b(status|stage|disposition)\\b/i, /^(state)$/i]);
+              nCol = pick([/^(action\\s*notes?|notes?|comments?|remarks?|action\\s*taken)$/i, /\\b(notes?|comments?|remarks?|action\\s*taken|updates?)\\b/i]);
+              tCol = pick([/^(ticket\\s*(#|num|number|id)?|case\\s*(#|num|number|id)?|incident\\s*(#|id)?|ref\\s*(#|id)?)$/i, /\\b(ticket|case|incident|reference)\\b/i]);
+              actCol = pick([/^(requested\\s*action|action|request\\s*type|action\\s*type|category|reason|issue|subtype)$/i, /\\b(action|category|reason|issue|subtype|type)\\b/i]);
+              pCol = pick([/^(email\\s*subject|subject|request\\s*subject|summary|issue\\s*summary)$/i, /\\b(subject|summary)\\b/i, /^(vin|lot\\s*(#|num|number|numbers)?|lot|title\\s*(#|num|number)?|item|request)$/i, /\\b(vin|lot|request|item|title)\\b/i]) || cols[0].c;
+              used.add(pCol);
+              secCol = pick([/^(broker\\s*name|broker|account\\s*name|account|buyer|dealer|customer)$/i, /\\b(broker|account|dealer|customer|buyer|owner|assigned|dept)\\b/i]) || (cols.find(x => !used.has(x.c))?.c || null);
               maxScanCol = Math.max(...cols.map(x => x.c));
               trkCol = foundTrk || (maxScanCol + 1);
             }
           }
         }
 
+        const WORKER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
         const rows = [];
         for (const { ws, name, ms } of dailySheets) {
           ws.eachRow({ includeEmpty: false }, (r, rn) => {
             if (rn === 1) return;
             let hasAny = false;
             for (let c = 1; c <= maxScanCol; c++) {
-              if (c !== trkCol && cellStr(r, c) !== '') { hasAny = true; break; }
+              if (c !== trkCol) {
+                const cv = cellStr(r, c);
+                if (cv !== '' && !WORKER_UUID_RE.test(cv)) { hasAny = true; break; }
+              }
             }
             if (!hasAny) return;
 
-            const subj = pCol ? cellStr(r, pCol) : '';
-            const tkt = tCol ? cellStr(r, tCol).toUpperCase() : '';
+            let key = (trkCol ? cellStr(r, trkCol).toLowerCase() : '') || '';
+            const cleanField = (val) => {
+              if (!val) return '';
+              if (WORKER_UUID_RE.test(val)) {
+                if (!key) key = val.toLowerCase();
+                return '';
+              }
+              return val;
+            };
+
+            const subj = cleanField(pCol ? cellStr(r, pCol) : '');
+            const tkt = cleanField(tCol ? cellStr(r, tCol) : '').toUpperCase();
             let acct = '';
             if (isStandard) {
-              const brk = cellStr(r, 3);
-              const mst = cellStr(r, 4).toUpperCase();
+              const brk = cleanField(cellStr(r, 3));
+              const mst = cleanField(cellStr(r, 4)).toUpperCase();
               acct = brk && mst ? (brk + ' (' + mst + ')') : (brk || mst);
             } else if (secCol) {
-              acct = cellStr(r, secCol);
+              acct = cleanField(cellStr(r, secCol));
             }
-            const act = actCol ? cellStr(r, actCol) : '';
-            const nts = nCol ? cellStr(r, nCol) : '';
-            const st = (stCol ? cellStr(r, stCol) : '') || 'Pending';
-            const key = (trkCol ? cellStr(r, trkCol).toLowerCase() : '') || '';
+            const act = cleanField(actCol ? cellStr(r, actCol) : '');
+            const nts = cleanField(nCol ? cellStr(r, nCol) : '');
+            const st = cleanField(stCol ? cellStr(r, stCol) : '') || 'Pending';
 
             rows.push({
               workbookName: fileName,
@@ -5267,13 +6075,22 @@ async function parseWorkbookBufferMainThreadFallback(sanitizedBuffer, fileName) 
   } else if (headerWs) {
     const det = extractDetectedRow1HeadersFromSheet(headerWs);
     if (det.columns.length > 0) {
-      const pick = (re) => { const f = det.columns.find(x => re.test(x.header)); return f ? f.colIndex : null; };
-      stCol = pick(/status|state|stage|disposition/i);
-      nCol = pick(/note|comment|remark|action taken|update/i);
-      tCol = pick(/ticket|case|incident|ref/i);
-      actCol = pick(/action|type|category|reason|issue|subtype|request type/i);
-      pCol = pick(/subject|title|summary|request|vin|lot|item/i) || det.columns[0].colIndex;
-      secCol = pick(/broker|account|dealer|customer|owner|assigned|dept/i) || (det.columns[1] ? det.columns[1].colIndex : null);
+      const used = new Set();
+      const pick = (reList) => {
+        const list = Array.isArray(reList) ? reList : [reList];
+        for (const re of list) {
+          const f = det.columns.find(x => !used.has(x.colIndex) && re.test(x.header));
+          if (f) { used.add(f.colIndex); return f.colIndex; }
+        }
+        return null;
+      };
+      stCol = pick([/^(request\s*status|status|title\s*status|current\s*status|stage|disposition)$/i, /\b(status|stage|disposition)\b/i, /^(state)$/i]);
+      nCol = pick([/^(action\s*notes?|notes?|comments?|remarks?|action\s*taken)$/i, /\b(notes?|comments?|remarks?|action\s*taken|updates?)\b/i]);
+      tCol = pick([/^(ticket\s*(#|num|number|id)?|case\s*(#|num|number|id)?|incident\s*(#|id)?|ref\s*(#|id)?)$/i, /\b(ticket|case|incident|reference)\b/i]);
+      actCol = pick([/^(requested\s*action|action|request\s*type|action\s*type|category|reason|issue|subtype)$/i, /\b(action|category|reason|issue|subtype|type)\b/i]);
+      pCol = pick([/^(email\s*subject|subject|request\s*subject|summary|issue\s*summary)$/i, /\b(subject|summary)\b/i, /^(vin|lot\s*(#|num|number|numbers)?|lot|title\s*(#|num|number)?|item|request)$/i, /\b(vin|lot|request|item|title)\b/i]) || det.columns[0].colIndex;
+      used.add(pCol);
+      secCol = pick([/^(broker\s*name|broker|account\s*name|account|buyer|dealer|customer)$/i, /\b(broker|account|dealer|customer|buyer|owner|assigned|dept)\b/i]) || (det.columns.find(x => !used.has(x.colIndex))?.colIndex || null);
       maxScanCol = det.maxCol;
       trkCol = det.existingTrackingCol || (det.maxCol + 1);
     }
@@ -5285,23 +6102,34 @@ async function parseWorkbookBufferMainThreadFallback(sanitizedBuffer, fileName) 
       if (rn === 1) return;
       let hasAny = false;
       for (let c = 1; c <= maxScanCol; c++) {
-        if (c !== trkCol && cellText(r, c) !== '') { hasAny = true; break; }
+        if (c !== trkCol) {
+          const cv = cellText(r, c);
+          if (cv !== '' && !UUID_REGEX.test(cv)) { hasAny = true; break; }
+        }
       }
       if (!hasAny) return;
-      const subj = pCol ? cellText(r, pCol) : '';
-      const tkt = tCol ? cellText(r, tCol).toUpperCase() : '';
+      let key = trkCol ? cellText(r, trkCol).toLowerCase() : '';
+      const cleanField = (val) => {
+        if (!val) return '';
+        if (UUID_REGEX.test(val)) {
+          if (!key) key = val.toLowerCase();
+          return '';
+        }
+        return val;
+      };
+      const subj = cleanField(pCol ? cellText(r, pCol) : '');
+      const tkt = cleanField(tCol ? cellText(r, tCol) : '').toUpperCase();
       let acct = '';
       if (isStandard) {
-        const brk = cellText(r, 3);
-        const mst = cellText(r, 4).toUpperCase();
+        const brk = cleanField(cellText(r, 3));
+        const mst = cleanField(cellText(r, 4)).toUpperCase();
         acct = brk && mst ? `${brk} (${mst})` : (brk || mst);
       } else if (secCol) {
-        acct = cellText(r, secCol);
+        acct = cleanField(cellText(r, secCol));
       }
-      const act = actCol ? cellText(r, actCol) : '';
-      const nts = nCol ? cellText(r, nCol) : '';
-      const st = (stCol ? cellText(r, stCol) : '') || 'Pending';
-      const key = trkCol ? cellText(r, trkCol).toLowerCase() : '';
+      const act = cleanField(actCol ? cellText(r, actCol) : '');
+      const nts = cleanField(nCol ? cellText(r, nCol) : '');
+      const st = cleanField(stCol ? cellText(r, stCol) : '') || 'Pending';
       rows.push({
         workbookName: fileName,
         sheetName: name,
@@ -5418,7 +6246,7 @@ function consolidateRollupRowsPerWorkbook(rawRows) {
 }
 
 function resolveRollupRowParentCategory(row) {
-  const clean = String(row.action || '').trim();
+  const clean = String(row.action || '').replace(/\s+/g, ' ').trim();
   if (clean) {
     const low = clean.toLowerCase();
     if (masterRollupState.localCategoryMap.has(low)) {
@@ -5486,6 +6314,17 @@ async function scanAndAggregateRollupFolder() {
 
     const allParsedRows = [];
     const localCatMap = new Map();
+    const canonicalCategoryLabelMap = new Map();
+    const canonicalizeCategoryLabel = (rawCat) => {
+      const cleanCat = String(rawCat || '').replace(/\s+/g, ' ').trim();
+      if (!cleanCat) return 'Uncategorized / General';
+      const lowCat = cleanCat.toLowerCase();
+      if (canonicalCategoryLabelMap.has(lowCat)) {
+        return canonicalCategoryLabelMap.get(lowCat);
+      }
+      canonicalCategoryLabelMap.set(lowCat, cleanCat);
+      return cleanCat;
+    };
     let anyWorkerUsed = false;
 
     for (const item of selectedEntries) {
@@ -5495,7 +6334,12 @@ async function scanAndAggregateRollupFolder() {
         const displayWbName = item.name.replace(/\s*\(VIEW ONLY\)\.xlsx$/i, '.xlsx');
         const res = await parseWorkbookBufferInBackground(buf, displayWbName);
         if (res.usedWorker) anyWorkerUsed = true;
-        (res.categoryPairs || []).forEach(([actLow, cat]) => localCatMap.set(actLow, cat));
+        (res.categoryPairs || []).forEach(([actLow, cat]) => {
+          const normAct = String(actLow || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (normAct && cat) {
+            localCatMap.set(normAct, canonicalizeCategoryLabel(cat));
+          }
+        });
         (res.rows || []).forEach(r => allParsedRows.push(r));
       } catch (fileErr) {
         console.warn(`Skipped unreadable workbook "${item.name}" in Master Rollup:`, fileErr);
@@ -5512,11 +6356,11 @@ async function scanAndAggregateRollupFolder() {
     };
 
     masterRollupState.rawRows.forEach(r => {
-      r.parentCategory = resolveRollupRowParentCategory(r);
+      r.parentCategory = canonicalizeCategoryLabel(resolveRollupRowParentCategory(r));
     });
     masterRollupState.dedupedRows = consolidateRollupRowsPerWorkbook(masterRollupState.rawRows).map(r => ({
       ...r,
-      parentCategory: resolveRollupRowParentCategory(r)
+      parentCategory: canonicalizeCategoryLabel(resolveRollupRowParentCategory(r))
     }));
 
     if (masterRollupWorkerBadge) {
@@ -5926,7 +6770,10 @@ async function importWorkspaceConfigJsonFile(file) {
     }
 
     if (parsed.actionCategoryOverrides && typeof parsed.actionCategoryOverrides === 'object' && !Array.isArray(parsed.actionCategoryOverrides)) {
-      actionCategoryOverridesStore = { ...actionCategoryOverridesStore, ...parsed.actionCategoryOverrides };
+      const mergedOverrides = { ...actionCategoryOverridesStore, ...parsed.actionCategoryOverrides };
+      actionCategoryOverridesStore = typeof normalizeActionCategoryOverridesMap === 'function'
+        ? normalizeActionCategoryOverridesMap(mergedOverrides)
+        : mergedOverrides;
       localStorage.setItem(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY, JSON.stringify(actionCategoryOverridesStore));
     }
 

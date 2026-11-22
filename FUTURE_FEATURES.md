@@ -6,6 +6,16 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ## 1. Planned Enhancements & Active Backlog (📋 Planned)
 
+### 🧱 Modular Scratch Sheet & Spreadsheet Engine Split (`js/spreadsheet-engine.js` + `js/scratch-sheets.js`)
+- **Status**: 📋 Planned
+- **Proposal**:
+  - Split `js/scratch-sheets.js` (~7,100 lines) into two focused zero-build modules loaded sequentially in `index.html`:
+    1. **`js/spreadsheet-engine.js`**: Pure spreadsheet & OpenXML engine (Excel theme/tint & ARGB color math, `numFmt` & cell data type inference, `applyRawEditToExcelCell`, formula tokenizer/AST parser, `recalculateScratchWorksheetFormulas` dynamic array spill evaluator, fill-handle series extrapolation, and RFC-4180 TSV / Excel HTML `<table>` clipboard matrix parsers & serializers).
+    2. **`js/scratch-sheets.js`**: Workspace tabs bar (`#workspaceTabsBar`), Scratch Sheet grid DOM rendering, pointer selection & auto-scroll loop, inline cell editor, 50-step Undo/Redo & per-profile runtime snapshot managers, context menu, Data-to-Columns wizard (`#textToColumnsModal`), and Auto-Filter Side Lists builder (`#scratchAutoFilterModal`).
+  - Pass explicit context objects (`{ ws, wb, archiveState, spillMaps }`) into the spreadsheet engine helpers so formula evaluation, cell formatting (`bold`/`italic`/`underline`/alignment), and clipboard matrix transformations operate without direct DOM globals.
+
+---
+
 ### 📋 Custom Field Validation Assignment
 - **Status**: 📋 Planned
 - **Proposal**:
@@ -69,6 +79,7 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
 |---|---|---|---|
+| **Modular Spreadsheet Engine Split (`js/spreadsheet-engine.js`)** | *Scratch Sheets / Architecture* | 📋 Planned | Split `js/scratch-sheets.js` into a pure formula/clipboard/formatting engine (`js/spreadsheet-engine.js`) and UI grid controller (`js/scratch-sheets.js`). |
 | **Rolling Daily & Version-Upgrade Backups (`_Backups/`)** | *Workbook I/O / Safety* | 📋 Planned | Capped 5–7 day `.xlsx` ring buffer + `SHA-256` dedup + automatic pre-version-upgrade & pre-rollover/delete safety snapshots with an in-app **Restore from Backup** picker. |
 | **Directory Paths & Startup `.json` Auto-Check** | *Config / Onboarding* | 📋 Planned | Store per-profile folder names/subpaths in `.json` config and auto-check on startup (`trackerui-config.json`), resolving subfolders from a shared root handle or prompting 1-click folder connection for coworkers. |
 | **Resizable Tracker Table Columns** | *Daily Tracker Table* | 📋 Planned | Draggable column header resize handles in `#tableHead` across Standard & Custom Department trackers, persisted per profile/schema in `localStorage` and `.json` config backups. |
@@ -80,7 +91,16 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.5`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.6`)
+
+### 🛡️ Comprehensive Defensive Code Audit Fixes, Advanced Column Settings & Yard # Dropdown (`v1.19.6`)
+- **Status**: ✅ Implemented in `v1.19.6`
+- **Delivered**:
+  - **Advanced Column Mapping Settings (`index.html`, `css/styles.css`, `js/workbook-io.js`, `js/request-editors.js`)**: Added the expandable **`⚙️ Advanced Column Settings ▾`** table inside `#schemaMapperModal` allowing per-column **Data Type** (`Auto`, `Uppercase Code / ID`, `Number`, `Currency`, `Date`, `Multi-line Notes`), **Dropdown / Validation Source** (`Auto-Detect`, `None`, `Yard # / Name List`, `Master Accounts`, `Validation Lists`, or custom comma-separated lists), **Input Control** (`Searchable Input + Dropdown` vs. `Strict <select>`), and **`📋 Copy`** toggles across all columns.
+  - **Standalone `Yard # / Yard Name` Dropdown & Strict `Broker ↔ Master #` Decoupling (`index.html`, `js/mockMasterAccounts.js`, `js/workbook-io.js`, `js/request-editors.js`)**: Decoupled `Bidder #` and `Yard #` from `Broker Name` ↔ `Master #` auto-fill, and wired `<datalist id="yardList">` to the existing `Yard #` (`Col G`) field so linked `Yard List` tabs or `validation lists` columns provide searchable `Yard # — Yard Name` autocomplete without adding a column.
+  - **String Normalization, Casing Deduplication & Formula Parity (`js/core-ui.js`, `js/workbook-io.js`, `js/request-editors.js`, `js/scratch-sheets.js`)**: Normalized `actionCategoryOverridesStore` keys, case-insensitively deduplicated `validation lists` and status `<select>` options, merged Master Rollup parent categories case-insensitively, and added `==`, matrix `=IF` false-branches, Date-vs-String comparisons, and `"="` / `"<>"` `=COUNTIF` shorthand.
+  - **Tiered Priority Role Inference, UUIDv4 Scrubbing & 11-Col Validation Bootstrap (`js/workbook-io.js`, `js/request-editors.js`, `index.html`)**: Added 3-tier priority matching + `usedSet` so `"Title Status"` never collides with `Subject`, added `buildStandardSchemaDataValidationsExtLst()` (`J2:J500` & `F2:F500`), gated Column C `XLOOKUP` XML rewriting, and scrubbed UUIDv4 strings from visible columns in View-Only Inspector and Master Rollup.
+  - **Scratch `Type: Text (@)` Formula Guard, Non-Blocking Auto-Save Lock Toast & Per-Profile Scratch State (`js/core-ui.js`, `js/workbook-io.js`, `js/scratch-sheets.js`, `js/rollover.js`)**: Checked `Type: Text (@)` before `=` formula parsing, stripped `<rPh>` phonetic XML tags, made background scratch auto-save locks non-blocking (`silentLockAlert`), isolated open Scratch Sheets & Undo/Redo stacks per Tracker Profile (`captureScratchRuntimeSnapshot` / `restoreScratchRuntimeSnapshot`), and fixed Rollover target-tab `New → In Progress` & superseded force-reopen preservation.
 
 ### 🕒 Row Last-Accessed Timestamp, Compact `#`/Checkbox Columns & Unsaved New Request Draft Autosave/Warning (`v1.19.5`)
 - **Status**: ✅ Implemented in `v1.19.5`

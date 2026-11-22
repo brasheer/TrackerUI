@@ -690,6 +690,15 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         typeof isOverdueStatus === 'function' &&
         !isOverdueStatus(targetRow.status)
       );
+      const autoProgressedOnTarget = Boolean(
+        inSelectedSourceScope &&
+        targetIsActive &&
+        !targetIsWaiting &&
+        !autoOverdueOnTarget &&
+        group.entries.length > 0 &&
+        typeof isNewStatus === 'function' &&
+        isNewStatus(targetRow.status)
+      );
       const priorCores = extractNoteCoresSet(consolidatedLatest.notes);
       const targetCores = extractNoteCoresSet(targetRow.notes);
       let hasMissingPriorNotes = false;
@@ -708,6 +717,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         targetRow,
         reopenedOnSource: inSelectedSourceScope && isTargetComplete && !isLatestComplete,
         autoOverdueOnTarget,
+        autoProgressedOnTarget,
         hasMissingPriorNotes: inSelectedSourceScope && hasMissingPriorNotes,
         mergedTargetNotes: inSelectedSourceScope ? mergedTargetNotes : targetRow.notes,
         groupEntries: group.entries
@@ -745,6 +755,7 @@ function computeRolloverAnalysis(targetTabName, includeFutureTabs, sourceMode = 
         targetRow,
         reopenedOnSource: false,
         autoOverdueOnTarget: false,
+        autoProgressedOnTarget: false,
         hasMissingPriorNotes: false,
         mergedTargetNotes: targetRow.notes,
         groupEntries: []
@@ -881,11 +892,14 @@ function updateRolloverModalPreview() {
     html += `<div>
       <div class="preview-section-title">Already Present on ${escapeHtml(targetVal)} (${plan.alreadyOnTarget.length})</div>
       <div class="preview-list">`;
-    plan.alreadyOnTarget.forEach(({ targetRow, latestRow, reopenedOnSource, autoOverdueOnTarget, hasMissingPriorNotes }) => {
+    const nextInProgressLbl = typeof resolveInProgressStatusLabel === 'function'
+      ? resolveInProgressStatusLabel()
+      : 'In Progress';
+    plan.alreadyOnTarget.forEach(({ targetRow, latestRow, reopenedOnSource, autoOverdueOnTarget, autoProgressedOnTarget, hasMissingPriorNotes }) => {
       const syncNoteLabel = hasMissingPriorNotes ? ' • +Append missing prior notes' : '';
       const effectiveTargetStatus = autoOverdueOnTarget
         ? 'Overdue'
-        : (reopenedOnSource ? latestRow.status : targetRow.status);
+        : (reopenedOnSource ? latestRow.status : (autoProgressedOnTarget ? nextInProgressLbl : targetRow.status));
       const targetBadgeClass = typeof getStatusBadgeClass === 'function'
         ? getStatusBadgeClass(effectiveTargetStatus)
         : (isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending');
@@ -898,7 +912,7 @@ function updateRolloverModalPreview() {
         : (isTargetWaiting ? ' waiting-outline-purple' : '');
       const statusArrowText = reopenedOnSource
         ? ` → Reopen (${escapeHtml(latestRow.status)})`
-        : (autoOverdueOnTarget ? ' → Overdue' : '');
+        : (autoOverdueOnTarget ? ' → Overdue' : (autoProgressedOnTarget ? ` → ${escapeHtml(nextInProgressLbl)}` : ''));
       html += `
         <div class="preview-item${targetHighlightClass}">
           <div class="preview-item-main">
@@ -939,7 +953,7 @@ function updateRolloverModalPreview() {
             <div class="preview-item-main">
               <strong>${escapeHtml(getRolloverItemDisplayTitle(openRow))}</strong>
               <span class="preview-item-sub">
-                ${escapeHtml(openRow.broker || 'No Broker')} • Was <strong>${escapeHtml(openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>${escapeHtml(completedRow.status)}</strong> on ${escapeHtml(completedRow.sheetName)}
+                ${escapeHtml(openRow.broker || 'No Broker')} • Was <strong>${escapeHtml(openRow._previousStatus || openRow.status)}</strong> on ${escapeHtml(openRow.sheetName)}, marked <strong>${escapeHtml(completedRow.status)}</strong> on ${escapeHtml(completedRow.sheetName)}
               </span>
             </div>
           </div>
@@ -980,18 +994,9 @@ rolloverForm.addEventListener('submit', async (e) => {
     if (!plan.valid) return;
 
     const itemsToCarry = [...plan.toRollOver];
-    plan.supersededByComplete.forEach(({ openRow, completedRow }) => {
+    plan.supersededByComplete.forEach(({ openRow }) => {
       if (forcedKeys.has(openRow.key.toLowerCase())) {
         itemsToCarry.push(openRow);
-        const completedWs = workbook.getWorksheet(completedRow.sheetName);
-        if (completedWs) {
-          const compColMap = getWorksheetColumnMap(completedWs);
-          if (compColMap.statusCol) {
-            const cr = completedWs.getRow(completedRow.rowNumber);
-            cr.getCell(compColMap.statusCol).value = openRow.status;
-            cr.commit();
-          }
-        }
       }
     });
 
@@ -1066,20 +1071,30 @@ rolloverForm.addEventListener('submit', async (e) => {
       }
     }
 
+    const nextInProgressOnTarget = typeof resolveInProgressStatusLabel === 'function'
+      ? resolveInProgressStatusLabel()
+      : 'In Progress';
     for (const entry of plan.alreadyOnTarget) {
       if (entry.groupEntries && entry.groupEntries.length > 0) {
         unifyHistoricalGroupTrackingIds(entry.groupEntries, entry.targetRow.key);
       }
 
-      if (entry.reopenedOnSource || entry.autoOverdueOnTarget || entry.hasMissingPriorNotes) {
+      if (entry.reopenedOnSource || entry.autoOverdueOnTarget || entry.autoProgressedOnTarget || entry.hasMissingPriorNotes) {
         const excelRow = targetSheet.getRow(entry.targetRow.rowNumber);
-        if ((entry.reopenedOnSource || entry.autoOverdueOnTarget) && targetColMap.statusCol) {
-          const nextStatus = entry.autoOverdueOnTarget ? 'Overdue' : entry.latestRow.status;
+        if ((entry.reopenedOnSource || entry.autoOverdueOnTarget || entry.autoProgressedOnTarget) && targetColMap.statusCol) {
+          const nextStatus = entry.autoOverdueOnTarget
+            ? 'Overdue'
+            : (entry.reopenedOnSource ? entry.latestRow.status : nextInProgressOnTarget);
           excelRow.getCell(targetColMap.statusCol).value = nextStatus;
           if (entry.autoOverdueOnTarget) {
             autoOverdueCount++;
             if (typeof ensureStatusOptionExists === 'function') {
               ensureStatusOptionExists('Overdue');
+            }
+          } else if (entry.autoProgressedOnTarget) {
+            autoProgressedCount++;
+            if (typeof ensureStatusOptionExists === 'function') {
+              ensureStatusOptionExists(nextStatus);
             }
           } else {
             reopenedCount++;

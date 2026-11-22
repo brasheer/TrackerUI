@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.5</title>
+  <title>TrackerUI v1.19.6</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.5">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.6">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.5 — Click to check for updates &amp; refresh app cache">v1.19.5</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.6 — Click to check for updates &amp; refresh app cache">v1.19.6</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.5</span>
+              <span class="menu-item-meta" data-app-version>v1.19.6</span>
             </button>
           </div>
         </div>
@@ -591,9 +591,6 @@
           <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
             <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
           </th>
-          <th class="sortable-th" data-sort="key" title="Click to sort by Tracking ID">
-            <span>Tracking ID (Col K)</span><span class="sort-indicator" data-ind="key">↕</span>
-          </th>
           <th class="sortable-th" data-sort="subject" title="Click to sort by Subject">
             <span>Subject</span><span class="sort-indicator" data-ind="subject">↕</span>
           </th>
@@ -622,11 +619,17 @@
           <th class="sortable-th" data-sort="status" title="Click to sort by Status">
             <span>Status</span><span class="sort-indicator" data-ind="status">↕</span>
           </th>
-          <th>Actions</th>
+          <th class="sortable-th" data-sort="lastAccessed" title="Click Accessed or ID to sort">
+            <span>Actions</span>
+            <span class="th-sep">•</span>
+            <span class="th-sub-sort" data-sort="lastAccessed" title="Sort by Last Accessed time">Accessed<span class="sort-indicator" data-ind="lastAccessed">↕</span></span>
+            <span class="th-sep">/</span>
+            <span class="th-sub-sort" data-sort="key" title="Sort by Tracking ID (UUIDv4)">ID<span class="sort-indicator" data-ind="key">↕</span></span>
+          </th>
         </tr>
       </thead>
       <tbody id="listBody">
-        <tr><td colspan="13" class="empty-table-cell">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
+        <tr><td colspan="12" class="empty-table-cell">Click "Select Agent Folder" to connect your tracker directory.</td></tr>
       </tbody>
     </table>
   </div>
@@ -741,7 +744,7 @@
         </div>
         <div class="form-group" data-field-id="yard">
           <label for="dockYard"><span class="field-lbl-main">Yard #</span> <span class="field-col-tag">Col G</span></label>
-          <input type="text" id="dockYard" placeholder="Yard #">
+          <input type="text" id="dockYard" list="yardList" placeholder="Yard # or Name">
         </div>
         <div class="form-group" data-field-id="lots">
           <label for="dockLots"><span class="field-lbl-main">Lot Numbers</span> <span class="field-col-tag">Col H</span></label>
@@ -1070,7 +1073,8 @@
           </div>
           <div class="form-group">
             <label>Yard # (Col G)</label>
-            <input type="text" id="fYard">
+            <input type="text" id="fYard" list="yardList" placeholder="Yard # or Name">
+            <datalist id="yardList"></datalist>
           </div>
           <div class="form-group">
             <label>Lot Numbers (Col H)</label>
@@ -1456,8 +1460,33 @@
         </div>
 
         <div class="schema-preview-section">
-          <div class="ttc-section-label">Detected Row-1 Workbook Columns, Validation &amp; Copy-to-Clipboard (Toggle 📋 Copy per column)</div>
-          <div id="schemaDetectedColsPreview" class="schema-cols-preview"></div>
+          <div class="schema-preview-header-row">
+            <div class="ttc-section-label" style="margin-bottom:0;">Detected Row-1 Workbook Columns, Validation &amp; Copy-to-Clipboard (Toggle 📋 Copy per column)</div>
+            <button type="button" id="btnToggleSchemaAdvanced" class="btn-dock-secondary btn-sm btn-schema-advanced-toggle" aria-expanded="false">
+              ⚙️ Advanced Column Settings ▾
+            </button>
+          </div>
+          <div id="schemaDetectedColsPreview" class="schema-cols-preview" style="margin-top:0.5rem;"></div>
+
+          <div id="schemaAdvancedPanel" class="schema-advanced-panel" style="display:none;">
+            <div class="schema-advanced-hint">
+              Configure per-column <strong>Data Type</strong> (auto-uppercasing codes, numbers, dates, multi-line notes), <strong>Dropdown / Validation List Source</strong> (including linked <code>Yard # / Name</code> or <code>validation lists</code> columns), and <strong>Input Style</strong> across any column:
+            </div>
+            <div class="schema-advanced-table-wrap">
+              <table class="schema-advanced-table">
+                <thead>
+                  <tr>
+                    <th>Column &amp; Header</th>
+                    <th>Data Type</th>
+                    <th>Dropdown / Validation Source</th>
+                    <th>Input Control</th>
+                    <th>Inline Copy</th>
+                  </tr>
+                </thead>
+                <tbody id="schemaAdvancedTableBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         <div class="modal-actions">
@@ -1859,7 +1888,7 @@
             <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.5</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.6</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -1978,16 +2007,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.5</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.6</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.5"></script>
-  <script src="js/core-ui.js?v=1.19.5"></script>
-  <script src="js/workbook-io.js?v=1.19.5"></script>
-  <script src="js/tracker-table.js?v=1.19.5"></script>
-  <script src="js/request-editors.js?v=1.19.5"></script>
-  <script src="js/scratch-sheets.js?v=1.19.5"></script>
-  <script src="js/rollover.js?v=1.19.5"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.6"></script>
+  <script src="js/core-ui.js?v=1.19.6"></script>
+  <script src="js/workbook-io.js?v=1.19.6"></script>
+  <script src="js/tracker-table.js?v=1.19.6"></script>
+  <script src="js/request-editors.js?v=1.19.6"></script>
+  <script src="js/scratch-sheets.js?v=1.19.6"></script>
+  <script src="js/rollover.js?v=1.19.6"></script>
 </body>
 </html>
