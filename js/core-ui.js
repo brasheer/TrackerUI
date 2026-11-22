@@ -202,8 +202,10 @@ let activeSchemaConfig = {
   primaryCol: 1,
   ticketCol: 2,
   secondaryCol: 3,
+  actionCol: 6,
   statusCol: 10,
   notesCol: 9,
+  emailSubjCol: null,
   trackingCol: 11
 };
 
@@ -1094,22 +1096,19 @@ const afFormulaPreviewBox = document.getElementById('afFormulaPreviewBox');
 const btnCancelAutoFilter = document.getElementById('btnCancelAutoFilter');
 const btnConfirmAutoFilter = document.getElementById('btnConfirmAutoFilter');
 
-// Dynamic Column Role Mapper Modal DOM Elements (v1.17.0)
+// Dynamic Full-Column Schema Manager Modal DOM Elements (v1.19.7)
 const schemaMapperModal = document.getElementById('schemaMapperModal');
 const schemaMapperSubtitle = document.getElementById('schemaMapperSubtitle');
 const schemaMapperModeBadge = document.getElementById('schemaMapperModeBadge');
 const schemaMapperForm = document.getElementById('schemaMapperForm');
 const schemaModeSelect = document.getElementById('schemaModeSelect');
-const schemaPrimaryColSelect = document.getElementById('schemaPrimaryColSelect');
-const schemaStatusColSelect = document.getElementById('schemaStatusColSelect');
-const schemaNotesColSelect = document.getElementById('schemaNotesColSelect');
-const schemaTicketColSelect = document.getElementById('schemaTicketColSelect');
-const schemaSecondaryColSelect = document.getElementById('schemaSecondaryColSelect');
 const schemaTrackingColInfo = document.getElementById('schemaTrackingColInfo');
-const schemaDetectedColsPreview = document.getElementById('schemaDetectedColsPreview');
-const btnToggleSchemaAdvanced = document.getElementById('btnToggleSchemaAdvanced');
-const schemaAdvancedPanel = document.getElementById('schemaAdvancedPanel');
-const schemaAdvancedTableBody = document.getElementById('schemaAdvancedTableBody');
+const schemaRolesSummaryBar = document.getElementById('schemaRolesSummaryBar');
+const schemaColSearchInput = document.getElementById('schemaColSearchInput');
+const btnSchemaShowAllCols = document.getElementById('btnSchemaShowAllCols');
+const chkSchemaAllTable = document.getElementById('chkSchemaAllTable');
+const chkSchemaAllEditor = document.getElementById('chkSchemaAllEditor');
+const schemaAllColumnsTableBody = document.getElementById('schemaAllColumnsTableBody');
 const btnResetSchemaMapper = document.getElementById('btnResetSchemaMapper');
 const btnCancelSchemaMapper = document.getElementById('btnCancelSchemaMapper');
 const btnSaveSchemaMapper = document.getElementById('btnSaveSchemaMapper');
@@ -1817,7 +1816,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.6';
+const APP_VERSION = 'v1.19.7';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;

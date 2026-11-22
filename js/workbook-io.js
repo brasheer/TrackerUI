@@ -1765,11 +1765,20 @@ function saveSchemaOverrideForWorkbook(fileName, overrideObj, profileId = active
 function extractDetectedRow1HeadersFromSheet(ws) {
   if (!ws) return { columns: [], existingTrackingCol: null, maxCol: 0 };
   const row1 = ws.getRow(1);
-  const scanLimit = Math.min(Math.max(row1.cellCount || 0, ws.columnCount || 0, 14), 60);
+  const scanLimit = Math.min(Math.max(row1.cellCount || 0, ws.columnCount || 0, 20), 100);
+  const maxScanDataRows = Math.min(ws.rowCount || 1, 25);
   let maxNonEmptyCol = 0;
   for (let c = 1; c <= scanLimit; c++) {
     if (cellText(row1, c) !== '') {
       maxNonEmptyCol = c;
+      continue;
+    }
+    for (let r = 2; r <= maxScanDataRows; r++) {
+      const val = cellText(ws.getRow(r), c);
+      if (val !== '' && !UUID_REGEX.test(val)) {
+        maxNonEmptyCol = c;
+        break;
+      }
     }
   }
   if (maxNonEmptyCol === 0) {
@@ -1806,6 +1815,7 @@ function extractDetectedRow1HeadersFromSheet(ws) {
           colIndex: c,
           fieldKey: `col_${c}`,
           colLetter,
+          excelHeader: inferredLabel,
           header: inferredLabel,
           dropdownOptions: dropdownOpts
         });
@@ -1821,6 +1831,7 @@ function extractDetectedRow1HeadersFromSheet(ws) {
       colIndex: c,
       fieldKey: `col_${c}`,
       colLetter,
+      excelHeader: label,
       header: label,
       dropdownOptions: dropdownOpts
     });
@@ -2217,6 +2228,38 @@ function formatValueForColumnDataType(rawVal, dataType) {
   return str;
 }
 
+function normalizeColSettingEntry(rawCfg, colObj, defaults = {}) {
+  const cfg = (rawCfg && typeof rawCfg === 'object') ? rawCfg : {};
+  const excelHdr = String((colObj && (colObj.excelHeader || colObj.header)) || '').trim();
+  const rawLabel = typeof cfg.label === 'string' ? cfg.label.replace(/\s+/g, ' ').trim() : '';
+  const label = (rawLabel && rawLabel !== excelHdr) ? rawLabel : '';
+  const showInTable = typeof cfg.showInTable === 'boolean'
+    ? cfg.showInTable
+    : (defaults.showInTable !== undefined ? Boolean(defaults.showInTable) : true);
+  const showInEditor = typeof cfg.showInEditor === 'boolean'
+    ? cfg.showInEditor
+    : (defaults.showInEditor !== undefined ? Boolean(defaults.showInEditor) : true);
+  const dataType = ['auto', 'uppercase', 'number', 'currency', 'date', 'notes'].includes(cfg.dataType)
+    ? cfg.dataType
+    : (defaults.dataType || 'auto');
+  const validationSource = (typeof cfg.validationSource === 'string' && cfg.validationSource.trim())
+    ? cfg.validationSource.trim()
+    : (defaults.validationSource || 'auto');
+  const customList = typeof cfg.customList === 'string' ? cfg.customList : '';
+  const controlMode = ['datalist', 'select'].includes(cfg.controlMode)
+    ? cfg.controlMode
+    : (defaults.controlMode || 'datalist');
+  return {
+    label,
+    showInTable,
+    showInEditor,
+    dataType,
+    validationSource,
+    customList,
+    controlMode
+  };
+}
+
 function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   const refWs = findPrimarySchemaHeaderWorksheet(wb);
   const detected = extractDetectedRow1HeadersFromSheet(refWs);
@@ -2230,7 +2273,7 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     ? true
     : (mode === 'custom' ? false : autoIsStandard);
 
-  // Cannot use custom mode if Row 1 has zero headers at all
+  // Cannot use custom mode if Row 1 / data has zero columns at all
   if (!useStandard && detected.columns.length === 0) {
     useStandard = true;
   }
@@ -2248,19 +2291,37 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
       emailSubjCol: null,
       trackingCol: 11
     };
-    const stdCols = detected.columns.length > 0
-      ? detected.columns
-      : STANDARD_HEADERS.slice(0, 10).map((h, i) => ({
-          colIndex: i + 1,
-          fieldKey: `col_${i + 1}`,
-          colLetter: colNumberToExcelLetters(i + 1),
-          header: h,
-          dropdownOptions: []
-        }));
+    const stdDefaultCols = STANDARD_HEADERS.slice(0, 10).map((h, i) => ({
+      colIndex: i + 1,
+      fieldKey: `col_${i + 1}`,
+      colLetter: colNumberToExcelLetters(i + 1),
+      excelHeader: h,
+      header: h,
+      dropdownOptions: []
+    }));
+    const detNonTracking = detected.columns.filter(c => c.colIndex !== stdMap.trackingCol);
+    const stdColByIdx = new Map();
+    detNonTracking.forEach(c => {
+      stdColByIdx.set(c.colIndex, {
+        ...c,
+        excelHeader: c.excelHeader || c.header
+      });
+    });
+    if (stdColByIdx.size === 0) {
+      stdDefaultCols.forEach(c => stdColByIdx.set(c.colIndex, c));
+    } else {
+      stdDefaultCols.forEach(dc => {
+        if (!stdColByIdx.has(dc.colIndex)) {
+          stdColByIdx.set(dc.colIndex, dc);
+        }
+      });
+    }
+    const stdCols = Array.from(stdColByIdx.values()).sort((a, b) => a.colIndex - b.colIndex);
     const stdRoles = {
       primaryCol: 1,
       ticketCol: 2,
       secondaryCol: 3,
+      actionCol: 6,
       statusCol: stdMap.statusCol,
       notesCol: stdMap.notesCol,
       trackingCol: stdMap.trackingCol
@@ -2277,28 +2338,31 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     const resolvedStdColSettings = {};
     stdCols.forEach(c => {
       const cfg = savedColSettings[c.colIndex] || savedColSettings[`col_${c.colIndex}`] || {};
-      const defaultType = inferDefaultDataTypeForColumn(c, stdRoles, true);
-      const defaultValSrc = inferDefaultValidationSourceForColumn(c, stdRoles, true);
-      const dataType = ['auto', 'uppercase', 'number', 'currency', 'date', 'notes'].includes(cfg.dataType)
-        ? cfg.dataType
-        : defaultType;
-      const validationSource = cfg.validationSource || defaultValSrc;
-      const customList = typeof cfg.customList === 'string' ? cfg.customList : '';
-      const controlMode = ['datalist', 'select'].includes(cfg.controlMode)
-        ? cfg.controlMode
-        : (c.colIndex === stdMap.statusCol ? 'select' : 'datalist');
-      c.dataType = dataType;
-      c.validationSource = validationSource;
-      c.customList = customList;
-      c.controlMode = controlMode;
-      c.dropdownOptions = resolveDropdownOptionsForSource(validationSource, c, customList, dvOptsByCol);
+      const isExtraStdEmail = Boolean(stdMap.emailSubjCol && c.colIndex === stdMap.emailSubjCol);
+      const normCfg = normalizeColSettingEntry(cfg, c, {
+        showInTable: !isExtraStdEmail,
+        showInEditor: true,
+        dataType: inferDefaultDataTypeForColumn(c, stdRoles, true),
+        validationSource: inferDefaultValidationSourceForColumn(c, stdRoles, true),
+        controlMode: c.colIndex === stdMap.statusCol ? 'select' : 'datalist'
+      });
+      c.excelHeader = c.excelHeader || c.header;
+      c.label = normCfg.label;
+      c.header = normCfg.label || c.excelHeader;
+      c.showInTable = normCfg.showInTable;
+      c.showInEditor = normCfg.showInEditor;
+      c.dataType = normCfg.dataType;
+      c.validationSource = normCfg.validationSource;
+      c.customList = normCfg.customList;
+      c.controlMode = normCfg.controlMode;
+      c.dropdownOptions = resolveDropdownOptionsForSource(
+        normCfg.validationSource,
+        { ...c, header: c.excelHeader },
+        normCfg.customList,
+        dvOptsByCol
+      );
       c.isCopyable = stdCopyCols.includes(c.colIndex);
-      resolvedStdColSettings[c.colIndex] = {
-        dataType,
-        validationSource,
-        customList,
-        controlMode
-      };
+      resolvedStdColSettings[c.colIndex] = normCfg;
     });
 
     activeSchemaConfig = {
@@ -2309,8 +2373,10 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
       primaryCol: 1,
       ticketCol: 2,
       secondaryCol: 3,
+      actionCol: 6,
       statusCol: stdMap.statusCol,
       notesCol: stdMap.notesCol,
+      emailSubjCol: stdMap.emailSubjCol || null,
       trackingCol: stdMap.trackingCol,
       copyCols: stdCopyCols,
       colSettings: resolvedStdColSettings
@@ -2318,7 +2384,10 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     return activeSchemaConfig;
   }
 
-  const cols = detected.columns;
+  const cols = detected.columns.map(c => ({
+    ...c,
+    excelHeader: c.excelHeader || c.header
+  }));
   cols.forEach(col => {
     if ((!col.dropdownOptions || col.dropdownOptions.length === 0) && dvOptsByCol.has(col.colIndex)) {
       col.dropdownOptions = dvOptsByCol.get(col.colIndex);
@@ -2334,7 +2403,7 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
 
   // Auto-infer semantic roles from column headers with tiered priority
   const findColByRegex = (regex, excludeSet = new Set(), filterFn = null) => {
-    const hit = cols.find(c => !excludeSet.has(c.colIndex) && regex.test(c.header) && (!filterFn || filterFn(c.header)));
+    const hit = cols.find(c => !excludeSet.has(c.colIndex) && regex.test(c.excelHeader) && (!filterFn || filterFn(c.excelHeader)));
     return hit ? hit.colIndex : null;
   };
 
@@ -2373,17 +2442,37 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
   const primaryCol = (savedOverride && pickValidOverride(savedOverride.primaryCol)) || inferredPrimaryCol;
   if (primaryCol) usedSet.add(primaryCol);
 
-  const inferredSecondaryCol =
+  const inferredExplicitSecondary =
     findColByRegex(/\b(account|broker|dealer|customer|buyer|assigned|owner|specialist|agent|dept|department|master)\b/i, usedSet) ||
-    findColByRegex(/\bstate\b/i, usedSet) ||
-    (cols.find(c => !usedSet.has(c.colIndex)) ? cols.find(c => !usedSet.has(c.colIndex)).colIndex : null);
-  const secondaryCol = savedOverride && pickValidOverride(savedOverride.secondaryCol) !== undefined
+    findColByRegex(/\bstate\b/i, usedSet);
+  const hasSecondaryOverride = savedOverride && pickValidOverride(savedOverride.secondaryCol) !== undefined;
+  let secondaryCol = hasSecondaryOverride
     ? pickValidOverride(savedOverride.secondaryCol)
-    : inferredSecondaryCol;
+    : inferredExplicitSecondary;
+  if (secondaryCol) usedSet.add(secondaryCol);
+
+  const inferredActionCol = findColByRegex(
+    /\b(requested\s*action|action\s*type|action|subtype|request\s*type|category|reason|issue)\b/i,
+    usedSet
+  );
+  const actionCol = savedOverride && pickValidOverride(savedOverride.actionCol) !== undefined
+    ? pickValidOverride(savedOverride.actionCol)
+    : inferredActionCol;
+  if (actionCol) usedSet.add(actionCol);
+
+  if (!hasSecondaryOverride && !secondaryCol) {
+    const remainingCol = cols.find(c => !usedSet.has(c.colIndex));
+    if (remainingCol) {
+      secondaryCol = remainingCol.colIndex;
+      usedSet.add(secondaryCol);
+    }
+  }
 
   const maxVisibleCol = cols.reduce((m, c) => Math.max(m, c.colIndex), 0);
-  // Ensure trackingCol is always strictly past all visible columns (e.g. Col K = 11 when Status is in Col J = 10)
-  const trackingCol = Math.max(detected.existingTrackingCol || 0, maxVisibleCol + 1);
+  // Keep detected existing Tracking ID column unless it collides with a visible data column
+  const trackingCol = (detected.existingTrackingCol && !validColSet.has(detected.existingTrackingCol))
+    ? detected.existingTrackingCol
+    : (maxVisibleCol + 1);
 
   // Sync Status column dropdown options with validationStatuses
   if (statusCol) {
@@ -2405,37 +2494,39 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
           .filter(n => validColSet.has(n) && n !== statusCol && n !== notesCol && n !== trackingCol)
       )).sort((a, b) => a - b)
     : cols
-        .filter(c => inferDefaultCopyableForCustomColumn(c, { statusCol, notesCol, trackingCol, ticketCol, secondaryCol, primaryCol }))
+        .filter(c => inferDefaultCopyableForCustomColumn(c, { statusCol, notesCol, trackingCol, ticketCol, secondaryCol, primaryCol, actionCol }))
         .map(c => c.colIndex)
         .sort((a, b) => a - b);
 
-  const customRoles = { statusCol, notesCol, trackingCol, ticketCol, secondaryCol, primaryCol };
+  const customRoles = { statusCol, notesCol, trackingCol, ticketCol, secondaryCol, primaryCol, actionCol };
   const resolvedCustomColSettings = {};
   cols.forEach(c => {
     const cfg = savedColSettings[c.colIndex] || savedColSettings[`col_${c.colIndex}`] || {};
-    const defaultType = inferDefaultDataTypeForColumn(c, customRoles, false);
-    const defaultValSrc = inferDefaultValidationSourceForColumn(c, customRoles, false);
-    const dataType = ['auto', 'uppercase', 'number', 'currency', 'date', 'notes'].includes(cfg.dataType)
-      ? cfg.dataType
-      : defaultType;
-    const validationSource = cfg.validationSource || defaultValSrc;
-    const customList = typeof cfg.customList === 'string' ? cfg.customList : '';
-    const controlMode = ['datalist', 'select'].includes(cfg.controlMode)
-      ? cfg.controlMode
-      : (c.colIndex === statusCol ? 'select' : 'datalist');
-    c.dataType = dataType;
-    c.validationSource = validationSource;
-    c.customList = customList;
-    c.controlMode = controlMode;
-    const resolvedOpts = resolveDropdownOptionsForSource(validationSource, c, customList, dvOptsByCol);
+    const normCfg = normalizeColSettingEntry(cfg, c, {
+      showInTable: true,
+      showInEditor: true,
+      dataType: inferDefaultDataTypeForColumn(c, customRoles, false),
+      validationSource: inferDefaultValidationSourceForColumn(c, customRoles, false),
+      controlMode: c.colIndex === statusCol ? 'select' : 'datalist'
+    });
+    c.excelHeader = c.excelHeader || c.header;
+    c.label = normCfg.label;
+    c.header = normCfg.label || c.excelHeader;
+    c.showInTable = normCfg.showInTable;
+    c.showInEditor = normCfg.showInEditor;
+    c.dataType = normCfg.dataType;
+    c.validationSource = normCfg.validationSource;
+    c.customList = normCfg.customList;
+    c.controlMode = normCfg.controlMode;
+    const resolvedOpts = resolveDropdownOptionsForSource(
+      normCfg.validationSource,
+      { ...c, header: c.excelHeader },
+      normCfg.customList,
+      dvOptsByCol
+    );
     c.dropdownOptions = resolvedOpts;
     c.isCopyable = copyCols.includes(c.colIndex);
-    resolvedCustomColSettings[c.colIndex] = {
-      dataType,
-      validationSource,
-      customList,
-      controlMode
-    };
+    resolvedCustomColSettings[c.colIndex] = normCfg;
   });
 
   activeSchemaConfig = {
@@ -2446,8 +2537,10 @@ function resolveWorkbookSchemaConfig(wb = workbook, fileName = '') {
     primaryCol,
     ticketCol: ticketCol || null,
     secondaryCol: secondaryCol || null,
+    actionCol: actionCol || null,
     statusCol: statusCol || null,
     notesCol: notesCol || null,
+    emailSubjCol: null,
     trackingCol,
     copyCols,
     colSettings: resolvedCustomColSettings
@@ -2527,7 +2620,7 @@ function syncWorkbookSheetsWithActiveSchema(wb = workbook) {
       const curHdr = cellText(row1, idx);
       if (!curHdr || /^(tracking\s*id|tracking_id|uuid|guid|row\s*guid)$/i.test(curHdr)) {
         const cell = row1.getCell(idx);
-        cell.value = col.header;
+        cell.value = col.excelHeader || col.header;
         const styleDonorCell = (donorRow1 && donorRow1.getCell(idx).style)
           ? donorRow1.getCell(idx)
           : (idx > 1 ? row1.getCell(idx - 1) : null);
@@ -3449,7 +3542,7 @@ btnAddBlankTab.addEventListener('click', async () => {
     if (templateSheet) {
       cloneTemplateStructure(templateSheet, newSheet);
     } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
-      applyCustomHeadersSheetFormatting(newSheet, activeSchemaConfig.columns.map(c => c.header));
+      applyCustomHeadersSheetFormatting(newSheet, activeSchemaConfig.columns.map(c => c.excelHeader || c.header));
     } else {
       applyStandardSheetFormatting(newSheet);
     }
@@ -3611,7 +3704,7 @@ btnDeleteTab.addEventListener('click', async () => {
   if (workbook.worksheets.length <= 1) {
     const fallbackTemplate = workbook.addWorksheet('template');
     if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
-      applyCustomHeadersSheetFormatting(fallbackTemplate, activeSchemaConfig.columns.map(c => c.header));
+      applyCustomHeadersSheetFormatting(fallbackTemplate, activeSchemaConfig.columns.map(c => c.excelHeader || c.header));
     } else {
       applyStandardSheetFormatting(fallbackTemplate);
     }
@@ -4066,6 +4159,9 @@ function populateReferenceControls() {
   });
 
   updateAutoFillFieldHints();
+  if (typeof syncStandardEditorFieldsFromSchema === 'function' && activeSchemaConfig && activeSchemaConfig.isStandardSchema) {
+    syncStandardEditorFieldsFromSchema();
+  }
 }
 
 function resolveYardValueFromTypedInput(rawInput) {
@@ -4165,6 +4261,9 @@ function applyBrokerAutoFillToPair(brokerInputEl, masterInputEl) {
     } else if (prevAccount && prevAccount.master && currentMasterNorm === prevAccount.master.trim().toLowerCase()) {
       masterInputEl.value = '';
     }
+    if (typeof syncStandardMirrorSelects === 'function') {
+      syncStandardMirrorSelects(masterInputEl.closest('.dock-form-grid, .form-grid'));
+    }
   }
 }
 
@@ -4183,6 +4282,9 @@ function applyMasterReverseAutoFillToPair(masterInputEl, brokerInputEl) {
       brokerInputEl.value = String(match.broker).trim();
     } else if (prevAccount && prevAccount.broker && currentBrokerNorm === prevAccount.broker.trim().toLowerCase()) {
       brokerInputEl.value = '';
+    }
+    if (typeof syncStandardMirrorSelects === 'function') {
+      syncStandardMirrorSelects(brokerInputEl.closest('.dock-form-grid, .form-grid'));
     }
   }
 }
@@ -4205,6 +4307,9 @@ if (dockBroker && dockMaster) {
     const resolved = resolveYardValueFromTypedInput(yardEl.value);
     if (resolved && resolved !== yardEl.value) {
       yardEl.value = resolved;
+      if (typeof syncStandardMirrorSelects === 'function') {
+        syncStandardMirrorSelects(yardEl.closest('.dock-form-grid, .form-grid'));
+      }
     }
   });
 });
@@ -4232,8 +4337,13 @@ function getNextEmptyRow(worksheet) {
     const lots = cellText(row, 8);
     const status = cellText(row, colMap.statusCol);
     const notes = cellText(row, colMap.notesCol);
+    let hasExtraStdData = false;
+    if (activeSchemaConfig && activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns)) {
+      const coreSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, colMap.notesCol, colMap.statusCol, colMap.trackingCol]);
+      hasExtraStdData = activeSchemaConfig.columns.some(c => !coreSet.has(c.colIndex) && cellText(row, c.colIndex) !== '');
+    }
     const hasData = [subject, ticket, broker, master, bidder, action, yard, lots, notes, status]
-      .some(val => val !== '');
+      .some(val => val !== '') || hasExtraStdData;
     if (hasData && rowNumber > lastRow) lastRow = rowNumber;
   });
   return lastRow + 1;
@@ -4351,7 +4461,7 @@ function cloneTemplateStructure(templateSheet, newSheet) {
     colMap.columns.forEach(c => {
       newSheet.getColumn(c.colIndex).hidden = false;
       if (!cellText(newHeader, c.colIndex)) {
-        newHeader.getCell(c.colIndex).value = c.header;
+        newHeader.getCell(c.colIndex).value = c.excelHeader || c.header;
       }
     });
     if (colMap.trackingCol && !cellText(newHeader, colMap.trackingCol)) {
@@ -4388,19 +4498,44 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
       ? item.customValues
       : {};
     const cols = Array.isArray(colMap.columns) ? colMap.columns : [];
+    const schemaActionCol = (activeSchemaConfig && activeSchemaConfig.actionCol) ? activeSchemaConfig.actionCol : colMap.actionCol;
     cols.forEach(col => {
       const idx = col.colIndex;
       const key = `col_${idx}`;
-      let val = customMap[key] !== undefined ? customMap[key] : '';
+      const hasExplicitKey = Object.prototype.hasOwnProperty.call(customMap, key);
+      let hasFallbackVal = false;
+      let fallbackVal = '';
+
+      if (idx === colMap.primaryCol && item.subject !== undefined) {
+        fallbackVal = item.subject;
+        hasFallbackVal = item.subject !== '';
+      } else if (idx === colMap.ticketCol && item.ticket !== undefined) {
+        fallbackVal = item.ticket;
+        hasFallbackVal = item.ticket !== '';
+      } else if (idx === colMap.secondaryCol && item.broker !== undefined) {
+        fallbackVal = item.broker;
+        hasFallbackVal = item.broker !== '';
+      } else if (idx === schemaActionCol && item.action !== undefined) {
+        fallbackVal = item.action;
+        hasFallbackVal = item.action !== '';
+      } else if (idx === colMap.notesCol && item.notes !== undefined) {
+        fallbackVal = item.notes;
+        hasFallbackVal = item.notes !== '';
+      } else if (idx === colMap.statusCol && item.status !== undefined && !UUID_REGEX.test(String(item.status).trim())) {
+        fallbackVal = item.status;
+        hasFallbackVal = item.status !== '';
+      }
+
+      if (!hasExplicitKey && !hasFallbackVal) {
+        return;
+      }
+
+      let val = hasExplicitKey ? customMap[key] : fallbackVal;
+      if (!val && hasFallbackVal) {
+        val = fallbackVal;
+      }
       if (val && UUID_REGEX.test(String(val).trim())) {
         val = '';
-      }
-      if (!val) {
-        if (idx === colMap.primaryCol && item.subject) val = item.subject;
-        else if (idx === colMap.ticketCol && item.ticket) val = item.ticket;
-        else if (idx === colMap.secondaryCol && item.broker) val = item.broker;
-        else if (idx === colMap.notesCol && item.notes) val = item.notes;
-        else if (idx === colMap.statusCol && item.status && !UUID_REGEX.test(String(item.status).trim())) val = item.status;
       }
       if (idx === colMap.ticketCol && val) {
         val = String(val).toUpperCase();
@@ -4409,10 +4544,10 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
       }
       row.getCell(idx).value = val !== undefined && val !== null ? String(val) : '';
     });
-    if (colMap.notesCol && item.notes !== undefined && customMap[`col_${colMap.notesCol}`] === undefined) {
+    if (colMap.notesCol && item.notes !== undefined && !Object.prototype.hasOwnProperty.call(customMap, `col_${colMap.notesCol}`)) {
       row.getCell(colMap.notesCol).value = item.notes || '';
     }
-    if (colMap.statusCol && item.status !== undefined && customMap[`col_${colMap.statusCol}`] === undefined) {
+    if (colMap.statusCol && item.status !== undefined && !Object.prototype.hasOwnProperty.call(customMap, `col_${colMap.statusCol}`)) {
       const cleanSt = UUID_REGEX.test(String(item.status || '').trim()) ? getDefaultStatus() : (item.status || '');
       row.getCell(colMap.statusCol).value = cleanSt;
     }
@@ -4421,17 +4556,47 @@ function writeItemToWorksheetRow(row, rowNumber, item, colMap) {
     return;
   }
 
-  const masterUpper = item.master ? item.master.toUpperCase() : '';
-  row.getCell(1).value = item.subject;
-  row.getCell(2).value = item.ticket ? item.ticket.toUpperCase() : '';
-  setBrokerCellWithFormula(row, rowNumber, item.broker, masterUpper, colMap);
+  const stdSettings = (activeSchemaConfig && activeSchemaConfig.colSettings) || {};
+  const fmtStdCell = (colIdx, rawVal, defaultUpper = false) => {
+    const cfg = stdSettings[colIdx];
+    const str = String(rawVal !== undefined && rawVal !== null ? rawVal : '');
+    if (!str) return '';
+    if (cfg && cfg.dataType && cfg.dataType !== 'auto') {
+      return formatValueForColumnDataType(str, cfg.dataType);
+    }
+    if (cfg && cfg.dataType === 'auto') {
+      return str;
+    }
+    return defaultUpper ? str.toUpperCase() : str;
+  };
+
+  const masterUpper = fmtStdCell(4, item.master, true);
+  row.getCell(1).value = fmtStdCell(1, item.subject, false);
+  row.getCell(2).value = fmtStdCell(2, item.ticket, true);
+  setBrokerCellWithFormula(row, rowNumber, fmtStdCell(3, item.broker, false), masterUpper, colMap);
   row.getCell(4).value = masterUpper;
-  row.getCell(5).value = item.bidder ? item.bidder.toUpperCase() : '';
-  row.getCell(6).value = item.action;
-  row.getCell(7).value = item.yard ? item.yard.toUpperCase() : '';
-  row.getCell(8).value = item.lots;
+  row.getCell(5).value = fmtStdCell(5, item.bidder, true);
+  row.getCell(6).value = fmtStdCell(6, item.action, false);
+  row.getCell(7).value = fmtStdCell(7, item.yard, true);
+  row.getCell(8).value = fmtStdCell(8, item.lots, false);
   row.getCell(colMap.notesCol).value = item.notes;
   row.getCell(colMap.statusCol).value = item.status;
+
+  if (item.customValues && typeof item.customValues === 'object' && activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) {
+    const coreStdSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, colMap.notesCol, colMap.statusCol, colMap.trackingCol]);
+    activeSchemaConfig.columns.forEach(c => {
+      if (coreStdSet.has(c.colIndex)) return;
+      const cKey = `col_${c.colIndex}`;
+      if (!Object.prototype.hasOwnProperty.call(item.customValues, cKey)) return;
+      let v = item.customValues[cKey];
+      if (v && UUID_REGEX.test(String(v).trim())) v = '';
+      if (c.dataType && c.dataType !== 'auto' && v) {
+        v = formatValueForColumnDataType(v, c.dataType);
+      }
+      row.getCell(c.colIndex).value = v !== undefined && v !== null ? String(v) : '';
+    });
+  }
+
   row.getCell(colMap.trackingCol).value = item.key;
   row.commit();
 }
@@ -5273,40 +5438,51 @@ if (menuRenameTrackerProfile) {
 }
 
 // ============================================================================
-// 10. DYNAMIC COLUMN ROLE MAPPER MODAL (#schemaMapperModal)
+// 10. COMPREHENSIVE FULL-COLUMN SCHEMA MANAGER MODAL (#schemaMapperModal)
 // ============================================================================
 let schemaMapperDetectedState = null;
 
-function buildRoleSelectOptionsHtml(cols, selectedColIdx, allowNone = true) {
-  let html = allowNone ? '<option value="">— None / Not Used —</option>' : '';
-  cols.forEach(c => {
-    const sel = Number(selectedColIdx) === c.colIndex ? ' selected' : '';
-    const letter = colNumberToExcelLetters(c.colIndex);
-    html += `<option value="${c.colIndex}"${sel}>Col ${letter} (${c.colIndex}): ${escapeHtml(c.header)}</option>`;
-  });
-  return html;
+function getAssignedRoleForSchemaColumn(colIdx, effectiveStandard) {
+  if (!schemaMapperDetectedState) return 'none';
+  if (effectiveStandard) {
+    const stdMap = schemaMapperDetectedState.stdMap || { statusCol: 10, notesCol: 9 };
+    if (colIdx === 1) return 'primary';
+    if (colIdx === 2) return 'ticket';
+    if (colIdx === 3) return 'secondary';
+    if (colIdx === 6) return 'action';
+    if (colIdx === (stdMap.notesCol || 9)) return 'notes';
+    if (colIdx === (stdMap.statusCol || 10)) return 'status';
+    return 'none';
+  }
+  const r = schemaMapperDetectedState.roles || {};
+  if (colIdx === r.primaryCol) return 'primary';
+  if (colIdx === r.statusCol) return 'status';
+  if (colIdx === r.notesCol) return 'notes';
+  if (colIdx === r.ticketCol) return 'ticket';
+  if (colIdx === r.secondaryCol) return 'secondary';
+  if (colIdx === r.actionCol) return 'action';
+  return 'none';
 }
 
-function refreshSchemaMapperPreviewUI() {
-  if (!schemaMapperDetectedState || !schemaDetectedColsPreview) return;
-  const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
-  const effectiveStandard =
-    modeVal === 'standard' ||
-    (modeVal === 'auto' && schemaMapperDetectedState.autoIsStandard);
-
-  [
-    schemaPrimaryColSelect,
-    schemaStatusColSelect,
-    schemaNotesColSelect,
-    schemaTicketColSelect,
-    schemaSecondaryColSelect
-  ].forEach(sel => {
-    if (sel) sel.disabled = effectiveStandard;
+function getFilteredSchemaMapperColumns() {
+  if (!schemaMapperDetectedState || !Array.isArray(schemaMapperDetectedState.columns)) return [];
+  const q = String(schemaMapperDetectedState.searchFilter || '').trim().toLowerCase();
+  if (!q) return schemaMapperDetectedState.columns;
+  const colSettings = schemaMapperDetectedState.colSettings || {};
+  return schemaMapperDetectedState.columns.filter(c => {
+    const letter = colNumberToExcelLetters(c.colIndex).toLowerCase();
+    const cfg = colSettings[c.colIndex] || {};
+    const hay = `${letter} col ${letter} ${c.colIndex} ${c.excelHeader || ''} ${c.header || ''} ${cfg.label || ''}`.toLowerCase();
+    return hay.includes(q);
   });
+}
 
+function updateSchemaMapperSummaryAndHeaders(effectiveStandard) {
+  if (!schemaMapperDetectedState) return;
+  const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
   if (schemaMapperModeBadge) {
     if (effectiveStandard) {
-      schemaMapperModeBadge.textContent = modeVal === 'auto' ? 'Auto: Standard 11-Col' : 'Standard 11-Col';
+      schemaMapperModeBadge.textContent = modeVal === 'auto' ? 'Auto: Standard Broker Layout' : 'Standard Broker Layout';
       schemaMapperModeBadge.className = 'badge badge-complete';
     } else {
       schemaMapperModeBadge.textContent = modeVal === 'auto' ? 'Auto: Custom Dept Schema' : 'Custom Dept Schema';
@@ -5315,73 +5491,67 @@ function refreshSchemaMapperPreviewUI() {
   }
   if (schemaTrackingColInfo) {
     const trkIdx = effectiveStandard
-      ? (activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.trackingCol || 11) : 11)
+      ? ((schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.trackingCol) || activeSchemaConfig.trackingCol || 11)
       : schemaMapperDetectedState.trackingCol;
     schemaTrackingColInfo.textContent = `Col ${colNumberToExcelLetters(trkIdx)} (${trkIdx}) — Hidden UUIDv4 Tracking ID`;
   }
 
-  const pCol = Number(schemaPrimaryColSelect?.value) || null;
-  const stCol = Number(schemaStatusColSelect?.value) || null;
-  const nCol = Number(schemaNotesColSelect?.value) || null;
-  const tCol = Number(schemaTicketColSelect?.value) || null;
-  const secCol = Number(schemaSecondaryColSelect?.value) || null;
+  const allCols = schemaMapperDetectedState.columns || [];
+  const filteredCols = getFilteredSchemaMapperColumns();
+  const colSettings = schemaMapperDetectedState.colSettings || {};
+  const visibleTableCount = allCols.filter(c => (colSettings[c.colIndex]?.showInTable) !== false).length;
+  const visibleEditorCount = allCols.filter(c => (colSettings[c.colIndex]?.showInEditor) !== false).length;
 
-  const cols = schemaMapperDetectedState.columns;
-  if (cols.length === 0) {
-    schemaDetectedColsPreview.innerHTML = '<div class="control-label">No Row-1 headers detected on active sheets.</div>';
-    return;
+  const filteredTableChecked = filteredCols.filter(c => (colSettings[c.colIndex]?.showInTable) !== false).length;
+  const filteredEditorChecked = filteredCols.filter(c => (colSettings[c.colIndex]?.showInEditor) !== false).length;
+  if (chkSchemaAllTable) {
+    chkSchemaAllTable.checked = filteredCols.length > 0 && filteredTableChecked === filteredCols.length;
+    chkSchemaAllTable.indeterminate = filteredTableChecked > 0 && filteredTableChecked < filteredCols.length;
+  }
+  if (chkSchemaAllEditor) {
+    chkSchemaAllEditor.checked = filteredCols.length > 0 && filteredEditorChecked === filteredCols.length;
+    chkSchemaAllEditor.indeterminate = filteredEditorChecked > 0 && filteredEditorChecked < filteredCols.length;
   }
 
-  const copySet = schemaMapperDetectedState.copyColsSet instanceof Set
-    ? schemaMapperDetectedState.copyColsSet
-    : new Set();
-  const colSettingsMap = schemaMapperDetectedState.colSettings || {};
-
-  schemaDetectedColsPreview.innerHTML = cols.map(c => {
-    const letter = colNumberToExcelLetters(c.colIndex);
-    const roles = [];
-    if (!effectiveStandard) {
-      if (c.colIndex === pCol) roles.push('Primary');
-      if (c.colIndex === stCol) roles.push('Status');
-      if (c.colIndex === nCol) roles.push('Notes');
-      if (c.colIndex === tCol) roles.push('Ticket #');
-      if (c.colIndex === secCol) roles.push('Secondary');
-    }
-    const cfg = colSettingsMap[c.colIndex] || {};
-    const valOpts = resolveDropdownOptionsForSource(cfg.validationSource || 'auto', c, cfg.customList || '');
-    const roleTag = roles.length > 0
-      ? `<span class="schema-col-role-tag">${escapeHtml(roles.join(' + '))}</span>`
-      : '';
-    const typeLabelMap = {
-      uppercase: 'A-Z Code',
-      number: '123',
-      currency: '$',
-      date: 'Date',
-      notes: 'Notes'
+  if (schemaRolesSummaryBar) {
+    const fmtRoleCol = (colIdx) => {
+      if (!colIdx) return null;
+      const found = allCols.find(c => c.colIndex === colIdx);
+      const letStr = colNumberToExcelLetters(colIdx);
+      const disp = found ? (colSettings[colIdx]?.label || found.excelHeader || found.header) : `Col ${letStr}`;
+      return `${letStr}: ${disp}`;
     };
-    const typeTag = (cfg.dataType && typeLabelMap[cfg.dataType])
-      ? `<span class="schema-col-role-tag" title="Column Data Type">${escapeHtml(typeLabelMap[cfg.dataType])}</span>`
-      : '';
-    const valTag = valOpts.length > 0
-      ? `<span class="schema-col-role-tag" title="Dropdown / validation list options">▾ ${valOpts.length} opts</span>`
-      : '';
-    const effectiveStCol = effectiveStandard ? (activeSchemaConfig.statusCol || 10) : stCol;
-    const effectiveNCol = effectiveStandard ? (activeSchemaConfig.notesCol || 9) : nCol;
-    const isExcludedRole = c.colIndex === effectiveStCol || c.colIndex === effectiveNCol;
-    const isCopyChecked = !isExcludedRole && copySet.has(c.colIndex);
-    const copyControlHtml = isExcludedRole
-      ? `<label class="schema-col-copy-toggle disabled" title="Status &amp; Notes columns do not use inline copy buttons"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" disabled>📋 Copy</label>`
-      : `<label class="schema-col-copy-toggle" title="Enable split-pill Copy to Clipboard button on ${escapeHtml(c.header)}"><input type="checkbox" class="chk-schema-copy-col" data-col-index="${c.colIndex}" ${isCopyChecked ? 'checked' : ''}>📋 Copy</label>`;
-    return `
-      <span class="schema-col-chip">
-        <span class="col-letter">Col ${letter}</span>
-        <span>${escapeHtml(c.header)}</span>
-        ${roleTag}${typeTag}${valTag}${copyControlHtml}
-      </span>
-    `;
-  }).join('');
+    const r = effectiveStandard
+      ? {
+          primaryCol: 1,
+          ticketCol: 2,
+          secondaryCol: 3,
+          actionCol: 6,
+          notesCol: (schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.notesCol) || 9,
+          statusCol: (schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.statusCol) || 10
+        }
+      : (schemaMapperDetectedState.roles || {});
 
-  renderSchemaAdvancedTableUI(effectiveStandard, { pCol, stCol, nCol, tCol, secCol });
+    const pills = [
+      `<span class="schema-role-summary-pill accent">${allCols.length} Columns Total</span>`,
+      `<span class="schema-role-summary-pill">Table: ${visibleTableCount}/${allCols.length}</span>`,
+      `<span class="schema-role-summary-pill">Editor: ${visibleEditorCount}/${allCols.length}</span>`
+    ];
+    [
+      ['Primary', r.primaryCol],
+      ['Status', r.statusCol],
+      ['Notes', r.notesCol],
+      ['Ticket #', r.ticketCol],
+      ['Secondary', r.secondaryCol],
+      ['Action', r.actionCol]
+    ].forEach(([lbl, cIdx]) => {
+      const txt = fmtRoleCol(cIdx);
+      if (txt) {
+        pills.push(`<span class="schema-role-summary-pill" title="${escapeHtml(lbl)} → ${escapeHtml(txt)}"><strong>${escapeHtml(lbl)}:</strong> ${escapeHtml(txt)}</span>`);
+      }
+    });
+    schemaRolesSummaryBar.innerHTML = pills.join('');
+  }
 }
 
 function buildValidationSourceOptionsHtml(selectedSource) {
@@ -5412,57 +5582,109 @@ function buildValidationSourceOptionsHtml(selectedSource) {
   }).join('');
 }
 
-function renderSchemaAdvancedTableUI(effectiveStandard, rolesObj = {}) {
-  if (!schemaAdvancedTableBody || !schemaMapperDetectedState) return;
+function renderSchemaMapperAllColumnsUI() {
+  if (!schemaMapperDetectedState || !schemaAllColumnsTableBody) return;
+  const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
+  const effectiveStandard =
+    modeVal === 'standard' ||
+    (modeVal === 'auto' && schemaMapperDetectedState.autoIsStandard);
+
+  updateSchemaMapperSummaryAndHeaders(effectiveStandard);
+
   const cols = schemaMapperDetectedState.columns || [];
+  if (cols.length === 0) {
+    schemaAllColumnsTableBody.innerHTML = '<tr><td colspan="9" class="empty-table-cell">No columns detected on active sheets.</td></tr>';
+    return;
+  }
+
   const copySet = schemaMapperDetectedState.copyColsSet instanceof Set
     ? schemaMapperDetectedState.copyColsSet
     : new Set();
   const colSettingsMap = schemaMapperDetectedState.colSettings || {};
-  const effectiveStCol = effectiveStandard ? (activeSchemaConfig.statusCol || 10) : rolesObj.stCol;
-  const effectiveNCol = effectiveStandard ? (activeSchemaConfig.notesCol || 9) : rolesObj.nCol;
+  const q = String(schemaMapperDetectedState.searchFilter || '').trim().toLowerCase();
 
-  schemaAdvancedTableBody.innerHTML = cols.map(c => {
+  schemaAllColumnsTableBody.innerHTML = cols.map(c => {
     const idx = c.colIndex;
     const letter = colNumberToExcelLetters(idx);
+    const excelHdr = c.excelHeader || c.header;
+    const roleVal = getAssignedRoleForSchemaColumn(idx, effectiveStandard);
     const cfg = colSettingsMap[idx] || {
+      label: '',
+      showInTable: true,
+      showInEditor: true,
       dataType: 'auto',
       validationSource: 'auto',
       customList: '',
-      controlMode: idx === effectiveStCol ? 'select' : 'datalist'
+      controlMode: roleVal === 'status' ? 'select' : 'datalist'
     };
+
+    const matchesFilter = !q || `${letter} col ${letter} ${idx} ${excelHdr} ${cfg.label || ''} ${roleVal}`.toLowerCase().includes(q);
+    const showTable = cfg.showInTable !== false;
+    const showEditor = cfg.showInEditor !== false;
+    const isRowFullyHidden = !showTable && !showEditor;
+
+    const effectiveStCol = effectiveStandard
+      ? ((schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.statusCol) || 10)
+      : (schemaMapperDetectedState.roles && schemaMapperDetectedState.roles.statusCol);
+    const effectiveNCol = effectiveStandard
+      ? ((schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.notesCol) || 9)
+      : (schemaMapperDetectedState.roles && schemaMapperDetectedState.roles.notesCol);
     const isExcludedCopy = idx === effectiveStCol || idx === effectiveNCol;
     const isCopyChecked = !isExcludedCopy && copySet.has(idx);
-    const showCustomInput = cfg.validationSource === 'custom';
-    const disableControlSelect = cfg.validationSource === 'none';
 
-    const typeOptions = [
+    const roleOptionsHtml = [
+      { value: 'none', label: '— Standard Field —' },
+      { value: 'primary', label: '★ Primary Subject' },
+      { value: 'status', label: '🏷️ Status (Badges/Rollover)' },
+      { value: 'notes', label: '📝 Notes / Timeline' },
+      { value: 'ticket', label: '🎟️ Ticket # (Grab/Merge)' },
+      { value: 'secondary', label: '👤 Secondary / Account' },
+      { value: 'action', label: '⚡ Requested Action' }
+    ].map(o => `<option value="${o.value}"${roleVal === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+
+    const typeOptionsHtml = [
       { value: 'auto', label: 'Text (Auto)' },
-      { value: 'uppercase', label: 'Uppercase Code / ID (A-Z, 0-9)' },
+      { value: 'uppercase', label: 'Uppercase Code / ID' },
       { value: 'number', label: 'Number (123)' },
       { value: 'currency', label: 'Currency ($)' },
       { value: 'date', label: 'Date (MM/DD/YYYY)' },
       { value: 'notes', label: 'Multi-line Notes' }
     ].map(o => `<option value="${o.value}"${cfg.dataType === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
 
-    const valSourceOptions = buildValidationSourceOptionsHtml(cfg.validationSource || 'auto');
+    const valSourceOptionsHtml = buildValidationSourceOptionsHtml(cfg.validationSource || 'auto');
+    const showCustomInput = cfg.validationSource === 'custom';
+    const disableControlSelect = cfg.validationSource === 'none';
+    const valOpts = resolveDropdownOptionsForSource(cfg.validationSource || 'auto', { ...c, header: excelHdr }, cfg.customList || '');
+    const excelHintText = (cfg.label && cfg.label !== excelHdr) ? `Excel: ${excelHdr} (${valOpts.length} opts)` : (valOpts.length > 0 ? `${valOpts.length} dropdown opt(s)` : '');
 
     return `
-      <tr data-adv-col-row="${idx}">
+      <tr data-schema-col-row="${idx}" class="${isRowFullyHidden ? 'schema-row-hidden' : ''}" style="${matchesFilter ? '' : 'display:none;'}">
+        <td style="white-space:nowrap;"><strong>Col ${letter}</strong> <span class="control-label">(${idx})</span></td>
+        <td class="schema-check-cell">
+          <input type="checkbox" class="chk-schema-show-table" data-col-index="${idx}" ${showTable ? 'checked' : ''} title="Show Col ${letter} in Daily Requests Table">
+        </td>
+        <td class="schema-check-cell">
+          <input type="checkbox" class="chk-schema-show-editor" data-col-index="${idx}" ${showEditor ? 'checked' : ''} title="Show Col ${letter} in Bottom Dock & Popup Editor">
+        </td>
         <td>
-          <div class="schema-adv-col-cell">
-            <strong>Col ${letter} (${idx})</strong>
-            <span>${escapeHtml(c.header)}</span>
+          <div class="schema-col-label-wrap">
+            <input type="text" class="schema-col-label-input" data-col-index="${idx}" value="${escapeHtml(cfg.label || excelHdr)}" placeholder="${escapeHtml(excelHdr)}" title="Display label in Table & Editor (Excel Row-1 stays '${escapeHtml(excelHdr)}')">
+            <span class="schema-col-excel-hint" style="display:${excelHintText ? 'block' : 'none'};">${escapeHtml(excelHintText)}</span>
           </div>
         </td>
         <td>
+          <select class="schema-col-role-select" data-col-index="${idx}" ${effectiveStandard ? 'disabled title="Switch Layout Mode to Custom to reassign standard roles"' : ''}>
+            ${roleOptionsHtml}
+          </select>
+        </td>
+        <td>
           <select class="schema-adv-type-select" data-col-index="${idx}">
-            ${typeOptions}
+            ${typeOptionsHtml}
           </select>
         </td>
         <td>
           <select class="schema-adv-list-select" data-col-index="${idx}">
-            ${valSourceOptions}
+            ${valSourceOptionsHtml}
           </select>
           <input
             type="text"
@@ -5475,14 +5697,14 @@ function renderSchemaAdvancedTableUI(effectiveStandard, rolesObj = {}) {
         </td>
         <td>
           <select class="schema-adv-control-select" data-col-index="${idx}" ${disableControlSelect ? 'disabled' : ''}>
-            <option value="datalist"${cfg.controlMode !== 'select' ? ' selected' : ''}>Searchable Input + Dropdown</option>
-            <option value="select"${cfg.controlMode === 'select' ? ' selected' : ''}>Strict Dropdown (&lt;select&gt;)</option>
+            <option value="datalist"${cfg.controlMode !== 'select' ? ' selected' : ''}>Input + Dropdown</option>
+            <option value="select"${cfg.controlMode === 'select' ? ' selected' : ''}>Strict &lt;select&gt;</option>
           </select>
         </td>
-        <td>
-          <label class="schema-col-copy-toggle ${isExcludedCopy ? 'disabled' : ''}">
+        <td class="schema-check-cell">
+          <label class="schema-col-copy-toggle ${isExcludedCopy ? 'disabled' : ''}" title="${isExcludedCopy ? 'Status & Notes do not use inline copy' : `Toggle 📋 Copy split-pill on Col ${letter}`}">
             <input type="checkbox" class="chk-schema-copy-col" data-col-index="${idx}" ${isCopyChecked ? 'checked' : ''} ${isExcludedCopy ? 'disabled' : ''}>
-            <span>📋 Copy</span>
+            <span>📋</span>
           </label>
         </td>
       </tr>
@@ -5497,25 +5719,45 @@ function openSchemaMapperModal() {
   const headerWs = findPrimarySchemaHeaderWorksheet(workbook);
   const detected = headerWs ? extractDetectedRow1HeadersFromSheet(headerWs) : { columns: [], maxCol: 0, existingTrackingCol: null };
   const autoIsStandard = headerWs ? isBrokerStandardHeaderRow(headerWs) : true;
-  const cols = detected.columns.length > 0
-    ? detected.columns
-    : STANDARD_HEADERS.slice(0, 10).map((h, i) => ({ colIndex: i + 1, header: h }));
+  const stdMap = headerWs ? getStandardWorksheetColumnMapOnly(headerWs) : {
+    statusCol: 10,
+    notesCol: 9,
+    emailSubjCol: null,
+    trackingCol: 11
+  };
+  let cols = detected.columns.length > 0
+    ? detected.columns.map(c => ({ ...c, excelHeader: c.excelHeader || c.header }))
+    : STANDARD_HEADERS.slice(0, 10).map((h, i) => ({ colIndex: i + 1, excelHeader: h, header: h }));
+
+  if (autoIsStandard) {
+    cols = cols.filter(c => c.colIndex !== stdMap.trackingCol);
+    const haveSet = new Set(cols.map(c => c.colIndex));
+    STANDARD_HEADERS.slice(0, 10).forEach((h, i) => {
+      if (!haveSet.has(i + 1)) {
+        cols.push({ colIndex: i + 1, excelHeader: h, header: h });
+      }
+    });
+    cols.sort((a, b) => a.colIndex - b.colIndex);
+  }
 
   const savedOverride = getSavedSchemaOverrideForWorkbook(workingFileHandle.name, activeProfileId);
   const currentMode = (savedOverride && savedOverride.mode) ? savedOverride.mode : (activeSchemaConfig.mode || 'auto');
 
-  const trackingColEstimate = detected.existingTrackingCol || (Math.max(...cols.map(c => c.colIndex), 0) + 1);
+  const validColSet = new Set(cols.map(c => c.colIndex));
+  const trackingColEstimate = (detected.existingTrackingCol && !validColSet.has(detected.existingTrackingCol))
+    ? detected.existingTrackingCol
+    : (Math.max(...cols.map(c => c.colIndex), 0) + 1);
   const inferUsedSet = new Set();
   const findInfer = (reOrList, markUsed = false) => {
     const patterns = Array.isArray(reOrList) ? reOrList : [reOrList];
     for (const re of patterns) {
-      const hit = cols.find(c => !inferUsedSet.has(c.colIndex) && re.test(c.header));
+      const hit = cols.find(c => !inferUsedSet.has(c.colIndex) && re.test(c.excelHeader || c.header));
       if (hit) {
         if (markUsed) inferUsedSet.add(hit.colIndex);
         return hit.colIndex;
       }
     }
-    return '';
+    return null;
   };
 
   const inferredSt = findInfer([
@@ -5541,19 +5783,25 @@ function openSchemaMapperModal() {
     /^(broker\s*name|broker|account\s*name|account|buyer|dealer|customer)$/i,
     /\b(broker|account|dealer|customer|buyer|owner|assigned|agent|rep|dept|department)\b/i
   ], true);
+  const inferredAction = findInfer([
+    /^(requested\s*action|action\s*type|action|subtype|request\s*type)$/i,
+    /\b(action|subtype|category|reason|issue)\b/i
+  ], true);
 
-  const defaultPrimary = (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.primaryCol) ? activeSchemaConfig.primaryCol : inferredPrimary;
-  const defaultStatus = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.statusCol || inferredSt);
-  const defaultNotes = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.notesCol || inferredNotes);
-  const defaultTicket = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.ticketCol || inferredTkt);
-  const defaultSecondary = activeSchemaConfig.isStandardSchema ? '' : (activeSchemaConfig.secondaryCol || inferredSec);
+  const pickSavedRole = (field) => {
+    if (!savedOverride || savedOverride[field] === undefined) return undefined;
+    if (savedOverride[field] === null || savedOverride[field] === 0 || savedOverride[field] === 'none') return null;
+    const n = Number(savedOverride[field]);
+    return validColSet.has(n) ? n : undefined;
+  };
 
-  const inferredRolesForCopy = {
-    primaryCol: Number(defaultPrimary) || cols[0].colIndex,
-    statusCol: defaultStatus !== '' ? Number(defaultStatus) : null,
-    notesCol: defaultNotes !== '' ? Number(defaultNotes) : null,
-    ticketCol: defaultTicket !== '' ? Number(defaultTicket) : null,
-    secondaryCol: defaultSecondary !== '' ? Number(defaultSecondary) : null,
+  const roles = {
+    primaryCol: pickSavedRole('primaryCol') || (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.primaryCol) || inferredPrimary,
+    statusCol: pickSavedRole('statusCol') !== undefined ? pickSavedRole('statusCol') : (!activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.statusCol ?? null) : inferredSt),
+    notesCol: pickSavedRole('notesCol') !== undefined ? pickSavedRole('notesCol') : (!activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.notesCol ?? null) : inferredNotes),
+    ticketCol: pickSavedRole('ticketCol') !== undefined ? pickSavedRole('ticketCol') : (!activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.ticketCol ?? null) : inferredTkt),
+    secondaryCol: pickSavedRole('secondaryCol') !== undefined ? pickSavedRole('secondaryCol') : (!activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.secondaryCol ?? null) : inferredSec),
+    actionCol: pickSavedRole('actionCol') !== undefined ? pickSavedRole('actionCol') : (!activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.actionCol ?? null) : inferredAction),
     trackingCol: trackingColEstimate
   };
 
@@ -5566,63 +5814,53 @@ function openSchemaMapperModal() {
     initialCopyCols = [1, 2, 4, 5, 7, 8];
   } else {
     initialCopyCols = cols
-      .filter(c => inferDefaultCopyableForCustomColumn(c, inferredRolesForCopy))
+      .filter(c => inferDefaultCopyableForCustomColumn(c, roles))
       .map(c => c.colIndex);
   }
 
   const savedColSettings = (savedOverride && savedOverride.colSettings && typeof savedOverride.colSettings === 'object')
     ? savedOverride.colSettings
     : (activeSchemaConfig.colSettings || {});
-  const initialColSettings = {};
   const isStdForDefaults = currentMode === 'standard' || (currentMode === 'auto' && autoIsStandard);
+  const defaultsRoles = isStdForDefaults
+    ? { primaryCol: 1, ticketCol: 2, secondaryCol: 3, actionCol: 6, statusCol: stdMap.statusCol, notesCol: stdMap.notesCol }
+    : roles;
+
+  const initialColSettings = {};
   cols.forEach(c => {
     const existing = savedColSettings[c.colIndex] || savedColSettings[`col_${c.colIndex}`] || {};
-    const defaultType = inferDefaultDataTypeForColumn(c, inferredRolesForCopy, isStdForDefaults);
-    const defaultValSrc = inferDefaultValidationSourceForColumn(c, inferredRolesForCopy, isStdForDefaults);
-    initialColSettings[c.colIndex] = {
-      dataType: existing.dataType || c.dataType || defaultType,
-      validationSource: existing.validationSource || c.validationSource || defaultValSrc,
-      customList: typeof existing.customList === 'string' ? existing.customList : (c.customList || ''),
-      controlMode: existing.controlMode || c.controlMode || (c.colIndex === inferredRolesForCopy.statusCol ? 'select' : 'datalist')
-    };
+    const isExtraStdEmail = Boolean(isStdForDefaults && stdMap.emailSubjCol && c.colIndex === stdMap.emailSubjCol);
+    initialColSettings[c.colIndex] = normalizeColSettingEntry(existing, c, {
+      showInTable: existing.showInTable !== undefined ? existing.showInTable : (typeof c.showInTable === 'boolean' ? c.showInTable : !isExtraStdEmail),
+      showInEditor: existing.showInEditor !== undefined ? existing.showInEditor : (typeof c.showInEditor === 'boolean' ? c.showInEditor : true),
+      dataType: inferDefaultDataTypeForColumn({ ...c, header: c.excelHeader || c.header }, defaultsRoles, isStdForDefaults),
+      validationSource: inferDefaultValidationSourceForColumn({ ...c, header: c.excelHeader || c.header }, defaultsRoles, isStdForDefaults),
+      controlMode: c.colIndex === (defaultsRoles.statusCol) ? 'select' : 'datalist'
+    });
   });
 
   schemaMapperDetectedState = {
     columns: cols,
     autoIsStandard,
+    stdMap,
     trackingCol: trackingColEstimate,
+    roles,
     copyColsSet: new Set(initialCopyCols),
-    colSettings: initialColSettings
+    colSettings: initialColSettings,
+    searchFilter: ''
   };
 
   if (schemaMapperSubtitle) {
-    schemaMapperSubtitle.textContent = `Workbook: ${workingFileHandle.name} • Source Sheet: ${headerWs ? headerWs.name : 'Default'}`;
+    schemaMapperSubtitle.textContent = `Workbook: ${workingFileHandle.name} • Source Sheet: ${headerWs ? headerWs.name : 'Default'} • ${cols.length} column(s)`;
   }
   if (schemaModeSelect) {
     schemaModeSelect.value = ['auto', 'custom', 'standard'].includes(currentMode) ? currentMode : 'auto';
   }
-
-  if (schemaPrimaryColSelect) {
-    schemaPrimaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultPrimary || cols[0].colIndex, false);
-  }
-  if (schemaStatusColSelect) {
-    schemaStatusColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultStatus, true);
-  }
-  if (schemaNotesColSelect) {
-    schemaNotesColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultNotes, true);
-  }
-  if (schemaTicketColSelect) {
-    schemaTicketColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultTicket, true);
-  }
-  if (schemaSecondaryColSelect) {
-    schemaSecondaryColSelect.innerHTML = buildRoleSelectOptionsHtml(cols, defaultSecondary, true);
-  }
-  if (schemaTrackingColInfo) {
-    const trkIdx = activeSchemaConfig.isStandardSchema ? (activeSchemaConfig.trackingCol || 11) : schemaMapperDetectedState.trackingCol;
-    schemaTrackingColInfo.textContent = `Col ${colNumberToExcelLetters(trkIdx)} (${trkIdx}) — Hidden UUIDv4 Tracking ID`;
+  if (schemaColSearchInput) {
+    schemaColSearchInput.value = '';
   }
 
-  refreshSchemaMapperPreviewUI();
+  renderSchemaMapperAllColumnsUI();
   schemaMapperModal.classList.add('open');
 }
 
@@ -5630,16 +5868,60 @@ if (btnOpenSchemaMapper) {
   btnOpenSchemaMapper.addEventListener('click', openSchemaMapperModal);
 }
 if (schemaModeSelect) {
-  schemaModeSelect.addEventListener('change', refreshSchemaMapperPreviewUI);
+  schemaModeSelect.addEventListener('change', renderSchemaMapperAllColumnsUI);
 }
+if (schemaColSearchInput) {
+  schemaColSearchInput.addEventListener('input', () => {
+    if (!schemaMapperDetectedState || !schemaAllColumnsTableBody) return;
+    schemaMapperDetectedState.searchFilter = schemaColSearchInput.value;
+    const q = String(schemaMapperDetectedState.searchFilter || '').trim().toLowerCase();
+    const colSettings = schemaMapperDetectedState.colSettings || {};
+    schemaMapperDetectedState.columns.forEach(c => {
+      const tr = schemaAllColumnsTableBody.querySelector(`tr[data-schema-col-row="${c.colIndex}"]`);
+      if (!tr) return;
+      const letter = colNumberToExcelLetters(c.colIndex);
+      const excelHdr = c.excelHeader || c.header;
+      const cfg = colSettings[c.colIndex] || {};
+      const match = !q || `${letter} col ${letter} ${c.colIndex} ${excelHdr} ${cfg.label || ''}`.toLowerCase().includes(q);
+      tr.style.display = match ? '' : 'none';
+    });
+    const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
+    const effStd = modeVal === 'standard' || (modeVal === 'auto' && schemaMapperDetectedState.autoIsStandard);
+    updateSchemaMapperSummaryAndHeaders(effStd);
+  });
+}
+
+if (btnSchemaShowAllCols) {
+  btnSchemaShowAllCols.addEventListener('click', () => {
+    if (!schemaMapperDetectedState) return;
+    schemaMapperDetectedState.columns.forEach(c => {
+      if (!schemaMapperDetectedState.colSettings[c.colIndex]) {
+        schemaMapperDetectedState.colSettings[c.colIndex] = normalizeColSettingEntry({}, c);
+      }
+      schemaMapperDetectedState.colSettings[c.colIndex].showInTable = true;
+      schemaMapperDetectedState.colSettings[c.colIndex].showInEditor = true;
+    });
+    renderSchemaMapperAllColumnsUI();
+  });
+}
+
 [
-  schemaPrimaryColSelect,
-  schemaStatusColSelect,
-  schemaNotesColSelect,
-  schemaTicketColSelect,
-  schemaSecondaryColSelect
-].forEach(el => {
-  if (el) el.addEventListener('change', refreshSchemaMapperPreviewUI);
+  { chk: chkSchemaAllTable, key: 'showInTable' },
+  { chk: chkSchemaAllEditor, key: 'showInEditor' }
+].forEach(({ chk, key }) => {
+  if (!chk) return;
+  chk.addEventListener('change', () => {
+    if (!schemaMapperDetectedState) return;
+    const checked = Boolean(chk.checked);
+    const filteredCols = getFilteredSchemaMapperColumns();
+    filteredCols.forEach(c => {
+      if (!schemaMapperDetectedState.colSettings[c.colIndex]) {
+        schemaMapperDetectedState.colSettings[c.colIndex] = normalizeColSettingEntry({}, c);
+      }
+      schemaMapperDetectedState.colSettings[c.colIndex][key] = checked;
+    });
+    renderSchemaMapperAllColumnsUI();
+  });
 });
 
 if (btnCancelSchemaMapper) {
@@ -5659,43 +5941,55 @@ if (btnResetSchemaMapper) {
     saveSchemaOverrideForWorkbook(workingFileHandle.name, null, activeProfileId);
     schemaMapperModal.classList.remove('open');
     await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, { skipStagedRecoveryCheck: true });
-    showToast('Reset column mapping to Auto-Detect.', 'info');
+    showToast('Reset column mapping, visibility, and field settings to Auto-Detect.', 'info');
   });
 }
 
-if (schemaDetectedColsPreview) {
-  schemaDetectedColsPreview.addEventListener('change', (e) => {
-    const chk = e.target.closest('.chk-schema-copy-col');
-    if (!chk || !schemaMapperDetectedState || !schemaMapperDetectedState.copyColsSet) return;
-    const colIdx = parseInt(chk.dataset.colIndex, 10);
-    if (!Number.isFinite(colIdx)) return;
-    if (chk.checked) {
-      schemaMapperDetectedState.copyColsSet.add(colIdx);
-    } else {
-      schemaMapperDetectedState.copyColsSet.delete(colIdx);
-    }
-    refreshSchemaMapperPreviewUI();
-  });
-}
-
-if (btnToggleSchemaAdvanced && schemaAdvancedPanel) {
-  btnToggleSchemaAdvanced.addEventListener('click', () => {
-    const isHidden = schemaAdvancedPanel.style.display === 'none';
-    schemaAdvancedPanel.style.display = isHidden ? 'block' : 'none';
-    btnToggleSchemaAdvanced.classList.toggle('active', isHidden);
-    btnToggleSchemaAdvanced.setAttribute('aria-expanded', String(isHidden));
-    btnToggleSchemaAdvanced.textContent = isHidden
-      ? '⚙️ Hide Advanced Column Settings ▴'
-      : '⚙️ Advanced Column Settings ▾';
-  });
-}
-
-if (schemaAdvancedTableBody) {
-  schemaAdvancedTableBody.addEventListener('change', (e) => {
+if (schemaAllColumnsTableBody) {
+  schemaAllColumnsTableBody.addEventListener('input', (e) => {
     if (!schemaMapperDetectedState) return;
     const target = e.target;
     const colIdx = parseInt(target.dataset.colIndex, 10);
     if (!Number.isFinite(colIdx)) return;
+    const colObj = schemaMapperDetectedState.columns.find(c => c.colIndex === colIdx);
+    if (!colObj) return;
+    if (!schemaMapperDetectedState.colSettings[colIdx]) {
+      schemaMapperDetectedState.colSettings[colIdx] = normalizeColSettingEntry({}, colObj);
+    }
+    const cfg = schemaMapperDetectedState.colSettings[colIdx];
+
+    if (target.classList.contains('schema-col-label-input')) {
+      const excelHdr = String(colObj.excelHeader || colObj.header || '').trim();
+      const rawVal = String(target.value || '').replace(/\s+/g, ' ').trim();
+      cfg.label = (rawVal && rawVal !== excelHdr) ? rawVal : '';
+      const hintEl = target.parentElement ? target.parentElement.querySelector('.schema-col-excel-hint') : null;
+      if (hintEl) {
+        const valOpts = resolveDropdownOptionsForSource(cfg.validationSource || 'auto', { ...colObj, header: excelHdr }, cfg.customList || '');
+        const txt = cfg.label ? `Excel: ${excelHdr} (${valOpts.length} opts)` : (valOpts.length > 0 ? `${valOpts.length} dropdown opt(s)` : '');
+        hintEl.textContent = txt;
+        hintEl.style.display = txt ? 'block' : 'none';
+      }
+      const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
+      const effStd = modeVal === 'standard' || (modeVal === 'auto' && schemaMapperDetectedState.autoIsStandard);
+      updateSchemaMapperSummaryAndHeaders(effStd);
+    } else if (target.classList.contains('schema-adv-custom-input')) {
+      cfg.customList = target.value;
+    }
+  });
+
+  schemaAllColumnsTableBody.addEventListener('change', (e) => {
+    if (!schemaMapperDetectedState) return;
+    const target = e.target;
+    const colIdx = parseInt(target.dataset.colIndex, 10);
+    if (!Number.isFinite(colIdx)) return;
+    const colObj = schemaMapperDetectedState.columns.find(c => c.colIndex === colIdx);
+    if (!colObj) return;
+    if (!schemaMapperDetectedState.colSettings[colIdx]) {
+      schemaMapperDetectedState.colSettings[colIdx] = normalizeColSettingEntry({}, colObj);
+    }
+    const cfg = schemaMapperDetectedState.colSettings[colIdx];
+    const modeVal = schemaModeSelect ? schemaModeSelect.value : 'auto';
+    const effectiveStandard = modeVal === 'standard' || (modeVal === 'auto' && schemaMapperDetectedState.autoIsStandard);
 
     if (target.classList.contains('chk-schema-copy-col')) {
       if (target.checked) {
@@ -5703,76 +5997,152 @@ if (schemaAdvancedTableBody) {
       } else {
         schemaMapperDetectedState.copyColsSet.delete(colIdx);
       }
-      refreshSchemaMapperPreviewUI();
       return;
     }
 
-    if (!schemaMapperDetectedState.colSettings[colIdx]) {
-      schemaMapperDetectedState.colSettings[colIdx] = {
-        dataType: 'auto',
-        validationSource: 'auto',
-        customList: '',
-        controlMode: 'datalist'
-      };
+    if (target.classList.contains('chk-schema-show-table')) {
+      cfg.showInTable = Boolean(target.checked);
+      const tr = target.closest('tr');
+      if (tr) tr.classList.toggle('schema-row-hidden', !cfg.showInTable && !cfg.showInEditor);
+      updateSchemaMapperSummaryAndHeaders(effectiveStandard);
+      return;
     }
-    const cfg = schemaMapperDetectedState.colSettings[colIdx];
+
+    if (target.classList.contains('chk-schema-show-editor')) {
+      cfg.showInEditor = Boolean(target.checked);
+      const tr = target.closest('tr');
+      if (tr) tr.classList.toggle('schema-row-hidden', !cfg.showInTable && !cfg.showInEditor);
+      updateSchemaMapperSummaryAndHeaders(effectiveStandard);
+      return;
+    }
+
+    if (target.classList.contains('schema-col-role-select') && !effectiveStandard) {
+      const newRole = target.value;
+      const r = schemaMapperDetectedState.roles;
+      const roleKeyMap = {
+        primary: 'primaryCol',
+        status: 'statusCol',
+        notes: 'notesCol',
+        ticket: 'ticketCol',
+        secondary: 'secondaryCol',
+        action: 'actionCol'
+      };
+      // Clear previous role held by this column
+      Object.values(roleKeyMap).forEach(rk => {
+        if (r[rk] === colIdx) r[rk] = null;
+      });
+      // Assign new unique role
+      if (newRole && roleKeyMap[newRole]) {
+        r[roleKeyMap[newRole]] = colIdx;
+      }
+      // Guarantee a Primary Subject column always exists
+      if (!r.primaryCol) {
+        const fallback = schemaMapperDetectedState.columns.find(c =>
+          c.colIndex !== r.statusCol && c.colIndex !== r.notesCol && c.colIndex !== colIdx
+        ) || schemaMapperDetectedState.columns[0];
+        if (fallback) r.primaryCol = fallback.colIndex;
+      }
+      if (newRole === 'status') {
+        schemaMapperDetectedState.copyColsSet.delete(colIdx);
+        cfg.controlMode = 'select';
+        if (cfg.validationSource === 'auto' || cfg.validationSource === 'none') {
+          cfg.validationSource = 'status_list';
+        }
+      } else if (newRole === 'notes') {
+        schemaMapperDetectedState.copyColsSet.delete(colIdx);
+        cfg.dataType = 'notes';
+      }
+      renderSchemaMapperAllColumnsUI();
+      return;
+    }
+
+    if (target.classList.contains('schema-col-label-input')) {
+      const excelHdr = String(colObj.excelHeader || colObj.header || '').trim();
+      const cleaned = String(target.value || '').replace(/\s+/g, ' ').trim();
+      if (!cleaned) target.value = excelHdr;
+      cfg.label = (cleaned && cleaned !== excelHdr) ? cleaned : '';
+      updateSchemaMapperSummaryAndHeaders(effectiveStandard);
+      return;
+    }
+
     if (target.classList.contains('schema-adv-type-select')) {
       cfg.dataType = target.value;
     } else if (target.classList.contains('schema-adv-list-select')) {
       cfg.validationSource = target.value;
+      const rowEl = target.closest('tr');
+      if (rowEl) {
+        const custInp = rowEl.querySelector('.schema-adv-custom-input');
+        const ctrlSel = rowEl.querySelector('.schema-adv-control-select');
+        const hintEl = rowEl.querySelector('.schema-col-excel-hint');
+        if (custInp) custInp.style.display = cfg.validationSource === 'custom' ? 'block' : 'none';
+        if (ctrlSel) ctrlSel.disabled = cfg.validationSource === 'none';
+        if (hintEl) {
+          const excelHdr = String(colObj.excelHeader || colObj.header || '').trim();
+          const valOpts = resolveDropdownOptionsForSource(cfg.validationSource || 'auto', { ...colObj, header: excelHdr }, cfg.customList || '');
+          const txt = cfg.label ? `Excel: ${excelHdr} (${valOpts.length} opts)` : (valOpts.length > 0 ? `${valOpts.length} dropdown opt(s)` : '');
+          hintEl.textContent = txt;
+          hintEl.style.display = txt ? 'block' : 'none';
+        }
+      }
     } else if (target.classList.contains('schema-adv-control-select')) {
       cfg.controlMode = target.value;
     } else if (target.classList.contains('schema-adv-custom-input')) {
       cfg.customList = target.value;
     }
-    refreshSchemaMapperPreviewUI();
-  });
-
-  schemaAdvancedTableBody.addEventListener('input', (e) => {
-    if (!schemaMapperDetectedState) return;
-    const target = e.target;
-    if (!target.classList.contains('schema-adv-custom-input')) return;
-    const colIdx = parseInt(target.dataset.colIndex, 10);
-    if (!Number.isFinite(colIdx) || !schemaMapperDetectedState.colSettings[colIdx]) return;
-    schemaMapperDetectedState.colSettings[colIdx].customList = target.value;
   });
 }
 
 if (schemaMapperForm) {
   schemaMapperForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!workingFileHandle) return;
+    if (!workingFileHandle || !schemaMapperDetectedState) return;
     const mode = schemaModeSelect ? schemaModeSelect.value : 'auto';
-    const parseOptCol = (sel) => {
-      if (!sel || sel.value === '') return null;
-      const n = parseInt(sel.value, 10);
-      return Number.isFinite(n) && n >= 1 ? n : null;
-    };
-    const statusColVal = parseOptCol(schemaStatusColSelect);
-    const notesColVal = parseOptCol(schemaNotesColSelect);
-    const trackingColVal = schemaMapperDetectedState ? schemaMapperDetectedState.trackingCol : null;
+    const effectiveStandard =
+      mode === 'standard' ||
+      (mode === 'auto' && schemaMapperDetectedState.autoIsStandard);
+
+    const cols = schemaMapperDetectedState.columns || [];
+    const colSettings = JSON.parse(JSON.stringify(schemaMapperDetectedState.colSettings || {}));
+    const tableVisibleCount = cols.filter(c => (colSettings[c.colIndex]?.showInTable) !== false).length;
+    const editorVisibleCount = cols.filter(c => (colSettings[c.colIndex]?.showInEditor) !== false).length;
+    if (tableVisibleCount === 0) {
+      showToast('Keep at least 1 column visible in the Daily Table.', 'warning');
+      return;
+    }
+    if (editorVisibleCount === 0) {
+      showToast('Keep at least 1 column visible in the Editor Form.', 'warning');
+      return;
+    }
+
+    const r = schemaMapperDetectedState.roles || {};
+    const statusColVal = effectiveStandard
+      ? ((schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.statusCol) || 10)
+      : (r.statusCol || null);
+    const notesColVal = effectiveStandard
+      ? ((schemaMapperDetectedState.stdMap && schemaMapperDetectedState.stdMap.notesCol) || 9)
+      : (r.notesCol || null);
+    const trackingColVal = schemaMapperDetectedState.trackingCol || null;
     const copyCols = (schemaMapperDetectedState && schemaMapperDetectedState.copyColsSet)
       ? Array.from(schemaMapperDetectedState.copyColsSet)
           .filter(cIdx => cIdx !== statusColVal && cIdx !== notesColVal && cIdx !== trackingColVal)
           .sort((a, b) => a - b)
       : undefined;
-    const colSettings = (schemaMapperDetectedState && schemaMapperDetectedState.colSettings)
-      ? JSON.parse(JSON.stringify(schemaMapperDetectedState.colSettings))
-      : undefined;
+
     const override = {
       mode,
-      primaryCol: parseOptCol(schemaPrimaryColSelect) || 1,
-      statusCol: statusColVal,
-      notesCol: notesColVal,
-      ticketCol: parseOptCol(schemaTicketColSelect),
-      secondaryCol: parseOptCol(schemaSecondaryColSelect),
+      primaryCol: effectiveStandard ? 1 : (r.primaryCol || cols[0].colIndex),
+      statusCol: effectiveStandard ? null : (r.statusCol || null),
+      notesCol: effectiveStandard ? null : (r.notesCol || null),
+      ticketCol: effectiveStandard ? 2 : (r.ticketCol || null),
+      secondaryCol: effectiveStandard ? 3 : (r.secondaryCol || null),
+      actionCol: effectiveStandard ? 6 : (r.actionCol || null),
       ...(Array.isArray(copyCols) ? { copyCols } : {}),
-      ...(colSettings ? { colSettings } : {})
+      colSettings
     };
     saveSchemaOverrideForWorkbook(workingFileHandle.name, override, activeProfileId);
     schemaMapperModal.classList.remove('open');
     await loadWorkbookFromDisk(sheetSelect ? sheetSelect.value : null, { skipStagedRecoveryCheck: true });
-    showToast(`Saved column mapping & advanced field settings for "${workingFileHandle.name}".`, 'success');
+    showToast(`Saved column configuration (${tableVisibleCount} in Table, ${editorVisibleCount} in Editor).`, 'success');
   });
 }
 

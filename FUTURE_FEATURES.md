@@ -16,22 +16,6 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-### 📋 Custom Field Validation Assignment
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Allow users to explicitly assign validation dropdowns and list sources to any desired field/column in both Custom Department and Standard tracker profiles.
-  - Rather than relying solely on automated header substring matching against the `validation lists` sheet or existing in-sheet XML, provide a configuration UI (e.g., inside Column Mapping / Schema Setup) where users can select which columns get dropdown validation, choose the source range or validation sheet column (or specify a custom comma-separated list of options), and have those validations reflected in both the in-app forms/grids (`<select>` / `<datalist>`) and written into the `.xlsx` worksheet data validations (`<x14:dataValidations>` / `<dataValidations>`).
-
----
-
-### 🧩 Comprehensive Full-Column Schema Mapping
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Expand the Column Mapping modal (`#schemaMapperModal`) to manage and configure **all** columns in a workbook, eliminating the current constraint where only 6 semantic roles (Primary/Subject, Ticket #, Secondary/Account, Requested Action, Notes, Status) can be mapped.
-  - Provide a full interactive column list for the active workbook showing every detected column (Col A, Col B, Col C, etc.), allowing users to inspect, re-label, assign semantic roles, set visibility/hidden flags, configure custom validation sources, and assign field types across all columns without limit.
-
----
-
 ### 🔍 1-Click Copyable UUIDv4 Tracking IDs
 - **Status**: 📋 Planned
 - **Proposal**:
@@ -91,7 +75,13 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.6`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.7`)
+
+### 🧩 Comprehensive Full-Column Schema Mapping & Custom Field Validation (`v1.19.7`)
+- **Status**: ✅ Implemented in `v1.19.7`
+- **Delivered**:
+  - **Unlimited Full-Column Schema Manager (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`)**: Redesigned `#schemaMapperModal` into a unified table listing every workbook column (across both Standard and Custom Department schemas) with **Table** / **Editor** visibility toggles, custom **Display Labels** (non-destructive to Excel Row-1 headers), **Semantic Role** assignment (adding `Requested Action`), **Data Type**, **Dropdown / Validation Source**, **Input Control (`<datalist>` vs. `<select>`)**, and **`📋 Copy`** toggles, plus column search and Select-All controls.
+  - **End-to-End Standard & Custom Visibility, Labels & Validation Wiring (`js/tracker-table.js`, `js/request-editors.js`)**: Wired custom column visibility, display labels, strict `<select>` mirrors, extra Standard columns (e.g., Col K `Sent Email Subject`), and non-destructive hidden-column preservation across the Daily Table, Bottom Dock, Popup Editor, and Ticket Details modal.
 
 ### 🛡️ Comprehensive Defensive Code Audit Fixes, Advanced Column Settings & Yard # Dropdown (`v1.19.6`)
 - **Status**: ✅ Implemented in `v1.19.6`

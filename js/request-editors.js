@@ -99,6 +99,12 @@ function getActiveFormLayoutSchemaKey() {
   return '__standard__';
 }
 
+function getVisibleCustomEditorColumns() {
+  if (!activeSchemaConfig || !Array.isArray(activeSchemaConfig.columns)) return [];
+  const visible = activeSchemaConfig.columns.filter(c => c.showInEditor !== false);
+  return visible.length > 0 ? visible : activeSchemaConfig.columns;
+}
+
 function buildDefaultFormLayoutForActiveSchema() {
   if (
     !activeSchemaConfig ||
@@ -106,31 +112,50 @@ function buildDefaultFormLayoutForActiveSchema() {
     !Array.isArray(activeSchemaConfig.columns) ||
     activeSchemaConfig.columns.length === 0
   ) {
-    return {
-      order: ['subject', 'ticket', 'broker', 'master', 'bidder', 'action', 'yard', 'lots', 'status', 'notes'],
-      spans: {
-        subject: 3,
-        ticket: 3,
-        broker: 2,
-        master: 2,
-        bidder: 2,
-        action: 3,
-        yard: 2,
-        lots: 4,
-        status: 3,
-        notes: 12
-      },
-      rows: { notes: 2 }
+    const nIdx = (activeSchemaConfig && activeSchemaConfig.notesCol) || 9;
+    const stIdx = (activeSchemaConfig && activeSchemaConfig.statusCol) || 10;
+    const trkIdx = (activeSchemaConfig && activeSchemaConfig.trackingCol) || 11;
+    const coreStdSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, nIdx, stIdx, trkIdx]);
+    const extraStdCols = (activeSchemaConfig && Array.isArray(activeSchemaConfig.columns))
+      ? activeSchemaConfig.columns.filter(c => !coreStdSet.has(c.colIndex) && c.showInEditor !== false)
+      : [];
+
+    const order = [
+      'subject', 'ticket', 'broker', 'master', 'bidder', 'action', 'yard', 'lots', 'status',
+      ...extraStdCols.filter(c => c.dataType !== 'notes').map(c => `col_${c.colIndex}`),
+      'notes',
+      ...extraStdCols.filter(c => c.dataType === 'notes').map(c => `col_${c.colIndex}`)
+    ];
+    const spans = {
+      subject: 3,
+      ticket: 3,
+      broker: 2,
+      master: 2,
+      bidder: 2,
+      action: 3,
+      yard: 2,
+      lots: 4,
+      status: 3,
+      notes: 12
     };
+    const rows = { notes: 2 };
+    extraStdCols.forEach(c => {
+      const fid = `col_${c.colIndex}`;
+      spans[fid] = c.dataType === 'notes' ? 12 : 4;
+      if (c.dataType === 'notes') rows[fid] = 2;
+    });
+
+    return { order, spans, rows };
   }
 
-  const cols = activeSchemaConfig.columns;
-  const nonNotesCols = cols.filter(c => c.colIndex !== activeSchemaConfig.notesCol);
-  const notesColObj = cols.find(c => c.colIndex === activeSchemaConfig.notesCol) || null;
+  const cols = getVisibleCustomEditorColumns();
+  const isNotesLikeCol = (c) => c.colIndex === activeSchemaConfig.notesCol || c.dataType === 'notes';
+  const nonNotesCols = cols.filter(c => !isNotesLikeCol(c));
+  const notesCols = cols.filter(c => isNotesLikeCol(c));
 
   // Smart default order: place multi-line Notes at the bottom so mid-sheet Notes columns (e.g. Col E of A..H)
   // never split single-line inputs into awkward half-empty rows, while still saving to their exact Excel column.
-  const orderedCols = notesColObj ? [...nonNotesCols, notesColObj] : [...nonNotesCols];
+  const orderedCols = [...nonNotesCols, ...notesCols];
   const order = orderedCols.map(c => `col_${c.colIndex}`);
   const spans = {};
   const rows = {};
@@ -138,7 +163,7 @@ function buildDefaultFormLayoutForActiveSchema() {
   // Assign base spans on a 12-column grid and auto-balance each row to eliminate dead trailing whitespace
   const baseItems = nonNotesCols.map(col => {
     const idx = col.colIndex;
-    const hdr = String(col.header || '');
+    const hdr = String(col.excelHeader || col.header || '');
     const isSubjectLike =
       idx === activeSchemaConfig.primaryCol ||
       (/\b(subject|summary|description|title|detail|reason|message)\b/i.test(hdr) &&
@@ -191,11 +216,11 @@ function buildDefaultFormLayoutForActiveSchema() {
     });
   });
 
-  if (notesColObj) {
-    const nId = `col_${notesColObj.colIndex}`;
+  notesCols.forEach(nc => {
+    const nId = `col_${nc.colIndex}`;
     spans[nId] = 12;
     rows[nId] = 2;
-  }
+  });
 
   return { order, spans, rows };
 }
@@ -355,22 +380,36 @@ function applyActiveFormLayoutToGrids() {
     });
   }
 
-  // Mirror field order & proportional spans into Popup Modal dynamic grid for custom schemas
-  if (isCustom && modalDynamicFieldsGrid) {
+  // Mirror field order & proportional spans into Popup Modal grids
+  const mirrorGridEl = isCustom ? modalDynamicFieldsGrid : modalStandardFieldsGrid;
+  if (mirrorGridEl) {
     const modalMap = new Map();
-    Array.from(modalDynamicFieldsGrid.children).forEach(el => {
+    Array.from(mirrorGridEl.children).forEach(el => {
       if (el && el.dataset && el.dataset.fieldId) {
         modalMap.set(el.dataset.fieldId, el);
       }
     });
-    layout.order.forEach(fieldId => {
-      const mEl = modalMap.get(fieldId);
-      if (!mEl) return;
-      modalDynamicFieldsGrid.appendChild(mEl);
-      const dockSpan = Math.max(2, Math.min(12, Number(layout.spans[fieldId]) || 3));
-      const modalSpan = dockSpan >= 8 ? 12 : (dockSpan >= 4 ? 6 : 4);
-      mEl.style.gridColumn = modalSpan >= 12 ? '1 / -1' : `span ${modalSpan}`;
-    });
+    if (isCustom) {
+      layout.order.forEach(fieldId => {
+        const mEl = modalMap.get(fieldId);
+        if (!mEl) return;
+        mirrorGridEl.appendChild(mEl);
+        const dockSpan = Math.max(2, Math.min(12, Number(layout.spans[fieldId]) || 3));
+        const modalSpan = dockSpan >= 8 ? 12 : (dockSpan >= 4 ? 6 : 4);
+        mEl.style.gridColumn = modalSpan >= 12 ? '1 / -1' : `span ${modalSpan}`;
+      });
+    } else {
+      layout.order.forEach(fieldId => {
+        const mEl = modalMap.get(fieldId);
+        if (!mEl || !mEl.classList.contains('std-extra-col-group')) return;
+        const notesEl = modalMap.get('notes');
+        if (notesEl && mEl.dataset.isNotesCol !== 'true') {
+          mirrorGridEl.insertBefore(mEl, notesEl);
+        } else {
+          mirrorGridEl.appendChild(mEl);
+        }
+      });
+    }
   }
 
   syncFormLayoutButtonsUI();
@@ -476,108 +515,362 @@ if (btnDockResetLayout) {
   });
 }
 
+function handleStandardGridDelegatedClick(e) {
+  if (e.target.closest('[data-layout-act]')) {
+    handleDockLayoutControlAction(e);
+    return;
+  }
+  const tsBtn = e.target.closest('[data-dyn-timestamp]');
+  if (tsBtn) {
+    const targetArea = document.getElementById(tsBtn.dataset.dynTimestamp);
+    if (targetArea) insertTimestampIntoTextarea(targetArea);
+  }
+}
+
 if (dockStandardFieldsGrid) {
-  dockStandardFieldsGrid.addEventListener('click', handleDockLayoutControlAction);
+  dockStandardFieldsGrid.addEventListener('click', handleStandardGridDelegatedClick);
   dockStandardFieldsGrid.addEventListener('mousedown', startFieldWidthDragResize);
+}
+if (modalStandardFieldsGrid) {
+  modalStandardFieldsGrid.addEventListener('click', handleStandardGridDelegatedClick);
+}
+
+function buildSingleDynamicFieldHtml(col, scopePrefix, extraClass = '') {
+  const isDock = scopePrefix === 'dock';
+  const idx = col.colIndex;
+  const fieldId = `col_${idx}`;
+  const colLetter = colNumberToExcelLetters(idx);
+  const inputId = `${scopePrefix}CustomCol_${idx}`;
+  const isPrimary = idx === activeSchemaConfig.primaryCol;
+  const isStatus = idx === activeSchemaConfig.statusCol;
+  const isNotes = idx === activeSchemaConfig.notesCol || col.dataType === 'notes';
+  const isTicket = idx === activeSchemaConfig.ticketCol;
+  const colDataType = col.dataType || 'auto';
+  const colValSource = col.validationSource || 'auto';
+  const colControlMode = col.controlMode || (isStatus ? 'select' : 'datalist');
+  const excelHdr = String(col.excelHeader || col.header || '').trim();
+  const fullTitleAttr = col.header !== excelHdr
+    ? `${escapeHtml(col.header)} (Excel Column ${escapeHtml(colLetter)}: ${escapeHtml(excelHdr)})`
+    : `${escapeHtml(col.header)} (Column ${escapeHtml(colLetter)})`;
+  const labelInnerHtml = `<span class="field-lbl-main">${escapeHtml(col.header)}</span> <span class="field-col-tag">Col ${escapeHtml(colLetter)}</span>`;
+  const extraClsStr = extraClass ? ` ${extraClass}` : '';
+
+  if (isNotes) {
+    const groupClass = (isDock ? 'form-group dock-col-notes' : 'form-group full') + extraClsStr;
+    return `
+      <div class="${groupClass}" data-field-id="${fieldId}" data-is-notes-col="true">
+        <div class="dock-notes-label-row">
+          <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
+          <button type="button" class="btn-timestamp-chip" data-dyn-timestamp="${inputId}" title="Insert current date &amp; time stamp">
+            + Insert Timestamp
+          </button>
+        </div>
+        <textarea id="${inputId}" data-custom-col="${idx}" rows="${isDock ? 2 : 3}" placeholder="Enter ${escapeHtml(col.header)}..."></textarea>
+      </div>
+    `;
+  }
+
+  const defaultStatusesList = (validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES)
+    .filter(s => s && !UUID_REGEX.test(String(s).trim()));
+  const cleanColOpts = Array.isArray(col.dropdownOptions)
+    ? col.dropdownOptions.filter(s => s && !UUID_REGEX.test(String(s).trim()))
+    : [];
+
+  if (isStatus || (colControlMode === 'select' && cleanColOpts.length > 0)) {
+    const baseStatusOpts = cleanColOpts.length > 0
+      ? cleanColOpts
+      : defaultStatusesList;
+    const statusOpts = isStatus && typeof mergeRequiredOperationalStatuses === 'function'
+      ? mergeRequiredOperationalStatuses(baseStatusOpts)
+      : baseStatusOpts;
+    const emptyOptHtml = !isStatus ? '<option value="">— Select —</option>' : '';
+    const isYardCol = colValSource === 'yard_list' ||
+      (colValSource === 'auto' && /\b(yard|yards|yard\s*#|yard\s*name)\b/i.test(excelHdr));
+    const optionsHtml = emptyOptHtml + statusOpts
+      .map(st => {
+        let lbl = st;
+        if (isYardCol && Array.isArray(validationYards)) {
+          const yHit = validationYards.find(y => String(y.value || '').toLowerCase() === String(st).toLowerCase());
+          if (yHit && yHit.label) lbl = yHit.label;
+        }
+        return `<option value="${escapeHtml(st)}">${escapeHtml(lbl)}</option>`;
+      })
+      .join('');
+    return `
+      <div class="form-group${extraClsStr}" data-field-id="${fieldId}">
+        <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
+        <select id="${inputId}" data-custom-col="${idx}">
+          ${optionsHtml}
+        </select>
+      </div>
+    `;
+  }
+
+  const isYardSource =
+    colValSource === 'yard_list' ||
+    (colValSource === 'auto' && /\b(yard|yards|yard\s*#|yard\s*name)\b/i.test(excelHdr) && Array.isArray(validationYards) && validationYards.length > 0);
+  const hasDatalist = isYardSource ? (Array.isArray(validationYards) && validationYards.length > 0) : cleanColOpts.length > 0;
+  const datalistId = isYardSource ? 'yardList' : (hasDatalist ? `${scopePrefix}CustomList_${idx}` : '');
+  const datalistHtml = (!isYardSource && hasDatalist)
+    ? `<datalist id="${datalistId}">${cleanColOpts.map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`
+    : '';
+  const groupClass = (isPrimary
+    ? (isDock ? 'form-group dock-col-subject' : 'form-group full')
+    : 'form-group') + extraClsStr;
+
+  const headerLabelBlock = isTicket
+    ? `<div class="dock-notes-label-row">
+         <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
+         <button type="button" class="btn-timestamp-chip" data-dyn-grab-ticket="${scopePrefix}" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from primary subject column">
+           🎯 Grab Ticket
+         </button>
+       </div>`
+    : `<label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>`;
+
+  const inputModeAttr = (colDataType === 'number' || colDataType === 'currency') ? ' inputmode="decimal"' : '';
+  const placeholderSuffix = colDataType === 'date'
+    ? ' (MM/DD/YYYY)'
+    : (colDataType === 'currency' ? ' ($0.00)' : '...');
+
+  return `
+    <div class="${groupClass}" data-field-id="${fieldId}">
+      ${headerLabelBlock}
+      <input type="text" id="${inputId}" data-custom-col="${idx}" data-col-type="${escapeHtml(colDataType)}"${inputModeAttr} ${hasDatalist ? `list="${datalistId}"` : ''} placeholder="${escapeHtml(col.header)}${placeholderSuffix}">
+      ${datalistHtml}
+    </div>
+  `;
 }
 
 function buildDynamicFieldsHtmlForScope(scopePrefix) {
   if (!activeSchemaConfig || activeSchemaConfig.isStandardSchema || !Array.isArray(activeSchemaConfig.columns)) {
     return '';
   }
+  return getVisibleCustomEditorColumns()
+    .map(col => buildSingleDynamicFieldHtml(col, scopePrefix))
+    .join('');
+}
+
+function getStandardFieldDomDefs(scopePrefix) {
   const isDock = scopePrefix === 'dock';
-  const defaultStatusesList = (validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES)
-    .filter(s => s && !UUID_REGEX.test(String(s).trim()));
+  const stIdx = (activeSchemaConfig && activeSchemaConfig.statusCol) || 10;
+  const nIdx = (activeSchemaConfig && activeSchemaConfig.notesCol) || 9;
+  return [
+    { colIndex: 1, fieldId: 'subject', defaultLabel: 'Subject', inputEl: isDock ? dockSubject : fSubject, defaultUpper: false, datalistId: '', requiredDefault: true },
+    { colIndex: 2, fieldId: 'ticket', defaultLabel: 'Ticket Number', inputEl: isDock ? dockTicket : fTicket, defaultUpper: true, datalistId: '', requiredDefault: false },
+    { colIndex: 3, fieldId: 'broker', defaultLabel: 'Broker Name', inputEl: isDock ? dockBroker : fBroker, defaultUpper: false, datalistId: 'brokerList', requiredDefault: true },
+    { colIndex: 4, fieldId: 'master', defaultLabel: 'Master #', inputEl: isDock ? dockMaster : fMaster, defaultUpper: true, datalistId: '', requiredDefault: false },
+    { colIndex: 5, fieldId: 'bidder', defaultLabel: 'Bidder #', inputEl: isDock ? dockBidder : fBidder, defaultUpper: true, datalistId: '', requiredDefault: false },
+    { colIndex: 6, fieldId: 'action', defaultLabel: 'Requested Action', inputEl: isDock ? dockAction : fAction, defaultUpper: false, datalistId: 'actionList', requiredDefault: false },
+    { colIndex: 7, fieldId: 'yard', defaultLabel: 'Yard #', inputEl: isDock ? dockYard : fYard, defaultUpper: true, datalistId: 'yardList', requiredDefault: false },
+    { colIndex: 8, fieldId: 'lots', defaultLabel: 'Lot Numbers', inputEl: isDock ? dockLots : fLots, defaultUpper: false, datalistId: '', requiredDefault: false },
+    { colIndex: nIdx, fieldId: 'notes', defaultLabel: 'Action Notes', inputEl: isDock ? dockNotes : fNotes, defaultUpper: false, datalistId: '', requiredDefault: false },
+    { colIndex: stIdx, fieldId: 'status', defaultLabel: 'Request Status', inputEl: isDock ? dockStatus : fStatus, defaultUpper: false, datalistId: '', requiredDefault: false }
+  ];
+}
 
-  return activeSchemaConfig.columns.map(col => {
-    const idx = col.colIndex;
-    const fieldId = `col_${idx}`;
-    const colLetter = colNumberToExcelLetters(idx);
-    const inputId = `${scopePrefix}CustomCol_${idx}`;
-    const isPrimary = idx === activeSchemaConfig.primaryCol;
-    const isStatus = idx === activeSchemaConfig.statusCol;
-    const isNotes = idx === activeSchemaConfig.notesCol || col.dataType === 'notes';
-    const isTicket = idx === activeSchemaConfig.ticketCol;
-    const colDataType = col.dataType || 'auto';
-    const colValSource = col.validationSource || 'auto';
-    const colControlMode = col.controlMode || (isStatus ? 'select' : 'datalist');
-    const fullTitleAttr = `${escapeHtml(col.header)} (Column ${escapeHtml(colLetter)})`;
-    const labelInnerHtml = `<span class="field-lbl-main">${escapeHtml(col.header)}</span> <span class="field-col-tag">Col ${escapeHtml(colLetter)}</span>`;
+function syncStandardMirrorSelects(gridEl) {
+  if (!gridEl) return;
+  gridEl.querySelectorAll('.std-override-select[data-mirror-for]').forEach(sel => {
+    const inp = document.getElementById(sel.dataset.mirrorFor);
+    if (!inp) return;
+    const val = String(inp.value || '').trim();
+    if (!val) {
+      sel.value = '';
+      return;
+    }
+    const matched = ensureSelectOptionExists(sel, val);
+    sel.value = matched || val;
+  });
+}
 
-    if (isNotes) {
-      const groupClass = isDock ? 'form-group dock-col-notes' : 'form-group full';
-      return `
-        <div class="${groupClass}" data-field-id="${fieldId}">
-          <div class="dock-notes-label-row">
-            <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
-            <button type="button" class="btn-timestamp-chip" data-dyn-timestamp="${inputId}" title="Insert current date &amp; time stamp">
-              + Insert Timestamp
-            </button>
-          </div>
-          <textarea id="${inputId}" data-custom-col="${idx}" rows="${isDock ? 2 : 3}" placeholder="Enter ${escapeHtml(col.header)}..."></textarea>
-        </div>
-      `;
+function syncStandardEditorFieldsFromScope(scopePrefix) {
+  const isDock = scopePrefix === 'dock';
+  const gridEl = isDock ? dockStandardFieldsGrid : modalStandardFieldsGrid;
+  if (!gridEl) return;
+
+  gridEl.querySelectorAll('.std-extra-col-group, .std-override-datalist, .std-override-select').forEach(el => el.remove());
+
+  const isStd = Boolean(!activeSchemaConfig || activeSchemaConfig.isStandardSchema);
+  const cols = (isStd && activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)) ? activeSchemaConfig.columns : [];
+  const byIdx = new Map();
+  cols.forEach(c => byIdx.set(c.colIndex, c));
+
+  const defs = getStandardFieldDomDefs(scopePrefix);
+  defs.forEach(def => {
+    const groupEl = gridEl.querySelector(`.form-group[data-field-id="${def.fieldId}"]`);
+    if (!groupEl || !def.inputEl) return;
+
+    const colObj = byIdx.get(def.colIndex) || null;
+    const isVisible = colObj ? (colObj.showInEditor !== false) : true;
+    groupEl.style.display = isVisible ? '' : 'none';
+    if (def.requiredDefault) {
+      def.inputEl.required = Boolean(isStd && isVisible);
     }
 
-    const cleanColOpts = Array.isArray(col.dropdownOptions)
-      ? col.dropdownOptions.filter(s => s && !UUID_REGEX.test(String(s).trim()))
-      : [];
+    const colLetter = colNumberToExcelLetters(def.colIndex);
+    const labelMainEl = groupEl.querySelector('.field-lbl-main');
+    const colTagEl = groupEl.querySelector('.field-col-tag');
+    if (labelMainEl) {
+      labelMainEl.textContent = (colObj && colObj.header)
+        ? `${colObj.header}${def.requiredDefault ? ' *' : ''}`
+        : `${def.defaultLabel}${def.requiredDefault ? ' *' : ''}`;
+    }
+    if (colTagEl) {
+      colTagEl.textContent = `Col ${colLetter}`;
+    }
 
-    if (isStatus || (colControlMode === 'select' && cleanColOpts.length > 0)) {
-      const baseStatusOpts = cleanColOpts.length > 0
-        ? cleanColOpts
-        : defaultStatusesList;
-      const statusOpts = isStatus && typeof mergeRequiredOperationalStatuses === 'function'
-        ? mergeRequiredOperationalStatuses(baseStatusOpts)
-        : baseStatusOpts;
-      const emptyOptHtml = !isStatus ? '<option value="">— Select —</option>' : '';
-      const optionsHtml = emptyOptHtml + statusOpts
-        .map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`)
+    if (def.fieldId === 'status' && def.inputEl.tagName === 'SELECT') {
+      if (colObj && colObj.validationSource && !['auto', 'status_list', 'none'].includes(colObj.validationSource) && Array.isArray(colObj.dropdownOptions) && colObj.dropdownOptions.length > 0) {
+        const prev = def.inputEl.value;
+        def.inputEl.innerHTML = colObj.dropdownOptions
+          .map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`)
+          .join('');
+        if (prev) ensureSelectOptionExists(def.inputEl, prev);
+      } else if (typeof populateSelectWithStatuses === 'function') {
+        populateSelectWithStatuses(def.inputEl);
+      }
+      return;
+    }
+
+    if (def.inputEl.tagName !== 'INPUT') return;
+
+    def.inputEl.style.display = '';
+    const dt = (colObj && colObj.dataType) || 'auto';
+    if (dt === 'number' || dt === 'currency') {
+      def.inputEl.setAttribute('inputmode', 'decimal');
+    } else {
+      def.inputEl.removeAttribute('inputmode');
+    }
+
+    const valSrc = (colObj && colObj.validationSource) || 'auto';
+    const ctrlMode = (colObj && colObj.controlMode) || 'datalist';
+    let targetListId = def.datalistId || '';
+    let optObjects = [];
+
+    if (valSrc === 'none') {
+      targetListId = '';
+      def.inputEl.removeAttribute('list');
+    } else if (valSrc === 'auto') {
+      if (targetListId) {
+        def.inputEl.setAttribute('list', targetListId);
+      } else if (colObj && Array.isArray(colObj.dropdownOptions) && colObj.dropdownOptions.length > 0) {
+        optObjects = colObj.dropdownOptions.map(v => ({ value: v, label: v }));
+        targetListId = `${scopePrefix}StdList_${def.colIndex}`;
+      } else {
+        def.inputEl.removeAttribute('list');
+      }
+    } else if (valSrc === 'yard_list') {
+      targetListId = 'yardList';
+      def.inputEl.setAttribute('list', 'yardList');
+      optObjects = (Array.isArray(validationYards) ? validationYards : []).map(y => ({ value: y.value, label: y.label || y.value }));
+    } else if (valSrc === 'broker_list') {
+      targetListId = 'brokerList';
+      def.inputEl.setAttribute('list', 'brokerList');
+      const seenB = new Set();
+      (Array.isArray(masterAccountsMap) ? masterAccountsMap : []).forEach(m => {
+        const b = String((m && m.broker) || '').trim();
+        if (b && !seenB.has(b.toLowerCase())) {
+          seenB.add(b.toLowerCase());
+          optObjects.push({ value: b, label: b });
+        }
+      });
+    } else if (valSrc === 'action_list') {
+      targetListId = 'actionList';
+      def.inputEl.setAttribute('list', 'actionList');
+      const acts = (Array.isArray(validationActions) && validationActions.length > 0) ? validationActions : DEFAULT_ACTIONS;
+      optObjects = acts.map(a => ({ value: a, label: a }));
+    } else {
+      const opts = (colObj && Array.isArray(colObj.dropdownOptions)) ? colObj.dropdownOptions : [];
+      optObjects = opts.map(v => ({ value: v, label: v }));
+      targetListId = opts.length > 0 ? `${scopePrefix}StdList_${def.colIndex}` : '';
+    }
+
+    if (targetListId && targetListId.startsWith(`${scopePrefix}StdList_`) && optObjects.length > 0) {
+      const dlEl = document.createElement('datalist');
+      dlEl.id = targetListId;
+      dlEl.className = 'std-override-datalist';
+      dlEl.innerHTML = optObjects.map(o => `<option value="${escapeHtml(o.value)}"></option>`).join('');
+      groupEl.appendChild(dlEl);
+      def.inputEl.setAttribute('list', targetListId);
+    }
+
+    if (optObjects.length === 0 && targetListId) {
+      if (targetListId === 'yardList') {
+        optObjects = (Array.isArray(validationYards) ? validationYards : []).map(y => ({ value: y.value, label: y.label || y.value }));
+      } else if (targetListId === 'brokerList') {
+        const seenB = new Set();
+        (Array.isArray(masterAccountsMap) ? masterAccountsMap : []).forEach(m => {
+          const b = String((m && m.broker) || '').trim();
+          if (b && !seenB.has(b.toLowerCase())) {
+            seenB.add(b.toLowerCase());
+            optObjects.push({ value: b, label: b });
+          }
+        });
+      } else if (targetListId === 'actionList') {
+        const acts = (Array.isArray(validationActions) && validationActions.length > 0) ? validationActions : DEFAULT_ACTIONS;
+        optObjects = acts.map(a => ({ value: a, label: a }));
+      }
+    }
+
+    if (ctrlMode === 'select' && valSrc !== 'none' && optObjects.length > 0) {
+      def.inputEl.style.display = 'none';
+      const selEl = document.createElement('select');
+      selEl.className = 'std-override-select';
+      selEl.dataset.mirrorFor = def.inputEl.id;
+      selEl.innerHTML = '<option value="">— Select —</option>' + optObjects
+        .map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
         .join('');
-      return `
-        <div class="form-group" data-field-id="${fieldId}">
-          <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
-          <select id="${inputId}" data-custom-col="${idx}">
-            ${optionsHtml}
-          </select>
-        </div>
-      `;
+      selEl.addEventListener('change', () => {
+        def.inputEl.value = selEl.value;
+        def.inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        def.inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      groupEl.appendChild(selEl);
     }
+  });
 
-    const isYardSource =
-      colValSource === 'yard_list' ||
-      (colValSource === 'auto' && /\b(yard|yards|yard\s*#|yard\s*name)\b/i.test(String(col.header || '')) && Array.isArray(validationYards) && validationYards.length > 0);
-    const hasDatalist = isYardSource ? (Array.isArray(validationYards) && validationYards.length > 0) : cleanColOpts.length > 0;
-    const datalistId = isYardSource ? 'yardList' : (hasDatalist ? `${scopePrefix}CustomList_${idx}` : '');
-    const datalistHtml = (!isYardSource && hasDatalist)
-      ? `<datalist id="${datalistId}">${cleanColOpts.map(v => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`
-      : '';
-    const groupClass = isPrimary
-      ? (isDock ? 'form-group dock-col-subject' : 'form-group full')
-      : 'form-group';
+  if (isStd && cols.length > 0) {
+    const stIdx = (activeSchemaConfig && activeSchemaConfig.statusCol) || 10;
+    const nIdx = (activeSchemaConfig && activeSchemaConfig.notesCol) || 9;
+    const trkIdx = (activeSchemaConfig && activeSchemaConfig.trackingCol) || 11;
+    const coreStdSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, nIdx, stIdx, trkIdx]);
+    const extraCols = cols.filter(c => !coreStdSet.has(c.colIndex) && c.showInEditor !== false);
+    if (extraCols.length > 0) {
+      const notesGroup = gridEl.querySelector('.form-group[data-field-id="notes"]');
+      extraCols.forEach(c => {
+        const tempWrap = document.createElement('div');
+        tempWrap.innerHTML = buildSingleDynamicFieldHtml(c, scopePrefix, 'std-extra-col-group').trim();
+        const extraGroupEl = tempWrap.firstElementChild;
+        if (!extraGroupEl) return;
+        if (notesGroup && c.dataType !== 'notes') {
+          gridEl.insertBefore(extraGroupEl, notesGroup);
+        } else {
+          gridEl.appendChild(extraGroupEl);
+        }
+      });
+    }
+  }
 
-    const headerLabelBlock = isTicket
-      ? `<div class="dock-notes-label-row">
-           <label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>
-           <button type="button" class="btn-timestamp-chip" data-dyn-grab-ticket="${scopePrefix}" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from primary subject column">
-             🎯 Grab Ticket
-           </button>
-         </div>`
-      : `<label for="${inputId}" title="${fullTitleAttr}">${labelInnerHtml}</label>`;
+  syncStandardMirrorSelects(gridEl);
+}
 
-    const inputModeAttr = (colDataType === 'number' || colDataType === 'currency') ? ' inputmode="decimal"' : '';
-    const placeholderSuffix = colDataType === 'date'
-      ? ' (MM/DD/YYYY)'
-      : (colDataType === 'currency' ? ' ($0.00)' : '...');
+function syncStandardEditorFieldsFromSchema() {
+  syncStandardEditorFieldsFromScope('dock');
+  syncStandardEditorFieldsFromScope('modal');
+}
 
-    return `
-      <div class="${groupClass}" data-field-id="${fieldId}">
-        ${headerLabelBlock}
-        <input type="text" id="${inputId}" data-custom-col="${idx}" data-col-type="${escapeHtml(colDataType)}"${inputModeAttr} ${hasDatalist ? `list="${datalistId}"` : ''} placeholder="${escapeHtml(col.header)}${placeholderSuffix}">
-        ${datalistHtml}
-      </div>
-    `;
-  }).join('');
+function populateStandardExtraFields(gridEl, itemOrNull) {
+  if (!gridEl) return;
+  gridEl.querySelectorAll('.std-extra-col-group [data-custom-col]').forEach(el => {
+    const colIdx = Number(el.dataset.customCol);
+    const key = `col_${colIdx}`;
+    if (!itemOrNull || !itemOrNull.customValues) {
+      el.value = '';
+      return;
+    }
+    const rawVal = itemOrNull.customValues[key] !== undefined ? String(itemOrNull.customValues[key] || '') : '';
+    el.value = UUID_REGEX.test(rawVal.trim()) ? '' : rawVal;
+  });
 }
 
 function syncDynamicEditorFormsUI() {
@@ -602,6 +895,10 @@ function syncDynamicEditorFormsUI() {
     if (fSubject) fSubject.required = !isCustom;
     if (fBroker) fBroker.required = !isCustom;
     modalDynamicFieldsGrid.innerHTML = isCustom ? buildDynamicFieldsHtmlForScope('modal') : '';
+  }
+
+  if (!isCustom) {
+    syncStandardEditorFieldsFromSchema();
   }
 
   // Toggle Grab Ticket buttons visibility for custom schemas when no ticket column is mapped
@@ -676,15 +973,22 @@ function populateDynamicGridFromItem(gridEl, itemOrNull) {
 
 function readFormPayloadFromScope(scopeMode) {
   const isDock = scopeMode === 'dock';
+  const targetObj = isDock ? dockEditingTarget : editingTarget;
+  const existingRow = targetObj
+    ? allRows.find(r => r.sheetName === targetObj.sheetName && r.rowNumber === targetObj.rowNumber)
+    : null;
+
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
     const gridEl = isDock ? dockDynamicFieldsGrid : modalDynamicFieldsGrid;
-    const customValues = {};
+    const customValues = (existingRow && existingRow.customValues)
+      ? { ...existingRow.customValues }
+      : {};
     if (gridEl) {
       gridEl.querySelectorAll('[data-custom-col]').forEach(el => {
         const idx = Number(el.dataset.customCol);
         const colObj = activeSchemaConfig.columns.find(c => c.colIndex === idx);
         let val = String(el.value || '').trim();
-        if (colObj && (colObj.validationSource === 'yard_list' || /\b(yard|yards)\b/i.test(String(colObj.header || ''))) && typeof resolveYardValueFromTypedInput === 'function') {
+        if (colObj && (colObj.validationSource === 'yard_list' || /\b(yard|yards)\b/i.test(String(colObj.excelHeader || colObj.header || ''))) && typeof resolveYardValueFromTypedInput === 'function') {
           val = resolveYardValueFromTypedInput(val);
         }
         if (idx === activeSchemaConfig.ticketCol && val) {
@@ -698,6 +1002,7 @@ function readFormPayloadFromScope(scopeMode) {
     const pCol = activeSchemaConfig.primaryCol;
     const tCol = activeSchemaConfig.ticketCol;
     const secCol = activeSchemaConfig.secondaryCol;
+    const actCol = activeSchemaConfig.actionCol;
     const nCol = activeSchemaConfig.notesCol;
     const stCol = activeSchemaConfig.statusCol;
 
@@ -709,7 +1014,7 @@ function readFormPayloadFromScope(scopeMode) {
       broker: secCol ? (customValues[`col_${secCol}`] || '') : '',
       master: '',
       bidder: '',
-      action: '',
+      action: actCol ? (customValues[`col_${actCol}`] || '') : '',
       yard: '',
       lots: '',
       notes: nCol ? (customValues[`col_${nCol}`] || '') : '',
@@ -718,7 +1023,7 @@ function readFormPayloadFromScope(scopeMode) {
   }
 
   const stdSettings = (activeSchemaConfig && activeSchemaConfig.colSettings) || {};
-  const fmtStd = (colIdx, rawVal) => {
+  const fmtStd = (colIdx, rawVal, defaultUpper = false) => {
     let v = String(rawVal || '').trim();
     if (colIdx === 7 && typeof resolveYardValueFromTypedInput === 'function') {
       v = resolveYardValueFromTypedInput(v);
@@ -727,21 +1032,48 @@ function readFormPayloadFromScope(scopeMode) {
     if (cfg && cfg.dataType && cfg.dataType !== 'auto' && typeof formatValueForColumnDataType === 'function') {
       return formatValueForColumnDataType(v, cfg.dataType);
     }
-    return v;
+    if (cfg && cfg.dataType === 'auto') {
+      return v;
+    }
+    return defaultUpper ? v.toUpperCase() : v;
   };
+
+  const stdGridEl = isDock ? dockStandardFieldsGrid : modalStandardFieldsGrid;
+  const extraCustomValues = (existingRow && existingRow.customValues)
+    ? { ...existingRow.customValues }
+    : {};
+  let hasExtraStdValues = Object.keys(extraCustomValues).length > 0;
+  if (stdGridEl) {
+    stdGridEl.querySelectorAll('.std-extra-col-group [data-custom-col]').forEach(el => {
+      const idx = Number(el.dataset.customCol);
+      const colObj = activeSchemaConfig && activeSchemaConfig.columns
+        ? activeSchemaConfig.columns.find(c => c.colIndex === idx)
+        : null;
+      let val = String(el.value || '').trim();
+      if (colObj && (colObj.validationSource === 'yard_list' || /\b(yard|yards)\b/i.test(String(colObj.excelHeader || colObj.header || ''))) && typeof resolveYardValueFromTypedInput === 'function') {
+        val = resolveYardValueFromTypedInput(val);
+      }
+      if (colObj && colObj.dataType && colObj.dataType !== 'auto' && typeof formatValueForColumnDataType === 'function') {
+        val = formatValueForColumnDataType(val, colObj.dataType);
+      }
+      extraCustomValues[`col_${idx}`] = val;
+      hasExtraStdValues = true;
+    });
+  }
 
   return {
     isCustomSchema: false,
-    subject: fmtStd(1, isDock ? dockSubject.value : fSubject.value),
-    ticket: fmtStd(2, isDock ? dockTicket.value : fTicket.value),
-    broker: fmtStd(3, isDock ? dockBroker.value : fBroker.value),
-    master: fmtStd(4, isDock ? dockMaster.value : fMaster.value),
-    bidder: fmtStd(5, isDock ? dockBidder.value : fBidder.value),
-    action: fmtStd(6, isDock ? dockAction.value : fAction.value),
-    yard: fmtStd(7, isDock ? dockYard.value : fYard.value),
-    lots: fmtStd(8, isDock ? dockLots.value : fLots.value),
+    subject: fmtStd(1, isDock ? dockSubject.value : fSubject.value, false),
+    ticket: fmtStd(2, isDock ? dockTicket.value : fTicket.value, true),
+    broker: fmtStd(3, isDock ? dockBroker.value : fBroker.value, false),
+    master: fmtStd(4, isDock ? dockMaster.value : fMaster.value, true),
+    bidder: fmtStd(5, isDock ? dockBidder.value : fBidder.value, true),
+    action: fmtStd(6, isDock ? dockAction.value : fAction.value, false),
+    yard: fmtStd(7, isDock ? dockYard.value : fYard.value, true),
+    lots: fmtStd(8, isDock ? dockLots.value : fLots.value, false),
     notes: (isDock ? dockNotes.value : fNotes.value) || '',
-    status: (isDock ? dockStatus.value : fStatus.value) || getDefaultStatus()
+    status: (isDock ? dockStatus.value : fStatus.value) || getDefaultStatus(),
+    ...(hasExtraStdValues ? { customValues: extraCustomValues } : {})
   };
 }
 
@@ -958,6 +1290,21 @@ function handlePullFromPriorTab(scopeMode = 'dock') {
         updatedLabels.push(label);
       }
     });
+
+    const stdGridEl = isDock ? dockStandardFieldsGrid : modalStandardFieldsGrid;
+    if (stdGridEl) {
+      stdGridEl.querySelectorAll('.std-extra-col-group [data-custom-col]').forEach(el => {
+        if (el.value.trim() !== '') return;
+        const cIdx = Number(el.dataset.customCol);
+        const donor = matches.find(m => m.customValues && String(m.customValues[`col_${cIdx}`] || '').trim() !== '');
+        if (donor) {
+          el.value = String(donor.customValues[`col_${cIdx}`]).trim();
+          const cObj = activeSchemaConfig?.columns?.find(c => c.colIndex === cIdx);
+          updatedLabels.push(cObj ? cObj.header : `Col ${cIdx}`);
+        }
+      });
+      syncStandardMirrorSelects(stdGridEl);
+    }
   }
 
   if (updatedLabels.length === 0) {
@@ -1083,6 +1430,7 @@ async function handleForwardBatchSync(triggerSource = 'dock') {
           updatedCopy.customValues[cKey] = donorVal;
           if (idx === activeSchemaConfig.primaryCol) updatedCopy.subject = donorVal;
           if (idx === activeSchemaConfig.secondaryCol) updatedCopy.broker = donorVal;
+          if (idx === activeSchemaConfig.actionCol) updatedCopy.action = donorVal;
           if (idx === activeSchemaConfig.notesCol) updatedCopy.notes = donorVal;
         } else if (currVal && !donorVal) {
           cumulativeDonor.customValues[cKey] = currVal;
@@ -1289,6 +1637,13 @@ function readNewDockDraftSnapshot() {
       customValues
     };
   }
+  const extraCustomValues = {};
+  if (dockStandardFieldsGrid) {
+    dockStandardFieldsGrid.querySelectorAll('.std-extra-col-group [data-custom-col]').forEach(el => {
+      const colIdx = Number(el.dataset.customCol);
+      if (colIdx >= 1) extraCustomValues[`col_${colIdx}`] = String(el.value || '');
+    });
+  }
   return {
     savedAt: Date.now(),
     isStandard: true,
@@ -1302,7 +1657,8 @@ function readNewDockDraftSnapshot() {
       yard: dockYard ? dockYard.value : '',
       lots: dockLots ? dockLots.value : '',
       notes: dockNotes ? dockNotes.value : '',
-      status: dockStatus ? dockStatus.value : ''
+      status: dockStatus ? dockStatus.value : '',
+      extraCustomValues
     }
   };
 }
@@ -1311,8 +1667,11 @@ function isNewDockDraftSnapshotNonEmpty(snap) {
   if (!snap || typeof snap !== 'object') return false;
   if (snap.isStandard && snap.fields) {
     const f = snap.fields;
+    const extraNonEmpty = f.extraCustomValues
+      ? Object.values(f.extraCustomValues).some(v => String(v || '').trim() !== '')
+      : false;
     return [f.subject, f.ticket, f.broker, f.master, f.bidder, f.action, f.yard, f.lots, f.notes]
-      .some(v => String(v || '').trim() !== '');
+      .some(v => String(v || '').trim() !== '') || extraNonEmpty;
   }
   if (!snap.isStandard && snap.customValues) {
     const stColKey = (activeSchemaConfig && activeSchemaConfig.statusCol) ? `col_${activeSchemaConfig.statusCol}` : '';
@@ -1408,6 +1767,10 @@ function applySavedDraftToBottomDock(snap) {
       const canonicalDraftSt = ensureStatusOptionExists(f.status);
       dockStatus.value = canonicalDraftSt;
     }
+    if (f.extraCustomValues) {
+      populateStandardExtraFields(dockStandardFieldsGrid, { customValues: f.extraCustomValues });
+    }
+    syncStandardMirrorSelects(dockStandardFieldsGrid);
     return true;
   }
   if (!snap.isStandard && snap.customValues && activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
@@ -1559,6 +1922,8 @@ function setBottomDockNewMode(focusInput = false, { restoreSavedDraft = false, c
   if (dockStatus) {
     dockStatus.value = defaultSt;
   }
+  populateStandardExtraFields(dockStandardFieldsGrid, null);
+  syncStandardMirrorSelects(dockStandardFieldsGrid);
   populateDynamicGridFromItem(dockDynamicFieldsGrid, null);
 
   if (restoreSavedDraft) {
@@ -1642,6 +2007,8 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
 
     const canonicalDockSt = ensureStatusOptionExists(item.status);
     if (dockStatus) dockStatus.value = canonicalDockSt;
+    populateStandardExtraFields(dockStandardFieldsGrid, item);
+    syncStandardMirrorSelects(dockStandardFieldsGrid);
   }
 
   syncDockDraftIndicatorsUI();
@@ -1740,6 +2107,8 @@ async function openNewRequestModal() {
   const defaultSt = getDefaultStatus();
   ensureStatusOptionExists(defaultSt);
   fStatus.value = defaultSt;
+  populateStandardExtraFields(modalStandardFieldsGrid, null);
+  syncStandardMirrorSelects(modalStandardFieldsGrid);
   populateDynamicGridFromItem(modalDynamicFieldsGrid, null);
 
   editModal.classList.add('open');
@@ -1779,6 +2148,8 @@ function openEditModal(sheetName, rowNumber) {
 
     const canonicalModalSt = ensureStatusOptionExists(item.status);
     fStatus.value = canonicalModalSt;
+    populateStandardExtraFields(modalStandardFieldsGrid, item);
+    syncStandardMirrorSelects(modalStandardFieldsGrid);
   }
 
   editModal.classList.add('open');
@@ -1814,13 +2185,16 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
     return false;
   }
 
+  const stdSettings = (activeSchemaConfig && activeSchemaConfig.colSettings) || {};
+  const shouldDefaultUpper = (colIdx) => !(stdSettings[colIdx] && stdSettings[colIdx].dataType === 'auto') &&
+    !(stdSettings[colIdx] && ['number', 'currency', 'date', 'notes'].includes(stdSettings[colIdx].dataType));
   const subjectVal = String(formValues.subject || '').trim();
-  const ticketVal = String(formValues.ticket || '').trim().toUpperCase();
+  const ticketVal = shouldDefaultUpper(2) ? String(formValues.ticket || '').trim().toUpperCase() : String(formValues.ticket || '').trim();
   const brokerVal = String(formValues.broker || '').trim();
-  const masterVal = String(formValues.master || '').trim().toUpperCase();
-  const bidderVal = String(formValues.bidder || '').trim().toUpperCase();
+  const masterVal = shouldDefaultUpper(4) ? String(formValues.master || '').trim().toUpperCase() : String(formValues.master || '').trim();
+  const bidderVal = shouldDefaultUpper(5) ? String(formValues.bidder || '').trim().toUpperCase() : String(formValues.bidder || '').trim();
   const actionVal = String(formValues.action || '').trim();
-  const yardVal = String(formValues.yard || '').trim().toUpperCase();
+  const yardVal = shouldDefaultUpper(7) ? String(formValues.yard || '').trim().toUpperCase() : String(formValues.yard || '').trim();
   const lotsVal = String(formValues.lots || '').trim();
   const notesVal = String(formValues.notes || '').trim();
   const statusVal = String(formValues.status || '').trim();
@@ -2041,7 +2415,11 @@ function renderTicketDetailsModal(seedItem) {
   if (ticketDetailsMetaGrid) {
     if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
       const customCards = activeSchemaConfig.columns
-        .filter(c => c.colIndex !== activeSchemaConfig.notesCol)
+        .filter(c => {
+          if (c.colIndex === activeSchemaConfig.notesCol) return false;
+          const v = (latest.customValues && latest.customValues[`col_${c.colIndex}`]) || '';
+          return c.showInTable !== false || c.showInEditor !== false || Boolean(String(v).trim());
+        })
         .map(c => {
           const val = (latest.customValues && latest.customValues[`col_${c.colIndex}`]) || '';
           const isCopyableField = Array.isArray(activeSchemaConfig.copyCols)
@@ -2049,7 +2427,7 @@ function renderTicketDetailsModal(seedItem) {
             : (
                 c.colIndex === activeSchemaConfig.ticketCol ||
                 c.colIndex === activeSchemaConfig.secondaryCol ||
-                /\b(subject|ticket|master\s*#?|account\s*#?|member\s*#?|bidder\s*#?|yard\s*#?|lot\s*#?)\b/i.test(c.header)
+                /\b(subject|ticket|master\s*#?|account\s*#?|member\s*#?|bidder\s*#?|yard\s*#?|lot\s*#?)\b/i.test(c.excelHeader || c.header)
               );
           const inner = c.colIndex === activeSchemaConfig.statusCol
             ? `<span class="badge ${getStatusBadgeClass(val || latest.status)}">${escapeHtml(val || latest.status)}</span>`
@@ -2073,35 +2451,59 @@ function renderTicketDetailsModal(seedItem) {
       `;
     } else {
       const parentCategory = resolveActionParentCategory(latest.action);
-      const subjectCardVal = latest.subject
-        ? `<span class="cell-copy-group cell-copy-text"><span>${escapeHtml(latest.subject)}</span>${renderInlineCopyBtnHtml(latest.subject, 'Email Subject')}</span>`
-        : '—';
-      const ticketCardVal = latest.ticket
-        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.ticket)}</span>${renderInlineCopyBtnHtml(latest.ticket, 'Ticket #')}</span>`
-        : '—';
-      const masterCardVal = latest.master
-        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.master)}</span>${renderInlineCopyBtnHtml(latest.master, 'Master #')}</span>`
-        : '—';
-      const bidderCardVal = latest.bidder
-        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.bidder)}</span>${renderInlineCopyBtnHtml(latest.bidder, 'Bidder #')}</span>`
-        : '—';
-      const yardCardVal = latest.yard
-        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.yard)}</span>${renderInlineCopyBtnHtml(latest.yard, 'Yard #')}</span>`
-        : '—';
-      const lotsCardVal = latest.lots
-        ? `<span class="cell-copy-group"><span>${escapeHtml(latest.lots)}</span>${renderInlineCopyBtnHtml(latest.lots, 'Lot Numbers')}</span>`
-        : '—';
+      const isStdCopy = (colIdx) => Array.isArray(activeSchemaConfig && activeSchemaConfig.copyCols)
+        ? activeSchemaConfig.copyCols.includes(colIdx)
+        : [1, 2, 4, 5, 7, 8].includes(colIdx);
+      const stdColHdr = (colIdx, fallback) => {
+        const hit = activeSchemaConfig && Array.isArray(activeSchemaConfig.columns)
+          ? activeSchemaConfig.columns.find(c => c.colIndex === colIdx)
+          : null;
+        return (hit && hit.header) ? hit.header : fallback;
+      };
+      const wrapStdCopy = (colIdx, val, lbl, mono = true) => {
+        if (!val) return '—';
+        if (!isStdCopy(colIdx)) return escapeHtml(val);
+        const cls = mono ? 'cell-copy-group' : 'cell-copy-group cell-copy-text';
+        return `<span class="${cls}"><span>${escapeHtml(val)}</span>${renderInlineCopyBtnHtml(val, lbl)}</span>`;
+      };
+
+      const subjectCardVal = wrapStdCopy(1, latest.subject, stdColHdr(1, 'Email Subject'), false);
+      const ticketCardVal = wrapStdCopy(2, latest.ticket, stdColHdr(2, 'Ticket #'), true);
+      const brokerCardVal = wrapStdCopy(3, latest.broker, stdColHdr(3, 'Broker Name'), false);
+      const masterCardVal = wrapStdCopy(4, latest.master, stdColHdr(4, 'Master #'), true);
+      const bidderCardVal = wrapStdCopy(5, latest.bidder, stdColHdr(5, 'Bidder #'), true);
+      const actionCardVal = wrapStdCopy(6, latest.action, stdColHdr(6, 'Requested Action'), false);
+      const yardCardVal = wrapStdCopy(7, latest.yard, stdColHdr(7, 'Yard #'), true);
+      const lotsCardVal = wrapStdCopy(8, latest.lots, stdColHdr(8, 'Lot Numbers'), true);
+
+      const coreStdSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, activeSchemaConfig.notesCol || 9, activeSchemaConfig.statusCol || 10, activeSchemaConfig.trackingCol || 11]);
+      const extraStdCardsHtml = (activeSchemaConfig && Array.isArray(activeSchemaConfig.columns))
+        ? activeSchemaConfig.columns
+            .filter(c => !coreStdSet.has(c.colIndex))
+            .map(c => {
+              const ev = (latest.customValues && latest.customValues[`col_${c.colIndex}`]) || '';
+              if (c.showInTable === false && c.showInEditor === false && !String(ev).trim()) return '';
+              const inner = ev ? wrapStdCopy(c.colIndex, ev, c.header, false) : '—';
+              return `
+                <div class="ticket-meta-card">
+                  <div class="ticket-meta-card-label">${escapeHtml(c.header)}</div>
+                  <div class="ticket-meta-card-val">${inner}</div>
+                </div>
+              `;
+            }).join('')
+        : '';
+
       ticketDetailsMetaGrid.innerHTML = `
         <div class="ticket-meta-card" style="grid-column: 1 / -1;">
-          <div class="ticket-meta-card-label">Email Subject</div>
+          <div class="ticket-meta-card-label">${escapeHtml(stdColHdr(1, 'Email Subject'))}</div>
           <div class="ticket-meta-card-val">${subjectCardVal}</div>
         </div>
         <div class="ticket-meta-card">
-          <div class="ticket-meta-card-label">Ticket Number</div>
+          <div class="ticket-meta-card-label">${escapeHtml(stdColHdr(2, 'Ticket Number'))}</div>
           <div class="ticket-meta-card-val">${ticketCardVal}</div>
         </div>
         <div class="ticket-meta-card">
-          <div class="ticket-meta-card-label">Current Status (${escapeHtml(latest.sheetName)})</div>
+          <div class="ticket-meta-card-label">Current ${escapeHtml(stdColHdr(10, 'Status'))} (${escapeHtml(latest.sheetName)})</div>
           <div class="ticket-meta-card-val">
             <span class="badge ${getStatusBadgeClass(latest.status)}">${escapeHtml(latest.status)}</span>
           </div>
@@ -2111,17 +2513,18 @@ function renderTicketDetailsModal(seedItem) {
           <div class="ticket-meta-card-val">${escapeHtml(oldest.sheetName)} (${history.length} tab${history.length === 1 ? '' : 's'})</div>
         </div>
         <div class="ticket-meta-card">
-          <div class="ticket-meta-card-label">Broker &amp; Accounts</div>
-          <div class="ticket-meta-card-val">${escapeHtml(latest.broker || '—')} (M: ${masterCardVal} / B: ${bidderCardVal})</div>
+          <div class="ticket-meta-card-label">${escapeHtml(stdColHdr(3, 'Broker'))} &amp; Accounts</div>
+          <div class="ticket-meta-card-val">${brokerCardVal} (M: ${masterCardVal} / B: ${bidderCardVal})</div>
         </div>
         <div class="ticket-meta-card">
-          <div class="ticket-meta-card-label">Requested Action &amp; Category</div>
-          <div class="ticket-meta-card-val">${escapeHtml(latest.action || '—')} <span class="badge badge-progress" style="margin-left:4px;">${escapeHtml(parentCategory)}</span></div>
+          <div class="ticket-meta-card-label">${escapeHtml(stdColHdr(6, 'Requested Action'))} &amp; Category</div>
+          <div class="ticket-meta-card-val">${actionCardVal} <span class="badge badge-progress" style="margin-left:4px;">${escapeHtml(parentCategory)}</span></div>
         </div>
         <div class="ticket-meta-card">
-          <div class="ticket-meta-card-label">Yard # &amp; Lot Numbers</div>
+          <div class="ticket-meta-card-label">${escapeHtml(stdColHdr(7, 'Yard #'))} &amp; ${escapeHtml(stdColHdr(8, 'Lot Numbers'))}</div>
           <div class="ticket-meta-card-val">Y: ${yardCardVal} • Lots: ${lotsCardVal}</div>
         </div>
+        ${extraStdCardsHtml}
       `;
     }
   }

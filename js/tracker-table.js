@@ -41,12 +41,14 @@ function indexWorksheetRows(worksheet, sheetName) {
 
   if (colMap.isCustomSchema) {
     const customCols = Array.isArray(colMap.columns) ? colMap.columns : [];
-    const inferredActionColObj = customCols.find(c =>
-      c.colIndex !== colMap.primaryCol &&
-      c.colIndex !== colMap.statusCol &&
-      c.colIndex !== colMap.notesCol &&
-      /\b(action|subtype|issue|category|reason|request\s*type|type)\b/i.test(c.header)
-    );
+    const inferredActionColObj = (activeSchemaConfig && activeSchemaConfig.actionCol)
+      ? (customCols.find(c => c.colIndex === activeSchemaConfig.actionCol) || null)
+      : customCols.find(c =>
+          c.colIndex !== colMap.primaryCol &&
+          c.colIndex !== colMap.statusCol &&
+          c.colIndex !== colMap.notesCol &&
+          /\b(action|subtype|issue|category|reason|request\s*type|type)\b/i.test(c.excelHeader || c.header)
+        );
 
     worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber === 1) return;
@@ -217,6 +219,11 @@ function indexWorksheetRows(worksheet, sheetName) {
     return;
   }
 
+  const coreStdSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, colMap.notesCol, colMap.statusCol, colMap.trackingCol]);
+  const extraStdCols = (activeSchemaConfig && activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns))
+    ? activeSchemaConfig.columns.filter(c => !coreStdSet.has(c.colIndex))
+    : [];
+
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (rowNumber === 1) return;
 
@@ -245,8 +252,17 @@ function indexWorksheetRows(worksheet, sheetName) {
       notes = tmp;
     }
 
+    const extraCustomValues = {};
+    let hasExtraStdData = false;
+    extraStdCols.forEach(c => {
+      let ev = cellText(row, c.colIndex);
+      if (ev && UUID_REGEX.test(ev)) ev = '';
+      extraCustomValues[`col_${c.colIndex}`] = ev;
+      if (ev !== '') hasExtraStdData = true;
+    });
+
     const hasData = [subject, ticket, broker, master, bidder, action, yard, lots, notes, status]
-      .some(val => val !== '');
+      .some(val => val !== '') || hasExtraStdData;
 
     if (!hasData) {
       // Clean up any blank template row that was previously polluted by the old [object Object] bug
@@ -326,7 +342,8 @@ function indexWorksheetRows(worksheet, sheetName) {
       lots,
       notes,
       status: status || defaultStatusVal,
-      key
+      key,
+      ...(extraStdCols.length > 0 ? { customValues: extraCustomValues } : {})
     });
   });
 }
@@ -478,11 +495,88 @@ function getRowCompositeId(sheetName, rowNumber) {
   return `${sheetName}::${rowNumber}`;
 }
 
+function getVisibleCustomTableColumns() {
+  if (!activeSchemaConfig || !Array.isArray(activeSchemaConfig.columns)) return [];
+  const visible = activeSchemaConfig.columns.filter(c => c.showInTable !== false);
+  return visible.length > 0 ? visible : activeSchemaConfig.columns;
+}
+
+function getStandardTableColumnsDescriptor() {
+  const cols = (activeSchemaConfig && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0)
+    ? activeSchemaConfig.columns
+    : [];
+  const byIdx = new Map();
+  cols.forEach(c => byIdx.set(c.colIndex, c));
+  const stColIdx = (activeSchemaConfig && activeSchemaConfig.statusCol) || 10;
+  const nColIdx = (activeSchemaConfig && activeSchemaConfig.notesCol) || 9;
+  const trkColIdx = (activeSchemaConfig && activeSchemaConfig.trackingCol) || 11;
+  const isVis = (idx, defaultVis = true) => {
+    const c = byIdx.get(idx);
+    return c ? (c.showInTable !== false) : defaultVis;
+  };
+  const getLbl = (idx, fallback) => {
+    const c = byIdx.get(idx);
+    return (c && c.header) ? c.header : fallback;
+  };
+
+  const slots = [];
+  if (isVis(1, true)) slots.push({ kind: 'subject', colIndex: 1, sortKey: 'subject', label: getLbl(1, 'Subject') });
+  if (isVis(2, true)) slots.push({ kind: 'ticket', colIndex: 2, sortKey: 'ticket', label: getLbl(2, 'Ticket #') });
+  if (isVis(3, true)) slots.push({ kind: 'broker', colIndex: 3, sortKey: 'broker', label: getLbl(3, 'Broker') });
+
+  const showMaster = isVis(4, true);
+  const showBidder = isVis(5, true);
+  if (showMaster || showBidder) {
+    slots.push({
+      kind: 'master_bidder',
+      showMaster,
+      showBidder,
+      masterLabel: getLbl(4, 'Master'),
+      bidderLabel: getLbl(5, 'Bidder')
+    });
+  }
+
+  if (isVis(6, true)) slots.push({ kind: 'action', colIndex: 6, sortKey: 'action', label: getLbl(6, 'Action') });
+
+  const showYard = isVis(7, true);
+  const showLots = isVis(8, true);
+  if (showYard || showLots) {
+    slots.push({
+      kind: 'yard_lots',
+      showYard,
+      showLots,
+      yardLabel: getLbl(7, 'Yard'),
+      lotsLabel: getLbl(8, 'Lots')
+    });
+  }
+
+  if (isVis(nColIdx, true)) slots.push({ kind: 'notes', colIndex: nColIdx, sortKey: 'notes', label: getLbl(nColIdx, 'Action Notes') });
+  if (isVis(stColIdx, true)) slots.push({ kind: 'status', colIndex: stColIdx, sortKey: 'status', label: getLbl(stColIdx, 'Status') });
+
+  const coreStdSet = new Set([1, 2, 3, 4, 5, 6, 7, 8, nColIdx, stColIdx, trkColIdx]);
+  cols.forEach(c => {
+    if (!coreStdSet.has(c.colIndex) && c.showInTable === true) {
+      slots.push({
+        kind: 'extra',
+        colIndex: c.colIndex,
+        colObj: c,
+        sortKey: `col_${c.colIndex}`,
+        label: c.header
+      });
+    }
+  });
+
+  if (slots.length === 0) {
+    slots.push({ kind: 'subject', colIndex: 1, sortKey: 'subject', label: getLbl(1, 'Subject') });
+  }
+  return { slots, stColIdx, nColIdx };
+}
+
 function getActiveTableColSpan() {
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
-    return 4 + activeSchemaConfig.columns.length;
+    return 4 + getVisibleCustomTableColumns().length;
   }
-  return 12;
+  return 4 + getStandardTableColumnsDescriptor().slots.length;
 }
 
 function renderTableHeader() {
@@ -490,11 +584,12 @@ function renderTableHeader() {
   const selectColClass = isDeleteMode ? 'delete-col' : 'select-col';
 
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
-    // Reset incompatible sortState if left over from standard schema
-    if (sortState.column && !['date', 'key', 'accessed'].includes(sortState.column) && !sortState.column.startsWith('col_')) {
+    const visibleCols = getVisibleCustomTableColumns();
+    const visibleSortKeys = new Set(visibleCols.map(c => `col_${c.colIndex}`));
+    if (sortState.column && !['date', 'key', 'accessed'].includes(sortState.column) && !visibleSortKeys.has(sortState.column)) {
       sortState = { column: null, direction: 'asc' };
     }
-    const customThsHtml = activeSchemaConfig.columns.map(c => {
+    const customThsHtml = visibleCols.map(c => {
       const sortKey = `col_${c.colIndex}`;
       return `
         <th class="sortable-th" data-sort="${sortKey}" title="Click to sort by ${escapeHtml(c.header)}">
@@ -524,9 +619,67 @@ function renderTableHeader() {
     return;
   }
 
-  if (sortState.column && sortState.column.startsWith('col_')) {
+  const descriptor = getStandardTableColumnsDescriptor();
+  const validStdSorts = new Set(['date', 'key', 'accessed']);
+  descriptor.slots.forEach(s => {
+    if (s.kind === 'master_bidder') {
+      if (s.showMaster) validStdSorts.add('master');
+      if (s.showBidder) validStdSorts.add('bidder');
+    } else if (s.kind === 'yard_lots') {
+      if (s.showYard) validStdSorts.add('yard');
+      if (s.showLots) validStdSorts.add('lots');
+    } else if (s.sortKey) {
+      validStdSorts.add(s.sortKey);
+    }
+  });
+  if (sortState.column && !validStdSorts.has(sortState.column)) {
     sortState = { column: null, direction: 'asc' };
   }
+
+  const stdThsHtml = descriptor.slots.map(s => {
+    if (s.kind === 'master_bidder') {
+      if (s.showMaster && s.showBidder) {
+        return `
+          <th class="sortable-th" data-sort="master" title="Click ${escapeHtml(s.masterLabel)} or ${escapeHtml(s.bidderLabel)} to sort">
+            <span class="th-sub-sort" data-sort="master" title="Sort by ${escapeHtml(s.masterLabel)}">${escapeHtml(s.masterLabel)}<span class="sort-indicator" data-ind="master">↕</span></span>
+            <span class="th-sep">/</span>
+            <span class="th-sub-sort" data-sort="bidder" title="Sort by ${escapeHtml(s.bidderLabel)}">${escapeHtml(s.bidderLabel)}<span class="sort-indicator" data-ind="bidder">↕</span></span>
+          </th>
+        `;
+      }
+      const key = s.showMaster ? 'master' : 'bidder';
+      const lbl = s.showMaster ? s.masterLabel : s.bidderLabel;
+      return `
+        <th class="sortable-th" data-sort="${key}" title="Click to sort by ${escapeHtml(lbl)}">
+          <span>${escapeHtml(lbl)}</span><span class="sort-indicator" data-ind="${key}">↕</span>
+        </th>
+      `;
+    }
+    if (s.kind === 'yard_lots') {
+      if (s.showYard && s.showLots) {
+        return `
+          <th class="sortable-th" data-sort="yard" title="Click ${escapeHtml(s.yardLabel)} or ${escapeHtml(s.lotsLabel)} to sort">
+            <span class="th-sub-sort" data-sort="yard" title="Sort by ${escapeHtml(s.yardLabel)}">${escapeHtml(s.yardLabel)}<span class="sort-indicator" data-ind="yard">↕</span></span>
+            <span class="th-sep">/</span>
+            <span class="th-sub-sort" data-sort="lots" title="Sort by ${escapeHtml(s.lotsLabel)}">${escapeHtml(s.lotsLabel)}<span class="sort-indicator" data-ind="lots">↕</span></span>
+          </th>
+        `;
+      }
+      const key = s.showYard ? 'yard' : 'lots';
+      const lbl = s.showYard ? s.yardLabel : s.lotsLabel;
+      return `
+        <th class="sortable-th" data-sort="${key}" title="Click to sort by ${escapeHtml(lbl)}">
+          <span>${escapeHtml(lbl)}</span><span class="sort-indicator" data-ind="${key}">↕</span>
+        </th>
+      `;
+    }
+    const extraCls = s.kind === 'subject' ? ' tracker-subject-th' : '';
+    return `
+      <th class="sortable-th${extraCls}" data-sort="${s.sortKey}" title="Click to sort by ${escapeHtml(s.label)}">
+        <span>${escapeHtml(s.label)}</span><span class="sort-indicator" data-ind="${s.sortKey}">↕</span>
+      </th>
+    `;
+  }).join('');
 
   tableHead.innerHTML = `
     <tr>
@@ -537,34 +690,7 @@ function renderTableHeader() {
       <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
         <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
       </th>
-      <th class="sortable-th tracker-subject-th" data-sort="subject" title="Click to sort by Subject">
-        <span>Subject</span><span class="sort-indicator" data-ind="subject">↕</span>
-      </th>
-      <th class="sortable-th" data-sort="ticket" title="Click to sort by Ticket #">
-        <span>Ticket #</span><span class="sort-indicator" data-ind="ticket">↕</span>
-      </th>
-      <th class="sortable-th" data-sort="broker" title="Click to sort by Broker Name">
-        <span>Broker</span><span class="sort-indicator" data-ind="broker">↕</span>
-      </th>
-      <th class="sortable-th" data-sort="master" title="Click Master or Bidder to sort">
-        <span class="th-sub-sort" data-sort="master" title="Sort by Master #">Master<span class="sort-indicator" data-ind="master">↕</span></span>
-        <span class="th-sep">/</span>
-        <span class="th-sub-sort" data-sort="bidder" title="Sort by Bidder #">Bidder<span class="sort-indicator" data-ind="bidder">↕</span></span>
-      </th>
-      <th class="sortable-th" data-sort="action" title="Click to sort by Requested Action">
-        <span>Action</span><span class="sort-indicator" data-ind="action">↕</span>
-      </th>
-      <th class="sortable-th" data-sort="yard" title="Click Yard or Lots to sort">
-        <span class="th-sub-sort" data-sort="yard" title="Sort by Yard #">Yard<span class="sort-indicator" data-ind="yard">↕</span></span>
-        <span class="th-sep">/</span>
-        <span class="th-sub-sort" data-sort="lots" title="Sort by Lot Numbers">Lots<span class="sort-indicator" data-ind="lots">↕</span></span>
-      </th>
-      <th class="sortable-th" data-sort="notes" title="Click to sort by Action Notes">
-        <span>Action Notes</span><span class="sort-indicator" data-ind="notes">↕</span>
-      </th>
-      <th class="sortable-th" data-sort="status" title="Click to sort by Status">
-        <span>Status</span><span class="sort-indicator" data-ind="status">↕</span>
-      </th>
+      ${stdThsHtml}
       <th class="sortable-th tracker-actions-th" data-sort="accessed" title="Sort by Last Accessed or Tracking ID">
         <span class="th-sub-sort" data-sort="accessed" title="Sort by Last Accessed">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span>
         <span class="th-sep">/</span>
@@ -581,14 +707,22 @@ function createShadowNewRowElement(colSpan, currentSheet) {
   }
   const isCustom = activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0;
   const ghostPillsHtml = isCustom
-    ? activeSchemaConfig.columns.slice(0, 5).map(c => `<span class="shadow-ghost-pill">${escapeHtml(c.header)}</span>`).join('')
-    : `
-        <span class="shadow-ghost-pill">Subject</span>
-        <span class="shadow-ghost-pill">Ticket #</span>
-        <span class="shadow-ghost-pill">Broker &amp; Master #</span>
-        <span class="shadow-ghost-pill">Requested Action</span>
-        <span class="shadow-ghost-pill">Yard / Lots</span>
-      `;
+    ? getVisibleCustomTableColumns().slice(0, 5).map(c => `<span class="shadow-ghost-pill">${escapeHtml(c.header)}</span>`).join('')
+    : getStandardTableColumnsDescriptor().slots
+        .filter(s => s.kind !== 'status' && s.kind !== 'notes')
+        .slice(0, 5)
+        .map(s => {
+          if (s.kind === 'master_bidder') {
+            const lbl = (s.showMaster && s.showBidder) ? `${s.masterLabel} & ${s.bidderLabel}` : (s.showMaster ? s.masterLabel : s.bidderLabel);
+            return `<span class="shadow-ghost-pill">${escapeHtml(lbl)}</span>`;
+          }
+          if (s.kind === 'yard_lots') {
+            const lbl = (s.showYard && s.showLots) ? `${s.yardLabel} / ${s.lotsLabel}` : (s.showYard ? s.yardLabel : s.lotsLabel);
+            return `<span class="shadow-ghost-pill">${escapeHtml(lbl)}</span>`;
+          }
+          return `<span class="shadow-ghost-pill">${escapeHtml(s.label)}</span>`;
+        })
+        .join('');
 
   const tr = document.createElement('tr');
   tr.className = 'shadow-new-row';
@@ -657,11 +791,11 @@ function isFieldFilterActive(field, val) {
   );
 }
 
-function renderClickableLotsHtml(lotsStr) {
+function renderClickableLotsHtml(lotsStr, includeCopy = true) {
   const trimmed = String(lotsStr || '').trim();
   if (!trimmed || trimmed === '—') return '—';
 
-  const copyBtnFn = typeof renderInlineCopyBtnHtml === 'function' ? renderInlineCopyBtnHtml : () => '';
+  const copyBtnFn = (includeCopy && typeof renderInlineCopyBtnHtml === 'function') ? renderInlineCopyBtnHtml : () => '';
   const parts = trimmed.split(/([,;/|\s]+)/);
   return parts
     .map(part => {
@@ -669,7 +803,9 @@ function renderClickableLotsHtml(lotsStr) {
         return escapeHtml(part);
       }
       const activeClass = isFieldFilterActive('lot', part) ? ' active-filter-match' : '';
-      return `<span class="cell-copy-group"><span class="clickable-code${activeClass}" data-filter-field="lot" data-filter-label="Lot #" data-filter-val="${escapeHtml(part)}" title="Click to show all requests with Lot # ${escapeHtml(part)}">${escapeHtml(part)}</span>${copyBtnFn(part, 'Lot #')}</span>`;
+      const copyHtml = copyBtnFn(part, 'Lot #');
+      const chipHtml = `<span class="clickable-code${activeClass}" data-filter-field="lot" data-filter-label="Lot #" data-filter-val="${escapeHtml(part)}" title="Click to show all requests with Lot # ${escapeHtml(part)}">${escapeHtml(part)}</span>`;
+      return copyHtml ? `<span class="cell-copy-group">${chipHtml}${copyHtml}</span>` : chipHtml;
     })
     .join('');
 }
@@ -1122,7 +1258,8 @@ function renderList() {
     `;
 
     if (isCustomSchema) {
-      const customCellsHtml = activeSchemaConfig.columns.map(c => {
+      const visibleCustomCols = getVisibleCustomTableColumns();
+      const customCellsHtml = visibleCustomCols.map(c => {
         const fieldKey = `col_${c.colIndex}`;
         const rawVal = (item.customValues && item.customValues[fieldKey] !== undefined)
           ? String(item.customValues[fieldKey])
@@ -1144,7 +1281,7 @@ function renderList() {
           `;
         }
 
-        if (c.colIndex === activeSchemaConfig.notesCol) {
+        if (c.colIndex === activeSchemaConfig.notesCol || c.dataType === 'notes') {
           const cNote = trimmedVal || '—';
           const cLong = cNote.length > 45 || cNote.includes('\n');
           return `
@@ -1160,7 +1297,7 @@ function renderList() {
           : (
               c.colIndex === activeSchemaConfig.ticketCol ||
               c.colIndex === activeSchemaConfig.secondaryCol ||
-              /\b(subject|ticket|master\s*#?|account\s*#?|member\s*#?|bidder\s*#?|yard\s*#?|lot\s*#?)\b/i.test(c.header)
+              /\b(subject|ticket|master\s*#?|account\s*#?|member\s*#?|bidder\s*#?|yard\s*#?|lot\s*#?)\b/i.test(c.excelHeader || c.header)
             );
 
         if (c.colIndex === activeSchemaConfig.ticketCol) {
@@ -1201,6 +1338,11 @@ function renderList() {
       return;
     }
 
+    const stdDescriptor = getStandardTableColumnsDescriptor();
+    const isStdColCopyable = (colIdx) => Array.isArray(activeSchemaConfig && activeSchemaConfig.copyCols)
+      ? activeSchemaConfig.copyCols.includes(colIdx)
+      : [1, 2, 4, 5, 7, 8].includes(colIdx);
+
     const subjectActiveClass = isFieldFilterActive('subject', item.subject) ? ' active-filter-match' : '';
     const brokerActiveClass = isFieldFilterActive('broker', item.broker) ? ' active-filter-match' : '';
     const masterActiveClass = isFieldFilterActive('master', item.master) ? ' active-filter-match' : '';
@@ -1209,36 +1351,93 @@ function renderList() {
     const yardActiveClass = isFieldFilterActive('yard', item.yard) ? ' active-filter-match' : '';
     const statusActiveClass = isFieldFilterActive('status', item.status) ? ' active-filter-match' : '';
 
+    const subjectCopyHtml = isStdColCopyable(1) ? copyBtnFn(item.subject, 'Email Subject') : '';
+    const subjectChipHtml = `<span class="clickable-cell${subjectActiveClass}" data-filter-field="subject" data-filter-label="Subject" data-filter-val="${escapeHtml(item.subject)}" title="Click to show all requests with Subject: ${escapeHtml(item.subject)}">${escapeHtml(item.subject)}</span>`;
     const subjectHtml = item.subject
-      ? `<span class="cell-copy-group cell-copy-text"><span class="clickable-cell${subjectActiveClass}" data-filter-field="subject" data-filter-label="Subject" data-filter-val="${escapeHtml(item.subject)}" title="Click to show all requests with Subject: ${escapeHtml(item.subject)}">${escapeHtml(item.subject)}</span>${copyBtnFn(item.subject, 'Email Subject')}</span>`
+      ? (subjectCopyHtml ? `<span class="cell-copy-group cell-copy-text">${subjectChipHtml}${subjectCopyHtml}</span>` : subjectChipHtml)
       : '—';
 
-    const ticketHtml = renderClickableTicketTokensHtml(item.ticket, 'ticket', 'Ticket #', true);
+    const ticketHtml = renderClickableTicketTokensHtml(item.ticket, 'ticket', 'Ticket #', isStdColCopyable(2));
 
+    const brokerCopyHtml = isStdColCopyable(3) ? copyBtnFn(item.broker, 'Broker') : '';
+    const brokerChipHtml = `<span class="clickable-cell${brokerActiveClass}" data-filter-field="broker" data-filter-label="Broker" data-filter-val="${escapeHtml(item.broker)}" title="Click to show all requests for Broker: ${escapeHtml(item.broker)}">${escapeHtml(item.broker)}</span>`;
     const brokerHtml = item.broker
-      ? `<span class="clickable-cell${brokerActiveClass}" data-filter-field="broker" data-filter-label="Broker" data-filter-val="${escapeHtml(item.broker)}" title="Click to show all requests for Broker: ${escapeHtml(item.broker)}">${escapeHtml(item.broker)}</span>`
+      ? (brokerCopyHtml ? `<span class="cell-copy-group cell-copy-text">${brokerChipHtml}${brokerCopyHtml}</span>` : brokerChipHtml)
       : '—';
 
+    const masterCopyHtml = isStdColCopyable(4) ? copyBtnFn(item.master, 'Master #') : '';
+    const masterChipHtml = `<span class="clickable-code${masterActiveClass}" data-filter-field="master" data-filter-label="Master #" data-filter-val="${escapeHtml(item.master)}" title="Click to show all requests with Master # ${escapeHtml(item.master)}">${escapeHtml(item.master)}</span>`;
     const masterHtml = item.master
-      ? `<span class="cell-copy-group"><span class="clickable-code${masterActiveClass}" data-filter-field="master" data-filter-label="Master #" data-filter-val="${escapeHtml(item.master)}" title="Click to show all requests with Master # ${escapeHtml(item.master)}">${escapeHtml(item.master)}</span>${copyBtnFn(item.master, 'Master #')}</span>`
+      ? (masterCopyHtml ? `<span class="cell-copy-group">${masterChipHtml}${masterCopyHtml}</span>` : masterChipHtml)
       : '—';
 
+    const bidderCopyHtml = isStdColCopyable(5) ? copyBtnFn(item.bidder, 'Bidder #') : '';
+    const bidderChipHtml = `<span class="clickable-code${bidderActiveClass}" data-filter-field="bidder" data-filter-label="Bidder #" data-filter-val="${escapeHtml(item.bidder)}" title="Click to show all requests with Bidder # ${escapeHtml(item.bidder)}">${escapeHtml(item.bidder)}</span>`;
     const bidderHtml = item.bidder
-      ? `<span class="cell-copy-group"><span class="clickable-code${bidderActiveClass}" data-filter-field="bidder" data-filter-label="Bidder #" data-filter-val="${escapeHtml(item.bidder)}" title="Click to show all requests with Bidder # ${escapeHtml(item.bidder)}">${escapeHtml(item.bidder)}</span>${copyBtnFn(item.bidder, 'Bidder #')}</span>`
+      ? (bidderCopyHtml ? `<span class="cell-copy-group">${bidderChipHtml}${bidderCopyHtml}</span>` : bidderChipHtml)
       : '—';
 
+    const actionCopyHtml = isStdColCopyable(6) ? copyBtnFn(item.action, 'Requested Action') : '';
+    const actionChipHtml = `<span class="clickable-cell${actionActiveClass}" data-filter-field="action" data-filter-label="Action" data-filter-val="${escapeHtml(item.action)}" title="Click to show all requests with Action: ${escapeHtml(item.action)}">${escapeHtml(item.action)}</span>`;
     const actionHtml = item.action
-      ? `<span class="clickable-cell${actionActiveClass}" data-filter-field="action" data-filter-label="Action" data-filter-val="${escapeHtml(item.action)}" title="Click to show all requests with Action: ${escapeHtml(item.action)}">${escapeHtml(item.action)}</span>`
+      ? (actionCopyHtml ? `<span class="cell-copy-group cell-copy-text">${actionChipHtml}${actionCopyHtml}</span>` : actionChipHtml)
       : '—';
 
+    const yardCopyHtml = isStdColCopyable(7) ? copyBtnFn(item.yard, 'Yard #') : '';
+    const yardChipHtml = `<span class="clickable-code${yardActiveClass}" data-filter-field="yard" data-filter-label="Yard #" data-filter-val="${escapeHtml(item.yard)}" title="Click to show all requests for Yard # ${escapeHtml(item.yard)}">${escapeHtml(item.yard)}</span>`;
     const yardHtml = item.yard
-      ? `<span class="cell-copy-group"><span class="clickable-code${yardActiveClass}" data-filter-field="yard" data-filter-label="Yard #" data-filter-val="${escapeHtml(item.yard)}" title="Click to show all requests for Yard # ${escapeHtml(item.yard)}">${escapeHtml(item.yard)}</span>${copyBtnFn(item.yard, 'Yard #')}</span>`
+      ? (yardCopyHtml ? `<span class="cell-copy-group">${yardChipHtml}${yardCopyHtml}</span>` : yardChipHtml)
       : '—';
 
-    const lotsHtml = renderClickableLotsHtml(item.lots);
+    const lotsHtml = renderClickableLotsHtml(item.lots, isStdColCopyable(8));
     const stdStatusBadgeClass = typeof getStatusBadgeClass === 'function'
       ? getStatusBadgeClass(item.status)
       : (isCompletedStatus(item.status) ? 'badge-complete' : 'badge-pending');
+
+    const stdCellsHtml = stdDescriptor.slots.map(s => {
+      switch (s.kind) {
+        case 'subject':
+          return `<td class="tracker-subject-cell">${subjectHtml}</td>`;
+        case 'ticket':
+          return `<td>${ticketHtml}</td>`;
+        case 'broker':
+          return `<td>${brokerHtml}</td>`;
+        case 'master_bidder': {
+          if (s.showMaster && s.showBidder) {
+            return `<td class="cell-mono-sm">M: ${masterHtml}<br>B: ${bidderHtml}</td>`;
+          }
+          return `<td class="cell-mono-sm">${s.showMaster ? masterHtml : bidderHtml}</td>`;
+        }
+        case 'action':
+          return `<td>${actionHtml}</td>`;
+        case 'yard_lots': {
+          if (s.showYard && s.showLots) {
+            return `<td class="cell-sm">Y: ${yardHtml}<br>L: ${lotsHtml}</td>`;
+          }
+          return `<td class="cell-sm">${s.showYard ? yardHtml : lotsHtml}</td>`;
+        }
+        case 'notes':
+          return `<td class="notes-cell"><div class="notes-preview" id="note-${idx}">${escapeHtml(noteText)}</div>${isLongNote ? `<span class="notes-toggle" data-target="note-${idx}">[+ Expand]</span>` : ''}</td>`;
+        case 'status':
+          return `<td><span class="badge clickable-badge ${stdStatusBadgeClass}${statusActiveClass}" data-filter-field="status" data-filter-label="Status" data-filter-val="${escapeHtml(item.status)}" title="Click to show all requests with Status: ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>`;
+        case 'extra': {
+          const fKey = `col_${s.colIndex}`;
+          const ev = (item.customValues && item.customValues[fKey] !== undefined) ? String(item.customValues[fKey]).trim() : '';
+          if (s.colObj && s.colObj.dataType === 'notes') {
+            const eNote = ev || '—';
+            const eLong = eNote.length > 45 || eNote.includes('\n');
+            return `<td class="notes-cell"><div class="notes-preview" id="note-${idx}-${s.colIndex}">${escapeHtml(eNote)}</div>${eLong ? `<span class="notes-toggle" data-target="note-${idx}-${s.colIndex}">[+ Expand]</span>` : ''}</td>`;
+          }
+          if (!ev) return '<td>—</td>';
+          const eAct = isFieldFilterActive(fKey, ev) ? ' active-filter-match' : '';
+          const eCopy = isStdColCopyable(s.colIndex) ? copyBtnFn(ev, s.label) : '';
+          const eSpan = `<span class="clickable-cell${eAct}" data-filter-field="${fKey}" data-filter-label="${escapeHtml(s.label)}" data-filter-val="${escapeHtml(ev)}" title="Click to filter by ${escapeHtml(s.label)}: ${escapeHtml(ev)}">${escapeHtml(ev)}</span>`;
+          return `<td>${eCopy ? `<span class="cell-copy-group cell-copy-text">${eSpan}${eCopy}</span>` : eSpan}</td>`;
+        }
+        default:
+          return '';
+      }
+    }).join('');
 
     tr.innerHTML = `
       ${rowNumCell}
@@ -1248,25 +1447,7 @@ function renderList() {
           ${escapeHtml(item.sheetName)}
         </button>
       </td>
-      <td class="tracker-subject-cell">${subjectHtml}</td>
-      <td>${ticketHtml}</td>
-      <td>${brokerHtml}</td>
-      <td class="cell-mono-sm">
-        M: ${masterHtml}<br>B: ${bidderHtml}
-      </td>
-      <td>${actionHtml}</td>
-      <td class="cell-sm">
-        Y: ${yardHtml}<br>L: ${lotsHtml}
-      </td>
-      <td class="notes-cell">
-        <div class="notes-preview" id="note-${idx}">${escapeHtml(noteText)}</div>
-        ${isLongNote ? `<span class="notes-toggle" data-target="note-${idx}">[+ Expand]</span>` : ''}
-      </td>
-      <td>
-        <span class="badge clickable-badge ${stdStatusBadgeClass}${statusActiveClass}" data-filter-field="status" data-filter-label="Status" data-filter-val="${escapeHtml(item.status)}" title="Click to show all requests with Status: ${escapeHtml(item.status)}">
-          ${escapeHtml(item.status)}
-        </span>
-      </td>
+      ${stdCellsHtml}
       <td>
         <div class="row-actions-group">
           <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Ticket Details &amp; Aggregated Timestamped Notes">Details</button>
@@ -1672,7 +1853,7 @@ function ensureTargetDailySheetInWorkbook(targetTabName) {
       if (templateSheet) {
         cloneTemplateStructure(templateSheet, targetSheet);
       } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
-        applyCustomHeadersSheetFormatting(targetSheet, activeSchemaConfig.columns.map(c => c.header));
+        applyCustomHeadersSheetFormatting(targetSheet, activeSchemaConfig.columns.map(c => c.excelHeader || c.header));
       } else {
         applyStandardSheetFormatting(targetSheet);
       }

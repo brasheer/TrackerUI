@@ -8,7 +8,15 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.6` (Current — `main` / `meerkat`)
+### `v1.19.7` (Current — `meerkat`)
+- **🧩 Comprehensive Full-Column Schema Manager (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
+  - Replaced the 5-dropdown partial mapper and collapsed Advanced Settings drawer with an **unlimited Full-Column Schema Manager** (`#schemaAllColumnsTableBody` inside `#schemaMapperModal`) displaying every detected column across both Standard and Custom Department trackers.
+  - Added per-column **Table** and **Editor** visibility checkboxes (with Select-All header checkboxes, column search filter, and **👁️ Show All** button), **Display Label** customization (preserving underlying Excel Row-1 headers when syncing/cloning), **Semantic Role** assignment (adding `⚡ Requested Action / Subtype` alongside Primary Subject, Status, Notes, Ticket #, and Secondary/Account), **Data Type**, **Dropdown / Validation Source**, **Input Control (`Searchable Input + Dropdown <datalist>` vs. `Strict <select>`)**, and **`📋 Copy`** split-pill toggles.
+  - Wired Standard Mode visibility, custom labels, data types, validation dropdowns, strict `<select>` mirrors, and extra Standard columns (e.g., Col K `Sent Email Subject` on 12-column templates) across both `#dockStandardFieldsGrid` and `#modalStandardFieldsGrid`, `#tableHead`/`#listBody`, and `#ticketDetailsModal`—while non-destructively preserving any column hidden from the Editor during saves.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v48'` in [`sw.js`](sw.js) and synced `?v=1.19.7` asset query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.6` (`main` / `meerkat`)
 - **⚙️ Advanced Column Mapping Settings (Per-Column Data Types, Dropdown Sources & Input Controls) (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`, `js/request-editors.js`)**:
   - Added an expandable **`⚙️ Advanced Column Settings ▾`** panel (`#btnToggleSchemaAdvanced` / `#schemaAdvancedPanel` / `#schemaAdvancedTableBody`) inside **Configure Column Mapping (`#schemaMapperModal`)** across both Standard and Custom Department schemas.
   - Supports per-column **Data Type** (`Text (Auto)`, `Uppercase Code / ID (A-Z, 0-9)`, `Number (123)`, `Currency ($)`, `Date (MM/DD/YYYY)`, `Multi-line Notes`), **Dropdown / Validation Source** (`Auto-Detect`, `None`, `Yard # / Name List`, `Master Accounts: Brokers`, `Validation Lists: Actions`, `Validation Lists: Statuses`, any discovered `validation lists` column, or a `Custom Comma-Separated List...`), **Input Control** (`Searchable Input + Dropdown <datalist>` vs. `Strict Dropdown <select>`), and **`📋 Copy`** split-pill toggles, persisted per workbook/profile in `schemaOverridesStore`.

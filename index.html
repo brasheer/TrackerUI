@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.6</title>
+  <title>TrackerUI v1.19.7</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.6">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.7">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.6 — Click to check for updates &amp; refresh app cache">v1.19.6</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.7 — Click to check for updates &amp; refresh app cache">v1.19.7</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.6</span>
+              <span class="menu-item-meta" data-app-version>v1.19.7</span>
             </button>
           </div>
         </div>
@@ -1027,39 +1027,39 @@
       </div>
       <form id="entryForm">
         <div id="modalStandardFieldsGrid" class="form-grid">
-          <div class="form-group full">
-            <label>Subject (Col A)</label>
+          <div class="form-group full" data-field-id="subject">
+            <label for="fSubject"><span class="field-lbl-main">Subject</span> <span class="field-col-tag">Col A</span></label>
             <input type="text" id="fSubject" required>
           </div>
-          <div class="form-group">
+          <div class="form-group" data-field-id="ticket">
             <div class="dock-notes-label-row">
-              <label>Ticket Number (Col B)</label>
+              <label for="fTicket"><span class="field-lbl-main">Ticket Number</span> <span class="field-col-tag">Col B</span></label>
               <button type="button" id="btnModalGrabTicket" class="btn-timestamp-chip" title="Extract bracketed [XXXX-XX-XXXX] ticket number(s) from Subject into Ticket Number">
                 🎯 Grab Ticket
               </button>
             </div>
             <input type="text" id="fTicket" placeholder="Optional metadata">
           </div>
-          <div class="form-group">
-            <label>Broker Name (Col C)</label>
+          <div class="form-group" data-field-id="broker">
+            <label for="fBroker"><span class="field-lbl-main">Broker Name</span> <span class="field-col-tag">Col C</span></label>
             <input type="text" id="fBroker" list="brokerList" placeholder="Select or type broker..." required>
             <datalist id="brokerList"></datalist>
           </div>
-          <div class="form-group">
-            <label>Master # (Col D)</label>
+          <div class="form-group" data-field-id="master">
+            <label for="fMaster"><span class="field-lbl-main">Master #</span> <span class="field-col-tag">Col D</span></label>
             <input type="text" id="fMaster" placeholder="Auto-fills from Broker (or reverse)">
           </div>
-          <div class="form-group">
-            <label>Bidder # (Col E)</label>
+          <div class="form-group" data-field-id="bidder">
+            <label for="fBidder"><span class="field-lbl-main">Bidder #</span> <span class="field-col-tag">Col E</span></label>
             <input type="text" id="fBidder">
           </div>
-          <div class="form-group">
-            <label>Requested Action (Col F)</label>
+          <div class="form-group" data-field-id="action">
+            <label for="fAction"><span class="field-lbl-main">Requested Action</span> <span class="field-col-tag">Col F</span></label>
             <input type="text" id="fAction" list="actionList" placeholder="Select or type action...">
             <datalist id="actionList"></datalist>
           </div>
-          <div class="form-group">
-            <label>Request Status (Col J)</label>
+          <div class="form-group" data-field-id="status">
+            <label for="fStatus"><span class="field-lbl-main">Request Status</span> <span class="field-col-tag">Col J</span></label>
             <select id="fStatus">
               <option value="Pending">Pending</option>
               <option value="In Progress">In Progress</option>
@@ -1071,18 +1071,18 @@
               <option value="Complete">Complete</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>Yard # (Col G)</label>
+          <div class="form-group" data-field-id="yard">
+            <label for="fYard"><span class="field-lbl-main">Yard #</span> <span class="field-col-tag">Col G</span></label>
             <input type="text" id="fYard" list="yardList" placeholder="Yard # or Name">
             <datalist id="yardList"></datalist>
           </div>
-          <div class="form-group">
-            <label>Lot Numbers (Col H)</label>
+          <div class="form-group" data-field-id="lots">
+            <label for="fLots"><span class="field-lbl-main">Lot Numbers</span> <span class="field-col-tag">Col H</span></label>
             <input type="text" id="fLots">
           </div>
-          <div class="form-group full">
+          <div class="form-group full" data-field-id="notes">
             <div class="dock-notes-label-row">
-              <label>Action Notes (Col I)</label>
+              <label for="fNotes"><span class="field-lbl-main">Action Notes</span> <span class="field-col-tag">Col I</span></label>
               <button type="button" id="btnModalInsertTimestamp" class="btn-timestamp-chip" title="Insert current date &amp; time stamp into Action Notes">
                 + Insert Timestamp
               </button>
@@ -1413,19 +1413,19 @@
     </div>
   </div>
 
-  <!-- Dynamic Column Role Mapper Modal (Multi-Department Custom Schema Engine) -->
+  <!-- Dynamic Full-Column Schema Manager Modal (Standard + Custom Department Schema Engine) -->
   <div id="schemaMapperModal" class="modal-backdrop">
-    <div class="modal modal-wide">
+    <div class="modal modal-xl schema-mapper-modal">
       <div class="modal-header">
         <div>
-          <h3>Configure Column Mapping</h3>
-          <div id="schemaMapperSubtitle" class="modal-subtitle">Inspect Row-1 headers and assign semantic roles for custom department trackers</div>
+          <h3>Configure Column Mapping &amp; Visibility</h3>
+          <div id="schemaMapperSubtitle" class="modal-subtitle">Inspect all workbook columns, choose Table/Editor visibility, rename display labels, assign roles, and configure dropdown validations</div>
         </div>
         <span id="schemaMapperModeBadge" class="badge badge-complete">Auto-Detected</span>
       </div>
       <form id="schemaMapperForm">
-        <div class="schema-mapper-grid">
-          <div class="form-group full">
+        <div class="schema-mapper-topbar">
+          <div class="form-group">
             <label for="schemaModeSelect">Tracker Schema Layout Mode</label>
             <select id="schemaModeSelect">
               <option value="auto">Auto-Detect from Row-1 Headers (Recommended)</option>
@@ -1434,59 +1434,48 @@
             </select>
           </div>
           <div class="form-group">
-            <label for="schemaPrimaryColSelect">Primary Title / Subject Column *</label>
-            <select id="schemaPrimaryColSelect"></select>
-          </div>
-          <div class="form-group">
-            <label for="schemaStatusColSelect">Status Column (Badges, Batch &amp; Rollover)</label>
-            <select id="schemaStatusColSelect"></select>
-          </div>
-          <div class="form-group">
-            <label for="schemaNotesColSelect">Notes / Timeline Column (Timestamps &amp; History)</label>
-            <select id="schemaNotesColSelect"></select>
-          </div>
-          <div class="form-group">
-            <label for="schemaTicketColSelect">Ticket # Column (Optional — Grab &amp; Merge)</label>
-            <select id="schemaTicketColSelect"></select>
-          </div>
-          <div class="form-group">
-            <label for="schemaSecondaryColSelect">Secondary Account / Subtitle Column (Optional)</label>
-            <select id="schemaSecondaryColSelect"></select>
-          </div>
-          <div class="form-group">
             <label>Immutable Primary Key (UUIDv4)</label>
             <div id="schemaTrackingColInfo" class="schema-readonly-pill">Hidden Tracking ID Column</div>
           </div>
         </div>
 
-        <div class="schema-preview-section">
-          <div class="schema-preview-header-row">
-            <div class="ttc-section-label" style="margin-bottom:0;">Detected Row-1 Workbook Columns, Validation &amp; Copy-to-Clipboard (Toggle 📋 Copy per column)</div>
-            <button type="button" id="btnToggleSchemaAdvanced" class="btn-dock-secondary btn-sm btn-schema-advanced-toggle" aria-expanded="false">
-              ⚙️ Advanced Column Settings ▾
+        <div class="schema-mapper-toolbar">
+          <div id="schemaRolesSummaryBar" class="schema-roles-summary-bar"></div>
+          <div class="schema-mapper-toolbar-actions">
+            <input type="text" id="schemaColSearchInput" class="schema-col-search-input" placeholder="Filter columns..." autocomplete="off">
+            <button type="button" id="btnSchemaShowAllCols" class="btn-dock-secondary btn-sm" title="Show all detected columns in both Table and Editor">
+              👁️ Show All
             </button>
           </div>
-          <div id="schemaDetectedColsPreview" class="schema-cols-preview" style="margin-top:0.5rem;"></div>
+        </div>
 
-          <div id="schemaAdvancedPanel" class="schema-advanced-panel" style="display:none;">
-            <div class="schema-advanced-hint">
-              Configure per-column <strong>Data Type</strong> (auto-uppercasing codes, numbers, dates, multi-line notes), <strong>Dropdown / Validation List Source</strong> (including linked <code>Yard # / Name</code> or <code>validation lists</code> columns), and <strong>Input Style</strong> across any column:
-            </div>
-            <div class="schema-advanced-table-wrap">
-              <table class="schema-advanced-table">
-                <thead>
-                  <tr>
-                    <th>Column &amp; Header</th>
-                    <th>Data Type</th>
-                    <th>Dropdown / Validation Source</th>
-                    <th>Input Control</th>
-                    <th>Inline Copy</th>
-                  </tr>
-                </thead>
-                <tbody id="schemaAdvancedTableBody"></tbody>
-              </table>
-            </div>
-          </div>
+        <div class="schema-all-cols-table-wrap">
+          <table class="schema-advanced-table schema-all-cols-table">
+            <thead>
+              <tr>
+                <th>Col</th>
+                <th class="schema-th-center">
+                  <label class="schema-th-check-label" title="Toggle all columns in Daily Table">
+                    <input type="checkbox" id="chkSchemaAllTable">
+                    <span>Table</span>
+                  </label>
+                </th>
+                <th class="schema-th-center">
+                  <label class="schema-th-check-label" title="Toggle all columns in Editor Form">
+                    <input type="checkbox" id="chkSchemaAllEditor">
+                    <span>Editor</span>
+                  </label>
+                </th>
+                <th>Display Label</th>
+                <th>Semantic Role</th>
+                <th>Data Type</th>
+                <th>Dropdown / Validation Source</th>
+                <th>Control</th>
+                <th class="schema-th-center">Copy</th>
+              </tr>
+            </thead>
+            <tbody id="schemaAllColumnsTableBody"></tbody>
+          </table>
         </div>
 
         <div class="modal-actions">
@@ -1888,7 +1877,7 @@
             <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.6</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.7</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -2007,16 +1996,16 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.6</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.7</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.6"></script>
-  <script src="js/core-ui.js?v=1.19.6"></script>
-  <script src="js/workbook-io.js?v=1.19.6"></script>
-  <script src="js/tracker-table.js?v=1.19.6"></script>
-  <script src="js/request-editors.js?v=1.19.6"></script>
-  <script src="js/scratch-sheets.js?v=1.19.6"></script>
-  <script src="js/rollover.js?v=1.19.6"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.7"></script>
+  <script src="js/core-ui.js?v=1.19.7"></script>
+  <script src="js/workbook-io.js?v=1.19.7"></script>
+  <script src="js/tracker-table.js?v=1.19.7"></script>
+  <script src="js/request-editors.js?v=1.19.7"></script>
+  <script src="js/scratch-sheets.js?v=1.19.7"></script>
+  <script src="js/rollover.js?v=1.19.7"></script>
 </body>
 </html>

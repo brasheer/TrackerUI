@@ -1021,7 +1021,7 @@ rolloverForm.addEventListener('submit', async (e) => {
         if (templateSheet) {
           cloneTemplateStructure(templateSheet, targetSheet);
         } else if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
-          applyCustomHeadersSheetFormatting(targetSheet, activeSchemaConfig.columns.map(c => c.header));
+          applyCustomHeadersSheetFormatting(targetSheet, activeSchemaConfig.columns.map(c => c.excelHeader || c.header));
         } else {
           applyStandardSheetFormatting(targetSheet);
         }
