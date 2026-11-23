@@ -3754,8 +3754,27 @@ button.ws-app-tab.active:hover {
   font-weight: 600;
 }
 
+.scratch-grid-table tbody tr:first-child .scratch-cell.header-like-cell.unbold-cell:not(.has-custom-fill) {
+  background: var(--surface);
+  font-weight: 400;
+}
+
 .scratch-cell.bold-cell {
   font-weight: 700;
+}
+
+.scratch-cell.unbold-cell {
+  font-weight: 400 !important;
+}
+
+.scratch-cell.italic-cell {
+  font-style: italic;
+}
+
+.scratch-cell.underline-cell,
+.scratch-cell.underline-cell .scratch-cell-text {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* Excel Default Cell Fill Color Rendering */
@@ -3956,6 +3975,62 @@ button.ws-app-tab.active:hover {
 
 .scratch-format-select:hover {
   border-color: var(--accent);
+}
+
+/* Text Formatting & Alignment Toolbar Controls */
+.scratch-text-format-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.16rem;
+  padding: 0.14rem 0.22rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.scratch-fmt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.68rem;
+  height: 1.56rem;
+  padding: 0.1rem 0.34rem;
+  font-size: 0.78rem;
+  line-height: 1;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0.28rem;
+  color: var(--text);
+}
+
+.scratch-fmt-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.scratch-fmt-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.scratch-fmt-btn .ui-icon {
+  width: 0.84rem;
+  height: 0.84rem;
+}
+
+.scratch-fmt-u {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+
+.scratch-fmt-sep {
+  display: inline-block;
+  width: 1px;
+  height: 1.05rem;
+  margin: 0 0.12rem;
+  background: var(--border);
 }
 
 .scratch-inline-editor {
@@ -4217,6 +4292,47 @@ button.ws-app-tab.active:hover {
 
 .scratch-ctx-swatches-section {
   padding: 0.2rem 0.45rem 0.28rem;
+}
+
+.scratch-ctx-format-section {
+  padding: 0.2rem 0.45rem 0.28rem;
+}
+
+.scratch-ctx-format-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.24rem;
+}
+
+.scratch-ctx-fmt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.6rem;
+  padding: 0.1rem;
+  font-size: 0.76rem;
+  line-height: 1;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.28rem;
+  cursor: pointer;
+}
+
+.scratch-ctx-fmt-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.scratch-ctx-fmt-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.scratch-ctx-fmt-btn .ui-icon {
+  width: 0.82rem;
+  height: 0.82rem;
 }
 
 .scratch-ctx-swatches-lbl {
@@ -5301,6 +5417,16 @@ button.manual-toc-item.active:hover {
   .scratch-toolbar {
     padding: 0.34rem 1rem;
     gap: 0.45rem;
+  }
+
+  .scratch-text-format-group {
+    padding: 0.1rem 0.16rem;
+  }
+
+  .scratch-fmt-btn {
+    min-width: 1.52rem;
+    height: 1.44rem;
+    padding: 0.08rem 0.28rem;
   }
 
   .scratch-formula-bar {

@@ -6,28 +6,11 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ## 1. Planned Enhancements & Active Backlog (📋 Planned)
 
-### 🧱 Modular Scratch Sheet & Spreadsheet Engine Split (`js/spreadsheet-engine.js` + `js/scratch-sheets.js`)
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Split `js/scratch-sheets.js` (~7,100 lines) into two focused zero-build modules loaded sequentially in `index.html`:
-    1. **`js/spreadsheet-engine.js`**: Pure spreadsheet & OpenXML engine (Excel theme/tint & ARGB color math, `numFmt` & cell data type inference, `applyRawEditToExcelCell`, formula tokenizer/AST parser, `recalculateScratchWorksheetFormulas` dynamic array spill evaluator, fill-handle series extrapolation, and RFC-4180 TSV / Excel HTML `<table>` clipboard matrix parsers & serializers).
-    2. **`js/scratch-sheets.js`**: Workspace tabs bar (`#workspaceTabsBar`), Scratch Sheet grid DOM rendering, pointer selection & auto-scroll loop, inline cell editor, 50-step Undo/Redo & per-profile runtime snapshot managers, context menu, Data-to-Columns wizard (`#textToColumnsModal`), and Auto-Filter Side Lists builder (`#scratchAutoFilterModal`).
-  - Pass explicit context objects (`{ ws, wb, archiveState, spillMaps }`) into the spreadsheet engine helpers so formula evaluation, cell formatting (`bold`/`italic`/`underline`/alignment), and clipboard matrix transformations operate without direct DOM globals.
-
----
-
 ### 🔍 1-Click Copyable UUIDv4 Tracking IDs
 - **Status**: 📋 Planned
 - **Proposal**:
   - Make the UUIDv4 Tracking ID chips in the table (`🔍 8f4a92c1...`) and badges in the Bottom Editor Dock (`#dockKeyBadge`), Edit Modal (`#modalKeyDisplay`), and Ticket Details modal 1-click copy-able.
   - Clicking the chip or an adjacent copy icon will copy the full 36-character UUIDv4 to the system clipboard (`navigator.clipboard.writeText`) and trigger a quick feedback toast (e.g., `📋 Copied Tracking ID to clipboard: 8f4a92c1-...`).
-
-### ✍️ Simple Text Editing & Cell Formatting Controls for Scratch Sheets
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Add lightweight text formatting buttons and standard keyboard shortcuts directly in the Scratch Sheet toolbar and right-click context menu: **Bold (`Ctrl+B`)**, **Italic (`Ctrl+I`)**, **Underline (`Ctrl+U`)**, **Text Alignment (`Left`, `Center`, `Right`)**, and a **1-click "Clear Text Formatting / Unbold"** toggle.
-  - Because TrackerUI automatically styles populated Row 1 cells as bold column headers, a manual Bold/Unbold and text-formatting toggle lets agents unbold Row 1 when Row 1 contains normal list data, or highlight totals, subheaders, and email notes without needing to open Desktop Excel.
-  - Persist `cell.font` (`bold`, `italic`, `underline`) and `cell.alignment` cleanly through the existing Scratch Sheet undo/redo stack, copy/paste HTML matrix, and `.xlsx` dual-write save pipeline.
 
 ---
 
@@ -63,11 +46,9 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
 |---|---|---|---|
-| **Modular Spreadsheet Engine Split (`js/spreadsheet-engine.js`)** | *Scratch Sheets / Architecture* | 📋 Planned | Split `js/scratch-sheets.js` into a pure formula/clipboard/formatting engine (`js/spreadsheet-engine.js`) and UI grid controller (`js/scratch-sheets.js`). |
-| **Rolling Daily & Version-Upgrade Backups (`_Backups/`)** | *Workbook I/O / Safety* | 📋 Planned | Capped 5–7 day `.xlsx` ring buffer + `SHA-256` dedup + automatic pre-version-upgrade & pre-rollover/delete safety snapshots with an in-app **Restore from Backup** picker. |
+| **Rolling Daily, Pre-Action & Version-Upgrade Backups (`_Backups/`)** | *Workbook I/O / Safety* | 📋 Planned | Capped 5–7 day `.xlsx` ring buffer + `SHA-256` dedup + automatic pre-version-upgrade & pre-rollover/delete safety snapshots with an in-app **Restore from Backup** picker. |
 | **Directory Paths & Startup `.json` Auto-Check** | *Config / Onboarding* | 📋 Planned | Store per-profile folder names/subpaths in `.json` config and auto-check on startup (`trackerui-config.json`), resolving subfolders from a shared root handle or prompting 1-click folder connection for coworkers. |
 | **Resizable Tracker Table Columns** | *Daily Tracker Table* | 📋 Planned | Draggable column header resize handles in `#tableHead` across Standard & Custom Department trackers, persisted per profile/schema in `localStorage` and `.json` config backups. |
-| **Simple Text Editing & Formatting (`Bold`/`Italic`/`Align`)** | *Scratch Sheets* | 📋 Planned | Toolbar toggles & shortcuts (`Ctrl+B` Bold/Unbold toggle to override auto-bolded Row 1 headers, `Ctrl+I`, `Ctrl+U`, Left/Center/Right align, and Clear Formatting) persisted to `.xlsx` `cell.font` / `cell.alignment` with full Undo/Redo support. |
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
 | **Charts & Visual Analytics Panel (Phase 1 & 2)** | *Daily Tracker / Scratch Sheets / Supervisor Rollup* | 📋 Planned | Native SVG (zero-dependency) or offline-cached Chart.js visual cards for Daily Request Volume/Status breakdown, Title Tracking Red/Yellow/Green bucket progress, and Multi-Workbook Supervisor Category trends, with optional image/HTML export. |
@@ -75,7 +56,19 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.7`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.9`)
+
+### ✍️ Simple Text Editing & Cell Formatting Controls for Scratch Sheets (`v1.19.9`)
+- **Status**: ✅ Implemented in `v1.19.9`
+- **Delivered**:
+  - Added **Bold (`Ctrl+B`)**, **Italic (`Ctrl+I`)**, **Underline (`Ctrl+U`)**, **Text Alignment (`Left`, `Center`, `Right`)**, and **Clear Text Formatting / Unbold** controls to both the Scratch Sheet toolbar (`#scratchTextFormatGroup`) and `#scratchContextMenu` (`.scratch-ctx-format-section`).
+  - Persists `cell.font` (`bold`, `italic`, `underline`) and `cell.alignment.horizontal` through 50-step Undo/Redo, HTML clipboard copy/paste (`serializeScratchSelectionToExcelHtml` / `parseClipboardHtmlTableToMatrix`), and `.xlsx` dual-write saves, including an explicit Row-1 Bold/Unbold override (`trackerui_scratch_row1_unbold_v1` / `.unbold-cell`).
+
+### 🧱 Modular Scratch Sheet & Spreadsheet Engine Split (`v1.19.8`)
+- **Status**: ✅ Implemented in `v1.19.8`
+- **Delivered**:
+  - Extracted the pure OpenXML styling, cell type/date parsing, `applyRawEditToExcelCell()`, `extractScratchCellInfo()`, `measureScratchWorksheetBounds()`, formula AST tokenizer & dynamic array spill evaluator (`recalculateScratchWorksheetFormulas()`), fill-handle series extrapolation, RFC-4180 TSV / Excel HTML `<table>` clipboard matrix parsers & serializers, and delimited line tokenizer into [`js/spreadsheet-engine.js`](js/spreadsheet-engine.js), loaded right before [`js/scratch-sheets.js`](js/scratch-sheets.js).
+  - Kept UI rendering, pointer range selection, inline editing, Undo/Redo, per-profile runtime snapshots, fill palette UI, context menu, and modals in [`js/scratch-sheets.js`](js/scratch-sheets.js), while extending style snapshots with `alignment`, `italic`, `underline`, and `buildStyleSnapshotForTextFormatting()` in preparation for Scratch Sheet formatting controls.
 
 ### 🧩 Comprehensive Full-Column Schema Mapping & Custom Field Validation (`v1.19.7`)
 - **Status**: ✅ Implemented in `v1.19.7`

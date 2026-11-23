@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.7</title>
+  <title>TrackerUI v1.19.9</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.7">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.9">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.7 — Click to check for updates &amp; refresh app cache">v1.19.7</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.9 — Click to check for updates &amp; refresh app cache">v1.19.9</span>
     </div>
 
     <div class="header-actions">
@@ -420,7 +420,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.7</span>
+              <span class="menu-item-meta" data-app-version>v1.19.9</span>
             </button>
           </div>
         </div>
@@ -824,6 +824,54 @@
           </select>
         </div>
 
+        <!-- Text Style, Alignment & Clear Formatting Controls -->
+        <div id="scratchTextFormatGroup" class="scratch-text-format-group" role="group" aria-label="Text formatting and alignment">
+          <button type="button" id="btnScratchFormatBold" class="btn-sm scratch-fmt-btn" aria-pressed="false" title="Bold / Unbold selected cell(s) (Ctrl+B) • Overrides auto-bolded Row 1 headers">
+            <strong>B</strong>
+          </button>
+          <button type="button" id="btnScratchFormatItalic" class="btn-sm scratch-fmt-btn" aria-pressed="false" title="Italicize selected cell(s) (Ctrl+I)">
+            <em>I</em>
+          </button>
+          <button type="button" id="btnScratchFormatUnderline" class="btn-sm scratch-fmt-btn" aria-pressed="false" title="Underline selected cell(s) (Ctrl+U)">
+            <span class="scratch-fmt-u">U</span>
+          </button>
+          <span class="scratch-fmt-sep" aria-hidden="true"></span>
+          <button type="button" id="btnScratchAlignLeft" class="btn-sm scratch-fmt-btn" data-align="left" aria-pressed="false" aria-label="Align Left" title="Align Left">
+            <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <line x1="3" y1="5" x2="17" y2="5"></line>
+              <line x1="3" y1="9" x2="12.5" y2="9"></line>
+              <line x1="3" y1="13" x2="17" y2="13"></line>
+              <line x1="3" y1="17" x2="11" y2="17"></line>
+            </svg>
+          </button>
+          <button type="button" id="btnScratchAlignCenter" class="btn-sm scratch-fmt-btn" data-align="center" aria-pressed="false" aria-label="Align Center" title="Align Center">
+            <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <line x1="3" y1="5" x2="17" y2="5"></line>
+              <line x1="5.2" y1="9" x2="14.8" y2="9"></line>
+              <line x1="3" y1="13" x2="17" y2="13"></line>
+              <line x1="6" y1="17" x2="14" y2="17"></line>
+            </svg>
+          </button>
+          <button type="button" id="btnScratchAlignRight" class="btn-sm scratch-fmt-btn" data-align="right" aria-pressed="false" aria-label="Align Right" title="Align Right">
+            <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <line x1="3" y1="5" x2="17" y2="5"></line>
+              <line x1="7.5" y1="9" x2="17" y2="9"></line>
+              <line x1="3" y1="13" x2="17" y2="13"></line>
+              <line x1="9" y1="17" x2="17" y2="17"></line>
+            </svg>
+          </button>
+          <span class="scratch-fmt-sep" aria-hidden="true"></span>
+          <button type="button" id="btnScratchClearTextFormat" class="btn-sm scratch-fmt-btn" aria-label="Clear text formatting and unbold" title="Clear Text Formatting / Unbold selected cell(s) (keeps Fill Color &amp; Cell Type)">
+            <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 4.5h9"></path>
+              <path d="M9.5 4.5 7.2 15.5"></path>
+              <line x1="3.5" y1="16" x2="16.5" y2="4"></line>
+              <path d="m12.5 11.5 4 4"></path>
+              <path d="m16.5 11.5-4 4"></path>
+            </svg>
+          </button>
+        </div>
+
         <!-- Excel Default Cell Fill Color Split Picker -->
         <div id="scratchFillMenuWrap" class="scratch-fill-wrap">
           <div class="scratch-fill-split" role="group" aria-label="Cell fill color">
@@ -970,6 +1018,36 @@
       </span>
     </button>
     <div class="scratch-ctx-divider" role="separator"></div>
+    <div class="scratch-ctx-format-section">
+      <div class="scratch-ctx-swatches-lbl">Text Formatting &amp; Alignment</div>
+      <div class="scratch-ctx-format-row" role="group" aria-label="Context menu text formatting">
+        <button type="button" class="scratch-ctx-fmt-btn" data-ctx-action="toggle-bold" title="Bold / Unbold (Ctrl+B)"><strong>B</strong></button>
+        <button type="button" class="scratch-ctx-fmt-btn" data-ctx-action="toggle-italic" title="Italic (Ctrl+I)"><em>I</em></button>
+        <button type="button" class="scratch-ctx-fmt-btn" data-ctx-action="toggle-underline" title="Underline (Ctrl+U)"><span class="scratch-fmt-u">U</span></button>
+        <button type="button" class="scratch-ctx-fmt-btn" data-ctx-action="align-left" title="Align Left" aria-label="Align Left">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+            <line x1="3" y1="5" x2="17" y2="5"></line>
+            <line x1="3" y1="9" x2="12.5" y2="9"></line>
+            <line x1="3" y1="13" x2="17" y2="13"></line>
+          </svg>
+        </button>
+        <button type="button" class="scratch-ctx-fmt-btn" data-ctx-action="align-center" title="Align Center" aria-label="Align Center">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+            <line x1="3" y1="5" x2="17" y2="5"></line>
+            <line x1="5.2" y1="9" x2="14.8" y2="9"></line>
+            <line x1="3" y1="13" x2="17" y2="13"></line>
+          </svg>
+        </button>
+        <button type="button" class="scratch-ctx-fmt-btn" data-ctx-action="align-right" title="Align Right" aria-label="Align Right">
+          <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+            <line x1="3" y1="5" x2="17" y2="5"></line>
+            <line x1="7.5" y1="9" x2="17" y2="9"></line>
+            <line x1="3" y1="13" x2="17" y2="13"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="scratch-ctx-divider" role="separator"></div>
     <div class="scratch-ctx-swatches-section">
       <div class="scratch-ctx-swatches-lbl">Fill Color (Excel Defaults)</div>
       <div id="scratchCtxQuickSwatches" class="scratch-ctx-swatches-row"></div>
@@ -1004,6 +1082,18 @@
         <span>Clear Contents</span>
       </span>
       <kbd class="scratch-ctx-Shortcut">Del</kbd>
+    </button>
+    <button type="button" class="scratch-ctx-item" data-ctx-action="clear-text-format" role="menuitem">
+      <span class="scratch-ctx-item-left">
+        <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 4.5h9"></path>
+          <path d="M9.5 4.5 7.2 15.5"></path>
+          <line x1="3.5" y1="16" x2="16.5" y2="4"></line>
+          <path d="m12.5 11.5 4 4"></path>
+          <path d="m16.5 11.5-4 4"></path>
+        </svg>
+        <span>Clear Text Formatting / Unbold</span>
+      </span>
     </button>
     <button type="button" class="scratch-ctx-item" data-ctx-action="clear-fill" role="menuitem">
       <span class="scratch-ctx-item-left">
@@ -1877,7 +1967,7 @@
             <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.7</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.9</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -1996,16 +2086,17 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.7</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.9</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.7"></script>
-  <script src="js/core-ui.js?v=1.19.7"></script>
-  <script src="js/workbook-io.js?v=1.19.7"></script>
-  <script src="js/tracker-table.js?v=1.19.7"></script>
-  <script src="js/request-editors.js?v=1.19.7"></script>
-  <script src="js/scratch-sheets.js?v=1.19.7"></script>
-  <script src="js/rollover.js?v=1.19.7"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.9"></script>
+  <script src="js/core-ui.js?v=1.19.9"></script>
+  <script src="js/workbook-io.js?v=1.19.9"></script>
+  <script src="js/tracker-table.js?v=1.19.9"></script>
+  <script src="js/request-editors.js?v=1.19.9"></script>
+  <script src="js/spreadsheet-engine.js?v=1.19.9"></script>
+  <script src="js/scratch-sheets.js?v=1.19.9"></script>
+  <script src="js/rollover.js?v=1.19.9"></script>
 </body>
 </html>

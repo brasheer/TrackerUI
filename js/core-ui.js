@@ -1032,6 +1032,14 @@ const btnScratchNoFill = document.getElementById('btnScratchNoFill');
 const scratchFillPastelGrid = document.getElementById('scratchFillPastelGrid');
 const scratchFillStandardGrid = document.getElementById('scratchFillStandardGrid');
 const scratchCellFormatSelect = document.getElementById('scratchCellFormatSelect');
+const scratchTextFormatGroup = document.getElementById('scratchTextFormatGroup');
+const btnScratchFormatBold = document.getElementById('btnScratchFormatBold');
+const btnScratchFormatItalic = document.getElementById('btnScratchFormatItalic');
+const btnScratchFormatUnderline = document.getElementById('btnScratchFormatUnderline');
+const btnScratchAlignLeft = document.getElementById('btnScratchAlignLeft');
+const btnScratchAlignCenter = document.getElementById('btnScratchAlignCenter');
+const btnScratchAlignRight = document.getElementById('btnScratchAlignRight');
+const btnScratchClearTextFormat = document.getElementById('btnScratchClearTextFormat');
 const btnScratchTextToColumns = document.getElementById('btnScratchTextToColumns');
 const btnScratchAutoFilter = document.getElementById('btnScratchAutoFilter');
 const btnScratchUndo = document.getElementById('btnScratchUndo');
@@ -1816,7 +1824,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.7';
+const APP_VERSION = 'v1.19.9';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;

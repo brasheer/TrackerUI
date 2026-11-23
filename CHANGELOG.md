@@ -8,7 +8,23 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.7` (Current — `meerkat`)
+### `v1.19.9` (Current — `main` / `meerkat`)
+- **✍️ Simple Text Editing & Cell Formatting Controls for Scratch Sheets (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/spreadsheet-engine.js`, `js/scratch-sheets.js`, `sw.js`)**:
+  - Added compact text formatting & alignment controls (`#scratchTextFormatGroup`) directly in the Scratch Sheet toolbar and quick-action formatting row (`.scratch-ctx-format-section`) inside `#scratchContextMenu`: **Bold (`Ctrl+B`)**, **Italic (`Ctrl+I`)**, **Underline (`Ctrl+U`)**, **Text Alignment (`Left`, `Center`, `Right`)**, and **Clear Text Formatting / Unbold** (`clear-text-format`, preserving cell fill color & data type).
+  - Supports explicit **Row 1 Bold / Unbold override** (`.unbold-cell`, persisted per workbook/sheet in `trackerui_scratch_row1_unbold_v1` and stored as `font.bold = false` in ExcelJS) so agents can unbold auto-styled Row 1 headers when Row 1 holds normal list data.
+  - Extended [`js/spreadsheet-engine.js`](js/spreadsheet-engine.js) (`extractScratchCellVisualStyle()`, `buildStyleSnapshotForTextFormatting()`, `applyVisualStyleToScratchTd()`, `serializeScratchSelectionToExcelHtml()`, `resolveColorStyleSnapshotFromProps()`, and `parseClipboardHtmlTableToMatrix()`) and [`js/scratch-sheets.js`](js/scratch-sheets.js) (`syncScratchTextFormattingUI()`, `applyScratchTextFormattingToSelection()`, live inline editor shortcuts/styling, 50-step Undo/Redo, and `.xlsx` dual-write save).
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v50'` in [`sw.js`](sw.js) and synced `?v=1.19.9` query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.8` (`main` / `meerkat`)
+- **🧱 Modular Scratch Sheet & Spreadsheet Engine Split (`js/spreadsheet-engine.js`, `js/scratch-sheets.js`, `index.html`, `sw.js`, `AGENTS.md`)**:
+  - Split [`js/scratch-sheets.js`](js/scratch-sheets.js) (~7,150 lines) into two focused zero-build modules loaded sequentially without bundlers:
+    - **[`js/spreadsheet-engine.js`](js/spreadsheet-engine.js)** (~2,470 lines): Pure OpenXML & spreadsheet engine containing `EXCEL_DEFAULT_FILL_PALETTE` / `OFFICE_THEME_BASE_HEX`, OpenXML tint & ARGB color math, style snapshot helpers (now capturing and restoring `alignment` alongside `italic`/`underline` visual styles and adding `buildStyleSnapshotForTextFormatting()`), `SCRATCH_FORMAT_DEFS` & `applyRawEditToExcelCell()`, `extractScratchCellInfo()`, `measureScratchWorksheetBounds()`, formula tokenizer/AST parser, `recalculateScratchWorksheetFormulas()` dynamic array spill evaluator (supporting explicit context overrides), fill-handle series extrapolation, RFC-4180 TSV / Excel HTML `<table>` clipboard matrix parsers & serializers, and delimited line tokenization (`splitScratchLineByDelimiters()`).
+    - **[`js/scratch-sheets.js`](js/scratch-sheets.js)** (~4,720 lines): Workspace tabs bar (`#workspaceTabsBar` & `#trackerProfilesBar`), Scratch Sheet grid DOM rendering, pointer selection & auto-scroll loop, inline cell editor, 50-step Undo/Redo & per-profile runtime snapshot managers (`captureScratchRuntimeSnapshot()` / `restoreScratchRuntimeSnapshot()`), context menu, Data-to-Columns wizard (`#textToColumnsModal`), and Auto-Filter Side Lists builder (`#scratchAutoFilterModal`).
+- **PWA Cache Bump**:
+  - Added `./js/spreadsheet-engine.js` to `ASSETS_TO_CACHE`, incremented `CACHE_NAME` to `'tracker-ui-v49'` in [`sw.js`](sw.js), and synced `?v=1.19.8` query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.7` (`main` / `meerkat`)
 - **🧩 Comprehensive Full-Column Schema Manager (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/workbook-io.js`, `js/tracker-table.js`, `js/request-editors.js`, `js/rollover.js`)**:
   - Replaced the 5-dropdown partial mapper and collapsed Advanced Settings drawer with an **unlimited Full-Column Schema Manager** (`#schemaAllColumnsTableBody` inside `#schemaMapperModal`) displaying every detected column across both Standard and Custom Department trackers.
   - Added per-column **Table** and **Editor** visibility checkboxes (with Select-All header checkboxes, column search filter, and **👁️ Show All** button), **Display Label** customization (preserving underlying Excel Row-1 headers when syncing/cloning), **Semantic Role** assignment (adding `⚡ Requested Action / Subtype` alongside Primary Subject, Status, Notes, Ticket #, and Secondary/Account), **Data Type**, **Dropdown / Validation Source**, **Input Control (`Searchable Input + Dropdown <datalist>` vs. `Strict <select>`)**, and **`📋 Copy`** split-pill toggles.

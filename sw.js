@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tracker-ui-v48';
+const CACHE_NAME = 'tracker-ui-v50';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS_TO_CACHE = [
   './js/workbook-io.js',
   './js/tracker-table.js',
   './js/request-editors.js',
+  './js/spreadsheet-engine.js',
   './js/scratch-sheets.js',
   './js/rollover.js',
   './manifest.json',
