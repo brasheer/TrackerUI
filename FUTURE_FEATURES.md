@@ -6,6 +6,57 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ## 1. Planned Enhancements & Active Backlog (📋 Planned)
 
+### 🛡️ Queue #1 — Rolling Daily, Pre-Action & Version-Upgrade Workbook Backups (`_Backups/`)
+- **Status**: 📋 Planned *(Queued Next)*
+- **Proposal**:
+  - Maintain a bounded rolling backup ring buffer inside a configurable **Backups Directory** (defaulting to a `_Backups/` subfolder of the Agent Folder, or persisted in `IndexedDB` + `.json` config via `backupsDirName` / `backupsSubPath`; excluded from normal workbook scanning) so storage never balloons:
+    - **1 Daily Snapshot:** Capture one clean `.xlsx` snapshot per workbook on the first load/save of each calendar day (using `SHA-256` content hashing to skip unchanged copies) and prune anything older than the last **5–7 days**.
+    - **App-Version-Upgrade Guard:** Automatically capture a safety snapshot before the first write after an `APP_VERSION` update (e.g., `_pre-v1.19.x.xlsx`) to guarantee instant recovery if a TrackerUI update ever introduces a workbook/OpenXML regression.
+    - **Pre-Destructive-Action Slots:** Keep a 2–3 slot ring buffer (`_pre-rollover`, `_pre-delete`) before Smart Rollover, Batch Delete, or Day Tab deletion.
+    - **In-App Restore UI:** Add **`Restore Workbook from Backup...`** inside **`⚙️ Tools & Setup ▾`** listing available snapshots with timestamps and file sizes for 1-click restoration.
+
+---
+
+### 🆔 Queue #2 — Agent Identity (`Agent Name` + `UUIDv4`) & Hidden `TrackerConfig` Sheet
+- **Status**: 📋 Planned *(Queued Next — Promoted from Parked)*
+- **Proposal**:
+  - **Agent Profile Identity in TrackerUI**: Add an Agent Identity section inside **`⚙️ Tools & Setup ▾`** (or Workspace Settings) where the user can enter/update their **Agent Name** and automatically generate (or view/copy) a persistent **Agent UUIDv4** (`crypto.randomUUID()`), persisted in browser storage and included in `.json` config exports.
+  - **Hidden `TrackerConfig` Workbook Sheet**: Create and maintain a hidden (`ws.state = 'hidden'` / `'veryHidden'`) `TrackerConfig` worksheet inside each tracker `.xlsx` workbook (automatically excluded from Daily Tracker tabs, Scratch Sheet tabs, Rollover, and deletion) storing structured key-value rows:
+    - `agentName` & `agentUuid` (immutable owner identity for the workbook)
+    - Associated workbook-level settings (e.g., `profileName`, `schemaVersion` / `appVersion`, active column mapping overrides, custom form layout JSON, and backup/mirror preferences) so critical tracker settings travel directly with the `.xlsx` file even across devices or browsers.
+  - **Auto-Sync on Load/Save**: When opening a workbook with an existing `TrackerConfig` tab, read its metadata safely without overwriting local unsaved edits, and sync updated identity/workbook settings back to `TrackerConfig` on save.
+
+---
+
+### 📂 Queue #3 — Team Root Directory Auto-Scaffolding & Startup `.json` Config
+- **Status**: 📋 Planned *(Queued Next)*
+- **Proposal**:
+  - **1-Click Team Root Auto-Scaffolding (OneDrive → SharePoint Portable)**: Once a user grants `showDirectoryPicker({ mode: 'readwrite' })` on a single synced **Team Root Folder** (OneDrive or a locally synced SharePoint Document Library), TrackerUI automatically creates the canonical folder hierarchy via `getDirectoryHandle(name, { create: true })` so migrating storage locations requires zero manual folder setup:
+    - `_Config/` (team presets, schema contract, startup `trackerui-config.json`)
+    - `_Templates/` (master monthly `.xlsx` templates)
+    - `_ViewOnly_JSON/` (fast per-agent JSON mirrors: `mirror_<agentUuid>.json`)
+    - `_SharedQueue/` (conflict-free per-ticket queue & claim files)
+    - `Agents/<AgentName>/` (primary working `.xlsx` with hidden `TrackerConfig`, `_Backups/`, and `_State/`)
+  - **Workspace `.json` Config & Startup Auto-Check**: Extend `Export Workspace Config (.json)` / `Import Workspace Config (.json)` to store **Agent Name**, **Agent UUIDv4**, and per-profile folder names/relative subpaths (`agentSubPath`, `supervisorSubPath`, `templatesSubPath`, `backupsSubPath`, `lastWorkbookName`), with an automatic startup check (`_Config/trackerui-config.json`) that resolves subfolders from the granted Team Root handle or displays a guided 1-click **"Connect Expected Folder"** prompt.
+
+---
+
+### 💾 Queue #4 — JSON View-Only Mirrors, Shared Request Queue & NoSQL Chrome-Wipe Recovery (Separate Aggregator Repo)
+- **Status**: 📋 Planned *(Queued After Queues #1–#3)*
+- **Proposal**:
+  - **Per-Agent `.json` View-Only Mirrors (`_ViewOnly_JSON/mirror_<agentUuid>.json`)**:
+    - Replace legacy `(VIEW ONLY).xlsx` mirror writes with fast (~2–5ms), lock-free per-agent `.json` mirrors containing normalized rows, `agentUuid`, `agentName`, `schemaVersion`, `appVersion`, `lastAccessed`, `carryCount`, and active schema metadata.
+    - Keep `(VIEW ONLY).xlsx` behind an optional **"Legacy Excel Mirror"** toggle during migration so supervisors have zero downtime while the standalone Aggregator is built.
+  - **Conflict-Free Shared Request Queue (`_SharedQueue/`)**:
+    - Avoid multi-writer OneDrive/SharePoint sync collisions by using a file-per-record NoSQL layout: `_SharedQueue/items/<trackingUuid>.json` for shared/queued tickets and `_SharedQueue/claims/<trackingUuid>__<agentUuid>.json` for agent claims (resolved deterministically by earliest `claimedAt` + `agentUuid` tiebreaker if two agents claim inside the same sync window).
+  - **Private Browser State NoSQL JSON Export/Restore (`_State/state_<agentUuid>.json`)**:
+    - Full document-style JSON snapshot of `IndexedDB` metadata + `localStorage` state (agent identity, tracker profiles, column mappings, form layouts, action category overrides, row last-accessed timestamps, Row-1 unbold preferences, open scratch tabs, UI theme/font scale, and folder subpath descriptors) to recover cleanly after a Chrome site-data or profile wipe.
+  - **Separate Aggregator & DB Manager Project + Shared `CONTRACT.md`**:
+    - Build the **Supervisor Aggregator & DB Manager** in its own separate project and Git repository to isolate reporting/analytics changes from the production agent client.
+    - Maintain a concise, versioned **`CONTRACT.md`** (defining canonical folder paths, `schemaVersion` payloads like `trackerui.mirror.v1` / `trackerui.queue.v1` / `trackerui.state.v1`, read/write ownership boundaries, and a brief contract-change log) so both projects stay mutually aware without needing to read each other's codebases.
+
+---
+
 ### 🔍 1-Click Copyable UUIDv4 Tracking IDs
 - **Status**: 📋 Planned
 - **Proposal**:
@@ -22,32 +73,13 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-### 📂 Directory Paths & Startup Auto-Check in Workspace `.json` Config
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Extend `Export Workspace Config (.json)` / `Import Workspace Config (.json)` to store per-profile directory metadata (`agentDirName`, `supervisorDirName`, `templatesDirName`, `backupsDirName`, optional shared-root relative subpaths, and `lastWorkbookName`).
-  - Add an **auto-check on startup** (e.g., checking a hosted/companion `trackerui-config.json` or saved team preset) so coworkers automatically receive pre-configured department tabs, column mappings, form layouts, and expected folder targets without manual setup.
-  - **Browser Security & Seamless Onboarding Design:** Because Chrome's File System Access API cannot bind raw OS path strings without a user-granted `FileSystemDirectoryHandle`:
-    - If coworkers share a common parent OneDrive/team root folder, picking that single root folder **once** can automatically resolve configured `agentSubPath` / `supervisorSubPath` / `templatesSubPath` / `backupsSubPath` handles via `getDirectoryHandle(...)`.
-    - For standalone folders, display a guided 1-click **"Connect Expected Folder: `<FolderName>`"** prompt on startup until the handle is granted and persisted in `IndexedDB`.
-
----
-
-### 🛡️ Rolling Daily, Pre-Action & Version-Upgrade Workbook Backups (`_Backups/`)
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Maintain a bounded rolling backup ring buffer inside a configurable **Backups Directory** (defaulting to a `_Backups/` subfolder of the Agent Folder, or persisted in `IndexedDB` + `.json` config via `backupsDirName` / `backupsSubPath`; excluded from normal workbook scanning) so storage never balloons:
-    - **1 Daily Snapshot:** Capture one clean `.xlsx` snapshot per workbook on the first load/save of each calendar day (using `SHA-256` content hashing to skip unchanged copies) and prune anything older than the last **5–7 days**.
-    - **App-Version-Upgrade Guard:** Automatically capture a safety snapshot before the first write after an `APP_VERSION` update (e.g., `_pre-v1.19.x.xlsx`) to guarantee instant recovery if a TrackerUI update ever introduces a workbook/OpenXML regression.
-    - **Pre-Destructive-Action Slots:** Keep a 2–3 slot ring buffer (`_pre-rollover`, `_pre-delete`) before Smart Rollover, Batch Delete, or Day Tab deletion.
-    - **In-App Restore UI:** Add **`Restore Workbook from Backup...`** inside **`⚙️ Tools & Setup ▾`** listing available snapshots with timestamps and file sizes for 1-click restoration.
-
----
-
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
 |---|---|---|---|
-| **Rolling Daily, Pre-Action & Version-Upgrade Backups (`_Backups/`)** | *Workbook I/O / Safety* | 📋 Planned | Capped 5–7 day `.xlsx` ring buffer + `SHA-256` dedup + automatic pre-version-upgrade & pre-rollover/delete safety snapshots with an in-app **Restore from Backup** picker. |
-| **Directory Paths & Startup `.json` Auto-Check** | *Config / Onboarding* | 📋 Planned | Store per-profile folder names/subpaths in `.json` config and auto-check on startup (`trackerui-config.json`), resolving subfolders from a shared root handle or prompting 1-click folder connection for coworkers. |
+| **1. Rolling Daily, Pre-Action & Version-Upgrade Backups (`_Backups/`)** | *Workbook I/O / Safety* | 📋 Planned *(Queued #1)* | Capped 5–7 day `.xlsx` ring buffer + `SHA-256` dedup + automatic pre-version-upgrade & pre-rollover/delete safety snapshots with an in-app **Restore from Backup** picker. |
+| **2. Agent Identity (`Agent Name` + `UUIDv4`) & Hidden `TrackerConfig` Sheet** | *Identity / Workbook I/O* | 📋 Planned *(Queued #2)* | Enter Agent Name & generate persistent `UUIDv4` in TrackerUI; persist identity & workbook-level settings in a hidden `TrackerConfig` Excel sheet so settings travel with the workbook. |
+| **3. Team Root Auto-Scaffolding & Startup `.json` Config** | *Config / Onboarding* | 📋 Planned *(Queued #3)* | Auto-create canonical OneDrive/SharePoint folder tree from a single Team Root handle (`{ create: true }`), store agent identity + subpaths in `.json`, and auto-check `_Config/trackerui-config.json` on startup. |
+| **4. JSON Mirrors, Shared Queue, Wipe Recovery & Separate Aggregator Repo** | *Sync / Persistence / Multi-Repo* | 📋 Planned *(Queued #4)* | Lock-free per-agent `.json` mirrors (`_ViewOnly_JSON/`), conflict-free per-ticket `_SharedQueue/`, Chrome-wipe `IndexedDB`+`localStorage` JSON snapshots (`_State/`), and a separate Aggregator repo synced via `CONTRACT.md`. |
+| **1-Click Copyable UUIDv4 Tracking IDs** | *Daily Tracker / Editors* | 📋 Planned | Clicking any Tracking ID chip/badge copies the full 36-character UUIDv4 to clipboard with toast feedback. |
 | **Resizable Tracker Table Columns** | *Daily Tracker Table* | 📋 Planned | Draggable column header resize handles in `#tableHead` across Standard & Custom Department trackers, persisted per profile/schema in `localStorage` and `.json` config backups. |
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
@@ -205,7 +237,7 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 | Concept | Status | Rationale |
 |---|---|---|
 | **Cross-Queue Ticket Claiming (Tombstoning)** | ⏸️ Parked | Manual dual-write transfer of tickets between agent workbooks. Intentionally parked to prioritize core workflow stability before introducing cross-file mutation. |
-| **Hidden UUID Configuration Sheets (`TrackerConfig`)** | ⏸️ Parked | Hidden `TrackerConfig` Excel tab reserved strictly for **Agent Name, Agent UUIDv4, and workbook-level parsing/ownership metadata** needed when cross-agent request sharing is enabled (NOT for UI/layout settings, which stay in `.json`). |
+| **Hidden UUID Configuration Sheets (`TrackerConfig`)** | 📋 Promoted to Section 1 | Promoted to **Queue #2** in Section 1 for Agent Name, Agent UUIDv4, and associated workbook-level settings stored directly in a hidden `TrackerConfig` tab. |
 | **Nested Agent JSON Config Storage** | ⏸️ Parked | Saving a `settings.json` file inside a nested agent directory for state persistence. Parked for now (manual `.json` export/import is implemented). |
 | **Mass Report Filter (380,000-Row Client-Side `Set` Filter)** | ⏸️ Parked | Explicitly parked. High memory overhead; requires `{ header: 1 }` stream parsing to avoid V8 memory crashes. |
 | **Smart Scratchpad (Real-Time Regex Lot # & Title Extractor)** | ⏸️ Parked | Split-pane scratchpad with automated regex scraping for 8-digit lot numbers. Parked in favor of Excel-like in-app scratch sheet tabs (`v1.15.0`). |
