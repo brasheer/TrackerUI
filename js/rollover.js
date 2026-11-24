@@ -903,13 +903,14 @@ function updateRolloverModalPreview() {
       const targetBadgeClass = typeof getStatusBadgeClass === 'function'
         ? getStatusBadgeClass(effectiveTargetStatus)
         : (isCompletedStatus(targetRow.status) ? 'badge-complete' : 'badge-pending');
-      const isTargetOverdue = !isCompletedStatus(effectiveTargetStatus) &&
+      const isTargetCompleted = isCompletedStatus(effectiveTargetStatus);
+      const isTargetOverdue = !isTargetCompleted &&
         typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveTargetStatus);
-      const isTargetWaiting = !isTargetOverdue && !isCompletedStatus(effectiveTargetStatus) &&
+      const isTargetWaiting = !isTargetOverdue && !isTargetCompleted &&
         typeof isWaitingOrHoldStatus === 'function' && isWaitingOrHoldStatus(effectiveTargetStatus);
-      const targetHighlightClass = isTargetOverdue
-        ? ' overdue-outline-red'
-        : (isTargetWaiting ? ' waiting-outline-purple' : '');
+      const targetHighlightClass = isTargetCompleted
+        ? ' completed-outline-green'
+        : (isTargetOverdue ? ' overdue-outline-red' : (isTargetWaiting ? ' waiting-outline-purple' : ''));
       const statusArrowText = reopenedOnSource
         ? ` → Reopen (${escapeHtml(latestRow.status)})`
         : (autoOverdueOnTarget ? ' → Overdue' : (autoProgressedOnTarget ? ` → ${escapeHtml(nextInProgressLbl)}` : ''));

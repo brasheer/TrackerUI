@@ -8,7 +8,29 @@ This document records the version release history, major feature rollouts, bug f
 
 ## Version Release History
 
-### `v1.19.9` (Current — `main` / `meerkat`)
+### `v1.19.10` (Current — `meerkat`)
+- **🟠 Orange Pulsing PWA Update Alert (`index.html`, `css/styles.css`, `js/core-ui.js`)**:
+  - Updated `#pwaUpdateBanner`, `#appVersionTag`, `#btnToolsMenu`, and `#btnCheckForUpdates` so when a background PWA update is waiting, the header version badge switches to a friendly **orange pulsing pill** (`v1.19.10 • Update Ready`, `@keyframes updateOrangePulse`) alongside an orange pulsing **Reload Now** banner and Tools dot—making updates hard to miss without looking like a red error alert (and keeping the header badge pulsing even if the user clicks *Later* on the banner).
+- **🔍 1-Click Copyable UUIDv4 Tracking IDs (`js/tracker-table.js`, `js/request-editors.js`, `css/styles.css`)**:
+  - Added an integrated right-side copy button (`.key-chip-copy-group`) to the UUIDv4 Tracking ID chip in the Daily Tracker row metadata bar (clicking the UUID still filters history; clicking the copy icon copies the full 36-character UUIDv4).
+  - Made `#dockKeyBadge`, `#modalKeyDisplay`, and `#ticketDetailsKeyBadge` 1-click copyable (`data-copy-key`, `.key-chip-copyable`), copying the full 36-character UUIDv4 to the clipboard with toast feedback.
+- **↔️ Resizable Tracker Table Columns (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/tracker-table.js`, `js/workbook-io.js`)**:
+  - Added draggable right-edge column resize handles (`.tracker-col-resizer`) and double-click auto-fit/reset to every `#tableHead` column across both Standard and Custom Department schemas, persisted per tracker profile & workbook schema in `localStorage` (`trackerui_table_col_widths_v1`) and included in `.json` Workspace Config export/import.
+  - Added **`Reset Table Column Widths`** (`#btnResetTableColWidths`) to **⚙️ Tools & Setup ▾**.
+- **✅ Completed Row Green Highlight & "Hiding Completed" Toggle Switch (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/tracker-table.js`, `js/rollover.js`, `js/workbook-io.js`)**:
+  - Added `.completed-outline-green` (`--success` border outline & `--success-soft` / `--success-soft-hover` green background) across both Standard and Custom Department Daily Tracker rows as well as `alreadyOnTarget` Rollover previews, matching the visual style of `overdue-outline-red` and `waiting-outline-purple`.
+  - Converted **`#btnToggleHideCompleted`** into a persistent sliding pill switch (`role="switch"`, `.btn-toggle-switch`), saved in `localStorage` (`trackerui_hide_completed_v1`) and `.json` config export/import, highlighting green and displaying **`Hiding Completed`** / **`Hiding Completed (N)`** when toggled on (while still honoring explicit completed-status filter chip clicks).
+- **📐 Compact `Master # / Bidder #` Header, Status-Folded `Accessed` Time & "Hide ID" Switch (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/tracker-table.js`, `js/workbook-io.js`)**:
+  - Stripped the redundant leading `"Broker "` word from default/auto Col D & Col E headers (`Master #` / `Bidder #`), stacked their sort buttons vertically in `th.tracker-master-bidder-th`, and applied compact column sizing (`.col-master-bidder`) so stacked codes don't leave a blank column of horizontal space.
+  - Folded the **Last Accessed** timestamp into the corner of the `Status` cell (`.status-accessed-time` in `.tracker-status-cell`) as transparent borderless text tucked beneath the status badge (using the row height already created by stacked `M:/B:` and `Y:/L:` cells without inflating margins or adjacent columns), stacked **`Accessed ↕`** neatly inside `th.tracker-status-th` (leaving `th.tracker-actions-th` uncluttered), and added a persistent **`Hide ID`** / **`Hiding ID`** switch (`#btnToggleHideUuid`, persisted via `trackerui_hide_uuid_key_v1` and `.json` config export/import) that collapses the bottom UUID row completely when toggled on.
+- **🔗 Duplicate Request Check & Shared UUIDv4 Preservation (`js/request-editors.js`)**:
+  - Added `findExistingMatchingRequestForNewEntry()` inside `saveRequestToWorkbook()` so adding a new entry whose identity or email subject (with compatible Ticket #, Master/Broker account, and Lot #) matches an existing request in the workbook never blocks creation and automatically reuses the existing request's immutable UUIDv4 Tracking ID across entries.
+- **🛡️ Forward-Compatible `TrackerConfig` Protection (`js/core-ui.js`)**:
+  - Added `TrackerConfig` / `Tracker Config` to `isProtectedReferenceSheetName()` (alongside existing `hidden` / `veryHidden` exclusion in `isCustomScratchSheetName()`) so older cached clients safely ignore future hidden `TrackerConfig` metadata sheets.
+- **PWA Cache Bump**:
+  - Incremented `CACHE_NAME` to `'tracker-ui-v55'` in [`sw.js`](sw.js) and synced `?v=1.19.10` query strings across [`index.html`](index.html) and [`js/core-ui.js`](js/core-ui.js).
+
+### `v1.19.9` (`main` / `meerkat`)
 - **✍️ Simple Text Editing & Cell Formatting Controls for Scratch Sheets (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/spreadsheet-engine.js`, `js/scratch-sheets.js`, `sw.js`)**:
   - Added compact text formatting & alignment controls (`#scratchTextFormatGroup`) directly in the Scratch Sheet toolbar and quick-action formatting row (`.scratch-ctx-format-section`) inside `#scratchContextMenu`: **Bold (`Ctrl+B`)**, **Italic (`Ctrl+I`)**, **Underline (`Ctrl+U`)**, **Text Alignment (`Left`, `Center`, `Right`)**, and **Clear Text Formatting / Unbold** (`clear-text-format`, preserving cell fill color & data type).
   - Supports explicit **Row 1 Bold / Unbold override** (`.unbold-cell`, persisted per workbook/sheet in `trackerui_scratch_row1_unbold_v1` and stored as `font.bold = false` in ExcelJS) so agents can unbold auto-styled Row 1 headers when Row 1 holds normal list data.

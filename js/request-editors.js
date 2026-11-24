@@ -1897,6 +1897,8 @@ function setBottomDockNewMode(focusInput = false, { restoreSavedDraft = false, c
   if (dockKeyBadge) {
     dockKeyBadge.style.display = 'none';
     dockKeyBadge.textContent = '';
+    dockKeyBadge.classList.remove('key-chip-copyable');
+    delete dockKeyBadge.dataset.copyKey;
   }
   if (dockHintText) {
     dockHintText.textContent = 'Tip: Click any row above to edit, or use 🎯 Grab Ticket / 📥 Pull Prior to auto-fill.';
@@ -1972,9 +1974,11 @@ function loadRowIntoBottomDock(sheetName, rowNumber, focusInput = false, { expan
     dockTargetLabel.textContent = `${item.subject || 'Untitled Request'} (${sheetName} • Row ${rowNumber}${ticketSuffix})`;
   }
   if (dockKeyBadge) {
-    dockKeyBadge.style.display = 'inline-block';
-    dockKeyBadge.textContent = `🔍 ${item.key.slice(0, 8)}...`;
-    dockKeyBadge.title = `Immutable Tracking ID (Excluded from editable inputs): ${item.key}`;
+    dockKeyBadge.style.display = 'inline-flex';
+    dockKeyBadge.classList.add('key-chip-copyable');
+    dockKeyBadge.dataset.copyKey = item.key;
+    dockKeyBadge.textContent = `📋 ${item.key.slice(0, 8)}...`;
+    dockKeyBadge.title = `Click to copy full Tracking ID: ${item.key}`;
   }
   if (dockHintText) {
     dockHintText.textContent = `Editing Row ${rowNumber} on ${sheetName}. Unique Tracking ID is preserved automatically on save.`;
@@ -2102,6 +2106,8 @@ async function openNewRequestModal() {
   const modalKeyEl = document.getElementById('modalKeyDisplay');
   modalKeyEl.textContent = 'New UUIDv4 on Save';
   modalKeyEl.title = 'A unique 36-character GUID will be generated on save';
+  modalKeyEl.classList.remove('key-chip-copyable');
+  delete modalKeyEl.dataset.copyKey;
 
   document.getElementById('entryForm').reset();
   const defaultSt = getDefaultStatus();
@@ -2130,8 +2136,10 @@ function openEditModal(sheetName, rowNumber) {
   editingTarget = { sheetName, rowNumber, key: item.key };
   document.getElementById('modalTitle').textContent = `Edit Request (${sheetName} • Row ${rowNumber})`;
   const modalKeyEl = document.getElementById('modalKeyDisplay');
-  modalKeyEl.textContent = `🔍 ${item.key.slice(0, 8)}...`;
-  modalKeyEl.title = item.key;
+  modalKeyEl.classList.add('key-chip-copyable');
+  modalKeyEl.dataset.copyKey = item.key;
+  modalKeyEl.textContent = `📋 ${item.key.slice(0, 8)}...`;
+  modalKeyEl.title = `Click to copy full Tracking ID: ${item.key}`;
 
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) {
     populateDynamicGridFromItem(modalDynamicFieldsGrid, item);
@@ -2158,6 +2166,109 @@ function openEditModal(sheetName, rowNumber) {
 document.getElementById('btnCancelModal').addEventListener('click', () => {
   editModal.classList.remove('open');
 });
+
+function findExistingMatchingRequestForNewEntry(formValues) {
+  if (!formValues || !Array.isArray(allRows) || allRows.length === 0) return null;
+
+  const isCustom = Boolean(
+    formValues.isCustomSchema ||
+    (activeSchemaConfig && !activeSchemaConfig.isStandardSchema)
+  );
+  const candidateTicketTokens = Array.from(new Set([
+    ...(typeof splitNormalizedTicketTokens === 'function' ? splitNormalizedTicketTokens(formValues.ticket) : []),
+    ...(typeof extractBracketedTicketsFromSubject === 'function' ? extractBracketedTicketsFromSubject(formValues.subject) : [])
+  ]));
+
+  const candidateProbe = {
+    ...formValues,
+    isCustomSchema: isCustom,
+    key: '',
+    ticket: candidateTicketTokens.join(', ')
+  };
+
+  // Search chronological newest-first so follow-up/duplicate entries reuse the most recent UUIDv4
+  const newestFirstRows = [...allRows]
+    .filter(r => r && String(r.key || '').trim() !== '')
+    .sort((a, b) => {
+      const timeDiff = parseDateTab(b.sheetName) - parseDateTab(a.sheetName);
+      return timeDiff !== 0 ? timeDiff : (b.rowNumber - a.rowNumber);
+    });
+
+  // Pass 1: Strict unique-request identity match (shared Ticket #, or matching Subject + Account + Lots/core fields)
+  if (typeof areRowsSameUniqueRequest === 'function') {
+    for (const row of newestFirstRows) {
+      if (areRowsSameUniqueRequest(row, candidateProbe)) {
+        return { key: String(row.key).trim(), matchedRow: row, matchReason: 'identity' };
+      }
+    }
+  }
+
+  // Pass 2: Duplicate email subject check (allows separate duplicate entry while preserving shared UUIDv4)
+  const normSubjFn = (str) => stripEmailReplyPrefixes(str);
+  const newSubjClean = normSubjFn(formValues.subject);
+  if (newSubjClean.length < 4) return null;
+
+  const normalizeLotTokenSet = (lotsStr) => {
+    if (!lotsStr) return [];
+    return String(lotsStr)
+      .split(/[,;/|\s]+/)
+      .map(s => s.trim().toLowerCase())
+      .filter(s => s.length > 0 && s !== '—');
+  };
+  const newLotsTokens = normalizeLotTokenSet(formValues.lots);
+  const newMasterLow = String(formValues.master || '').trim().toLowerCase();
+  const newBrokerLow = String(formValues.broker || '').trim().toLowerCase();
+  const pCol = activeSchemaConfig && activeSchemaConfig.primaryCol ? activeSchemaConfig.primaryCol : 1;
+  const secCol = activeSchemaConfig && activeSchemaConfig.secondaryCol ? activeSchemaConfig.secondaryCol : null;
+  const newSecVal = (isCustom && secCol && formValues.customValues)
+    ? String(formValues.customValues[`col_${secCol}`] || '').trim().toLowerCase()
+    : '';
+
+  for (const row of newestFirstRows) {
+    const rowSubjRaw = (isCustom && row.customValues && row.customValues[`col_${pCol}`] !== undefined)
+      ? row.customValues[`col_${pCol}`]
+      : row.subject;
+    const rowSubjClean = normSubjFn(rowSubjRaw);
+    if (!rowSubjClean || rowSubjClean !== newSubjClean) continue;
+
+    // Explicit non-overlapping Ticket Numbers mean separate requests
+    const rowTicketTokens = Array.from(new Set([
+      ...(typeof splitNormalizedTicketTokens === 'function' ? splitNormalizedTicketTokens(row.ticket) : []),
+      ...(typeof extractBracketedTicketsFromSubject === 'function' ? extractBracketedTicketsFromSubject(rowSubjRaw) : [])
+    ]));
+    if (candidateTicketTokens.length > 0 && rowTicketTokens.length > 0) {
+      const sharesTicket = candidateTicketTokens.some(t => rowTicketTokens.includes(t));
+      if (!sharesTicket) continue;
+    }
+
+    if (isCustom) {
+      if (secCol && row.customValues) {
+        const rowSecVal = String(row.customValues[`col_${secCol}`] || '').trim().toLowerCase();
+        if (newSecVal && rowSecVal && newSecVal !== rowSecVal) continue;
+      }
+      return { key: String(row.key).trim(), matchedRow: row, matchReason: 'subject' };
+    }
+
+    // Explicit conflicting Master # or Broker Name on same generic subject -> separate requests
+    const rowMasterLow = String(row.master || '').trim().toLowerCase();
+    const rowBrokerLow = String(row.broker || '').trim().toLowerCase();
+    if (newMasterLow && rowMasterLow && newMasterLow !== rowMasterLow) continue;
+    if (!(newMasterLow && rowMasterLow) && newBrokerLow && rowBrokerLow && newBrokerLow !== rowBrokerLow) continue;
+
+    // Explicit non-overlapping Lot Numbers on same generic subject (with no shared ticket) -> separate requests
+    const rowLotsTokens = normalizeLotTokenSet(row.lots);
+    if (newLotsTokens.length > 0 && rowLotsTokens.length > 0) {
+      const lotsOverlap = newLotsTokens.some(t => rowLotsTokens.includes(t));
+      const sharesTicket = candidateTicketTokens.length > 0 && rowTicketTokens.length > 0 &&
+        candidateTicketTokens.some(t => rowTicketTokens.includes(t));
+      if (!lotsOverlap && !sharesTicket) continue;
+    }
+
+    return { key: String(row.key).trim(), matchedRow: row, matchReason: 'subject' };
+  }
+
+  return null;
+}
 
 async function saveRequestToWorkbook(targetInfo, formValues) {
   const currentSheetName = targetInfo ? targetInfo.sheetName : sheetSelect.value;
@@ -2201,13 +2312,15 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
 
   let targetRowNum;
   let trackingKey;
+  let reusedDuplicateMatch = null;
 
   if (targetInfo) {
     targetRowNum = targetInfo.rowNumber;
     trackingKey = targetInfo.key;
   } else {
     targetRowNum = getNextEmptyRow(worksheet);
-    trackingKey = generateTrackingGuid();
+    reusedDuplicateMatch = findExistingMatchingRequestForNewEntry(formValues);
+    trackingKey = reusedDuplicateMatch ? reusedDuplicateMatch.key : generateTrackingGuid();
   }
 
   const colMap = getWorksheetColumnMap(worksheet);
@@ -2267,12 +2380,23 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
     }
   }
 
+  const notifyDuplicateUuidLink = () => {
+    if (reusedDuplicateMatch && reusedDuplicateMatch.matchedRow) {
+      const shortId = trackingKey.length > 8 ? `${trackingKey.slice(0, 8)}...` : trackingKey;
+      showToast(
+        `🔗 Linked duplicate request to existing Tracking ID (${shortId}) from ${reusedDuplicateMatch.matchedRow.sheetName}.`,
+        'info'
+      );
+    }
+  };
+
   const saveResult = await saveWorkbookToDisk();
   if (saveResult) {
     await loadWorkbookFromDisk(currentSheetName, {
       skipStagedRecoveryCheck: true,
       preserveStatus: saveResult === 'mirror-locked'
     });
+    notifyDuplicateUuidLink();
     return true;
   }
 
@@ -2288,6 +2412,7 @@ async function saveRequestToWorkbook(targetInfo, formValues) {
     dailyObjs.forEach(({ ws, raw }) => indexWorksheetRows(ws, raw));
     renderSheetTabsBar();
     renderList();
+    notifyDuplicateUuidLink();
   }
   return false;
 }
@@ -2398,8 +2523,10 @@ function renderTicketDetailsModal(seedItem) {
     ticketDetailsSubtitle.textContent = `Tracked across ${history.length} daily tab${history.length === 1 ? '' : 's'} (${spanDays} day span • First logged ${oldest.sheetName})`;
   }
   if (ticketDetailsKeyBadge) {
-    ticketDetailsKeyBadge.textContent = latest.ticket ? `Ticket #${latest.ticket}` : `🔍 ${latest.key.slice(0, 8)}...`;
-    ticketDetailsKeyBadge.title = `Tracking ID: ${latest.key}`;
+    ticketDetailsKeyBadge.classList.add('key-chip-copyable');
+    ticketDetailsKeyBadge.dataset.copyKey = latest.key;
+    ticketDetailsKeyBadge.textContent = latest.ticket ? `📋 Ticket #${latest.ticket}` : `📋 ${latest.key.slice(0, 8)}...`;
+    ticketDetailsKeyBadge.title = `Click to copy full Tracking ID: ${latest.key}`;
   }
   if (ticketTimelineHeader) {
     ticketTimelineHeader.textContent = `Aggregated Notes & Daily Timeline (${history.length} Tab${history.length === 1 ? '' : 's'} • ${spanDays} Day Span)`;
@@ -2960,3 +3087,25 @@ if (btnDownloadViewOnly) {
     showToast(`Downloaded copy of "${viewOnlyState.fileName}" (safe to open in Excel).`, 'info');
   });
 }
+
+// 1-Click Copyable UUIDv4 Tracking ID Badges (Bottom Dock, Edit Modal & Ticket Details)
+function bindCopyableKeyBadge(el) {
+  if (!el) return;
+  el.addEventListener('click', (e) => {
+    const fullKey = el.dataset && el.dataset.copyKey ? el.dataset.copyKey.trim() : '';
+    if (!fullKey) return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (typeof copyTextToClipboard === 'function') {
+      copyTextToClipboard(fullKey, 'Tracking ID', el);
+    } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(fullKey).then(() => {
+        showToast(`📋 Copied Tracking ID: ${fullKey.slice(0, 8)}...`, 'info');
+      }).catch(() => {});
+    }
+  });
+}
+
+bindCopyableKeyBadge(dockKeyBadge);
+bindCopyableKeyBadge(document.getElementById('modalKeyDisplay'));
+bindCopyableKeyBadge(ticketDetailsKeyBadge);

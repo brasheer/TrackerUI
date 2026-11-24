@@ -505,6 +505,14 @@ function resetActiveTrackerUIDisconnectedState() {
   btnRenameTab.disabled = true;
   btnDeleteTab.disabled = true;
   btnDeleteMode.disabled = true;
+  if (typeof btnToggleHideCompleted !== 'undefined' && btnToggleHideCompleted) {
+    btnToggleHideCompleted.disabled = true;
+    if (typeof syncHideCompletedButtonUI === 'function') syncHideCompletedButtonUI(0);
+  }
+  if (typeof btnToggleHideUuid !== 'undefined' && btnToggleHideUuid) {
+    btnToggleHideUuid.disabled = true;
+    if (typeof syncHideUuidButtonUI === 'function') syncHideUuidButtonUI();
+  }
   selectedForDelete.clear();
   if (batchActionDock) batchActionDock.style.display = 'none';
   if (bottomEditorDock) bottomEditorDock.style.display = 'none';
@@ -2877,6 +2885,12 @@ async function loadWorkbookFromDisk(preserveSelectedSheet = null, options = {}) 
 
   sheetSelect.disabled = dateSheets.length === 0;
   scopeSelect.disabled = dateSheets.length === 0;
+  if (typeof btnToggleHideCompleted !== 'undefined' && btnToggleHideCompleted) {
+    btnToggleHideCompleted.disabled = dateSheets.length === 0;
+  }
+  if (typeof btnToggleHideUuid !== 'undefined' && btnToggleHideUuid) {
+    btnToggleHideUuid.disabled = dateSheets.length === 0;
+  }
   searchInput.disabled = dateSheets.length === 0;
   if (searchInput) {
     if (!activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0) {
@@ -5178,6 +5192,12 @@ function applyProfileSnapshotToGlobals(snap) {
     }
     sheetSelect.disabled = dateSheets.length === 0;
     scopeSelect.disabled = dateSheets.length === 0;
+    if (typeof btnToggleHideCompleted !== 'undefined' && btnToggleHideCompleted) {
+      btnToggleHideCompleted.disabled = dateSheets.length === 0;
+    }
+    if (typeof btnToggleHideUuid !== 'undefined' && btnToggleHideUuid) {
+      btnToggleHideUuid.disabled = dateSheets.length === 0;
+    }
     btnNewEntry.style.display = 'inline-flex';
     btnRollover.style.display = 'inline-flex';
     btnRepairSchema.disabled = false;
@@ -7061,11 +7081,14 @@ function exportWorkspaceConfigJson() {
     preferences: {
       themePreference,
       fontScalePercent,
-      autoReconnectEnabled
+      autoReconnectEnabled,
+      hideCompletedRequests: Boolean(typeof hideCompletedRequests !== 'undefined' && hideCompletedRequests),
+      hideUuidKey: Boolean(typeof hideUuidKey !== 'undefined' && hideUuidKey)
     },
     trackerProfiles,
     schemaOverrides: schemaOverridesStore,
     formLayouts: formLayoutsStore,
+    tableColWidths: typeof tableColWidthsStore === 'object' && tableColWidthsStore ? tableColWidthsStore : {},
     actionCategoryOverrides: actionCategoryOverridesStore,
     referenceDefaults: {
       statuses: validationStatuses.length > 0 ? validationStatuses : DEFAULT_STATUSES,
@@ -7105,6 +7128,12 @@ async function importWorkspaceConfigJsonFile(file) {
       if (typeof parsed.preferences.autoReconnectEnabled === 'boolean') {
         setAutoReconnectPreference(parsed.preferences.autoReconnectEnabled);
       }
+      if (typeof parsed.preferences.hideCompletedRequests === 'boolean' && typeof setHideCompletedPreference === 'function') {
+        setHideCompletedPreference(parsed.preferences.hideCompletedRequests);
+      }
+      if (typeof parsed.preferences.hideUuidKey === 'boolean' && typeof setHideUuidKeyPreference === 'function') {
+        setHideUuidKeyPreference(parsed.preferences.hideUuidKey);
+      }
     }
 
     if (Array.isArray(parsed.trackerProfiles) && parsed.trackerProfiles.length > 0) {
@@ -7137,6 +7166,12 @@ async function importWorkspaceConfigJsonFile(file) {
     if (parsed.formLayouts && typeof parsed.formLayouts === 'object' && !Array.isArray(parsed.formLayouts)) {
       formLayoutsStore = { ...formLayoutsStore, ...parsed.formLayouts };
       saveFormLayoutsStore();
+    }
+
+    if (parsed.tableColWidths && typeof parsed.tableColWidths === 'object' && !Array.isArray(parsed.tableColWidths)) {
+      tableColWidthsStore = { ...(tableColWidthsStore || {}), ...parsed.tableColWidths };
+      if (typeof saveTableColWidthsStore === 'function') saveTableColWidthsStore();
+      if (typeof applySavedTrackerTableColumnWidths === 'function') applySavedTrackerTableColumnWidths();
     }
 
     if (parsed.actionCategoryOverrides && typeof parsed.actionCategoryOverrides === 'object' && !Array.isArray(parsed.actionCategoryOverrides)) {

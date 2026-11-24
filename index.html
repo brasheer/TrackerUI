@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TrackerUI v1.19.9</title>
+  <title>TrackerUI v1.19.10</title>
 
   <!-- PWA Meta & Manifest -->
   <meta name="theme-color" id="metaThemeColor" content="#0f172a">
@@ -18,7 +18,7 @@
 
   <!-- ExcelJS preserves cell styles, column widths, and hidden columns -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <link rel="stylesheet" href="css/styles.css?v=1.19.9">
+  <link rel="stylesheet" href="css/styles.css?v=1.19.10">
 </head>
 <body>
 
@@ -32,7 +32,7 @@
         </svg>
       </div>
       <h1>TrackerUI</h1>
-      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.9 — Click to check for updates &amp; refresh app cache">v1.19.9</span>
+      <span class="version-tag" id="appVersionTag" data-app-version title="TrackerUI v1.19.10 — Click to check for updates &amp; refresh app cache">v1.19.10</span>
     </div>
 
     <div class="header-actions">
@@ -381,6 +381,18 @@
                 <span id="deleteModeLabel">Batch Delete Requests Mode</span>
               </span>
             </button>
+            <button type="button" id="btnResetTableColWidths" class="menu-item" title="Reset custom resized column widths on the Daily Tracker table back to automatic defaults">
+              <span class="menu-item-left">
+                <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="4" y1="4" x2="4" y2="16"></line>
+                  <line x1="16" y1="4" x2="16" y2="16"></line>
+                  <path d="M7.5 10h5"></path>
+                  <polyline points="9.2 8 7.2 10 9.2 12"></polyline>
+                  <polyline points="10.8 8 12.8 10 10.8 12"></polyline>
+                </svg>
+                <span>Reset Table Column Widths</span>
+              </span>
+            </button>
             <button type="button" id="btnExportConfigJson" class="menu-item" title="Export tracker profiles, custom column mappings, and preferences to a .json file">
               <span class="menu-item-left">
                 <svg class="ui-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -420,7 +432,7 @@
                 </svg>
                 <span>Check for Updates &amp; Clear Cache</span>
               </span>
-              <span class="menu-item-meta" data-app-version>v1.19.9</span>
+              <span class="menu-item-meta" data-app-version>v1.19.10</span>
             </button>
           </div>
         </div>
@@ -431,10 +443,11 @@
   <!-- PWA Update Ready Notification Banner -->
   <div id="pwaUpdateBanner" class="pwa-update-banner" style="display:none;" role="status" aria-live="polite">
     <div class="pwa-update-banner-text">
-      <strong>Update Ready:</strong> A newer version of TrackerUI was downloaded in the background. Reload now to keep UI and code in sync.
+      <span class="pwa-update-dot" aria-hidden="true"></span>
+      <strong>Update Available:</strong> A newer version of TrackerUI is ready. Reload now to stay on the latest release.
     </div>
     <div class="pwa-update-banner-actions">
-      <button type="button" id="btnPwaReloadNow" class="btn-primary btn-sm">Reload Now</button>
+      <button type="button" id="btnPwaReloadNow" class="btn-update-orange btn-sm">Reload Now</button>
       <button type="button" id="btnPwaDismissUpdate" class="btn-sm">Later</button>
     </div>
   </div>
@@ -535,6 +548,16 @@
         <option value="all">All Daily Tabs (Full History)</option>
       </select>
     </div>
+
+    <button type="button" id="btnToggleHideCompleted" class="btn-toggle-switch btn-hide-completed" role="switch" aria-checked="false" aria-pressed="false" disabled title="Click to hide completed requests">
+      <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+      <span id="hideCompletedLabel">Hide Completed</span>
+    </button>
+
+    <button type="button" id="btnToggleHideUuid" class="btn-toggle-switch btn-hide-uuid" role="switch" aria-checked="false" aria-pressed="false" disabled title="Click to hide the UUID Tracking ID key on each request row">
+      <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+      <span id="hideUuidLabel">Hide ID</span>
+    </button>
 
     <input type="text" id="searchInput" class="search-box" placeholder="Search across ALL daily tabs (Subject, Ticket #, Broker, Master #, Bidder #, Lot #, or Tracking ID)..." disabled>
     <span id="searchScopeHint" class="search-scope-pill" style="display:none;">Searching All Tabs</span>
@@ -1967,7 +1990,7 @@
             <h4>14. Backup, Portable <code>.json</code> Config &amp; PWA Updates</h4>
             <ul class="manual-list">
               <li><strong>Export / Import Workspace Config (<code>.json</code>):</strong> Under <strong><code>⚙️ Tools &amp; Setup ▾</code></strong>, back up or restore department tracker profiles, custom column mappings, per-column <code>📋 Copy</code> toggles, and 12-column form layouts as a portable <code>.json</code> file.</li>
-              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.9</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
+              <li><strong>Instant Cache Refresh:</strong> Click the <strong><code data-app-version>v1.19.10</code></strong> version badge in the top-left header (or <strong><code>Check for Updates &amp; Clear Cache</code></strong> in Tools &amp; Setup) to verify and reload the latest version.</li>
             </ul>
           </article>
 
@@ -2086,17 +2109,17 @@
     <div class="status-bar-right">
       <span id="statusTimestamp" class="status-meta-item">Waiting for workbook...</span>
       <span class="status-divider">•</span>
-      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.9</span>
+      <span class="status-meta-item" data-app-version title="TrackerUI Application Version">v1.19.10</span>
     </div>
   </footer>
 
-  <script src="js/mockMasterAccounts.js?v=1.19.9"></script>
-  <script src="js/core-ui.js?v=1.19.9"></script>
-  <script src="js/workbook-io.js?v=1.19.9"></script>
-  <script src="js/tracker-table.js?v=1.19.9"></script>
-  <script src="js/request-editors.js?v=1.19.9"></script>
-  <script src="js/spreadsheet-engine.js?v=1.19.9"></script>
-  <script src="js/scratch-sheets.js?v=1.19.9"></script>
-  <script src="js/rollover.js?v=1.19.9"></script>
+  <script src="js/mockMasterAccounts.js?v=1.19.10"></script>
+  <script src="js/core-ui.js?v=1.19.10"></script>
+  <script src="js/workbook-io.js?v=1.19.10"></script>
+  <script src="js/tracker-table.js?v=1.19.10"></script>
+  <script src="js/request-editors.js?v=1.19.10"></script>
+  <script src="js/spreadsheet-engine.js?v=1.19.10"></script>
+  <script src="js/scratch-sheets.js?v=1.19.10"></script>
+  <script src="js/rollover.js?v=1.19.10"></script>
 </body>
 </html>

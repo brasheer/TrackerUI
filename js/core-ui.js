@@ -117,6 +117,7 @@ function normalizeActionCategoryOverridesMap(rawObj) {
 }
 
 const FORM_LAYOUTS_STORAGE_KEY = 'trackerui_form_layouts_v1';
+const TABLE_COL_WIDTHS_STORAGE_KEY = 'trackerui_table_col_widths_v1';
 const ROW_LAST_ACCESSED_STORAGE_KEY = 'trackerui_row_last_accessed_v1';
 const ROW_LAST_ACCESSED_MAX_ENTRIES = 5000;
 let schemaOverridesStore = loadSavedJsonMapFromStorage(SCHEMA_OVERRIDES_STORAGE_KEY);
@@ -124,7 +125,14 @@ let actionCategoryOverridesStore = normalizeActionCategoryOverridesMap(
   loadSavedJsonMapFromStorage(ACTION_CATEGORY_OVERRIDES_STORAGE_KEY)
 );
 let formLayoutsStore = loadSavedJsonMapFromStorage(FORM_LAYOUTS_STORAGE_KEY);
+let tableColWidthsStore = loadSavedJsonMapFromStorage(TABLE_COL_WIDTHS_STORAGE_KEY);
 let rowLastAccessedStore = loadSavedJsonMapFromStorage(ROW_LAST_ACCESSED_STORAGE_KEY);
+
+function saveTableColWidthsStore() {
+  try {
+    localStorage.setItem(TABLE_COL_WIDTHS_STORAGE_KEY, JSON.stringify(tableColWidthsStore || {}));
+  } catch (_) { /* ignore */ }
+}
 
 function saveRowLastAccessedStore() {
   try {
@@ -426,7 +434,9 @@ function isProtectedReferenceSheetName(sheetName) {
     norm === 'yard list' ||
     norm === 'yard lists' ||
     norm === 'yards' ||
-    norm === 'yard locations'
+    norm === 'yard locations' ||
+    norm === 'trackerconfig' ||
+    norm === 'tracker config'
   );
 }
 
@@ -622,11 +632,46 @@ const IDB_SUPERVISOR_KEY = 'supervisorFolderHandle';
 const IDB_TEMPLATES_KEY = 'templatesFolderHandle';
 const IDB_LAST_WORKBOOK_KEY = 'lastActiveWorkbookName';
 const AUTO_RECONNECT_STORAGE_KEY = 'trackerui_auto_reconnect';
+const HIDE_COMPLETED_STORAGE_KEY = 'trackerui_hide_completed_v1';
+const HIDE_UUID_KEY_STORAGE_KEY = 'trackerui_hide_uuid_key_v1';
 const THEME_STORAGE_KEY = 'trackerui_theme_mode'; // 'auto' | 'light' | 'dark'
 const FONT_SCALE_STORAGE_KEY = 'trackerui_font_scale'; // '85' .. '125' (percent)
 const FONT_SCALE_MIN = 85;
 const FONT_SCALE_MAX = 125;
 const FONT_SCALE_STEP = 5;
+
+let hideCompletedRequests = localStorage.getItem(HIDE_COMPLETED_STORAGE_KEY) === 'true';
+let hideUuidKey = localStorage.getItem(HIDE_UUID_KEY_STORAGE_KEY) === 'true';
+
+function setHideCompletedPreference(enabled, { persist = true } = {}) {
+  hideCompletedRequests = Boolean(enabled);
+  if (persist) {
+    try {
+      localStorage.setItem(HIDE_COMPLETED_STORAGE_KEY, String(hideCompletedRequests));
+    } catch (_) { /* ignore */ }
+  }
+  return hideCompletedRequests;
+}
+
+function setHideUuidKeyPreference(enabled, { persist = true } = {}) {
+  hideUuidKey = Boolean(enabled);
+  if (persist) {
+    try {
+      localStorage.setItem(HIDE_UUID_KEY_STORAGE_KEY, String(hideUuidKey));
+    } catch (_) { /* ignore */ }
+  }
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.classList.toggle('hide-tracker-uuid-keys', hideUuidKey);
+  }
+  if (typeof syncHideUuidButtonUI === 'function') {
+    syncHideUuidButtonUI();
+  }
+  return hideUuidKey;
+}
+
+if (typeof document !== 'undefined' && document.body && hideUuidKey) {
+  document.body.classList.add('hide-tracker-uuid-keys');
+}
 
 let themePreference = localStorage.getItem(THEME_STORAGE_KEY) || 'auto';
 if (!['auto', 'light', 'dark'].includes(themePreference)) {
@@ -691,6 +736,7 @@ const btnRenameTab = document.getElementById('btnRenameTab');
 const btnDeleteTab = document.getElementById('btnDeleteTab');
 const btnDeleteMode = document.getElementById('btnDeleteMode');
 const deleteModeLabel = document.getElementById('deleteModeLabel');
+const btnResetTableColWidths = document.getElementById('btnResetTableColWidths');
 const btnExportConfigJson = document.getElementById('btnExportConfigJson');
 const btnImportConfigJson = document.getElementById('btnImportConfigJson');
 const configJsonFileInput = document.getElementById('configJsonFileInput');
@@ -839,6 +885,10 @@ const btnNextSheet = document.getElementById('btnNextSheet');
 const sheetSelect = document.getElementById('sheetSelect');
 const sheetTabsBar = document.getElementById('sheetTabsBar');
 const scopeSelect = document.getElementById('scopeSelect');
+const btnToggleHideCompleted = document.getElementById('btnToggleHideCompleted');
+const hideCompletedLabel = document.getElementById('hideCompletedLabel');
+const btnToggleHideUuid = document.getElementById('btnToggleHideUuid');
+const hideUuidLabel = document.getElementById('hideUuidLabel');
 const searchInput = document.getElementById('searchInput');
 const searchScopeHint = document.getElementById('searchScopeHint');
 const btnClearSortFilter = document.getElementById('btnClearSortFilter');
@@ -1824,7 +1874,7 @@ if (typeof document !== 'undefined') {
 }
 
 // --- 9. APP VERSION, MULTI-TAB INSTANCE LOCKING, CHROME CHECK & PWA SERVICE WORKER ---
-const APP_VERSION = 'v1.19.9';
+const APP_VERSION = 'v1.19.10';
 
 function syncAppVersionDOM() {
   if (typeof document === 'undefined') return;
@@ -2287,11 +2337,24 @@ if (typeof navigator !== 'undefined' && (navigator.userAgent || navigator.userAg
 }
 let activeSwRegistration = null;
 let lastSwUpdateCheckAt = 0;
+let pwaUpdatePending = false;
 const SW_UPDATE_CHECK_THROTTLE_MS = 45000;
 
 function showPwaUpdateBanner() {
+  pwaUpdatePending = true;
   if (pwaUpdateBanner) {
     pwaUpdateBanner.style.display = 'flex';
+  }
+  if (appVersionTag) {
+    appVersionTag.classList.add('update-available');
+    appVersionTag.textContent = `${APP_VERSION} • Update Ready`;
+    appVersionTag.title = `A newer version of TrackerUI is available — click to refresh and apply the update`;
+  }
+  if (btnToolsMenu) {
+    btnToolsMenu.classList.add('has-update-indicator');
+  }
+  if (btnCheckForUpdates) {
+    btnCheckForUpdates.classList.add('menu-item-update-ready');
   }
 }
 

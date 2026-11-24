@@ -518,6 +518,13 @@ function getStandardTableColumnsDescriptor() {
     const c = byIdx.get(idx);
     return (c && c.header) ? c.header : fallback;
   };
+  const getCompactMasterBidderLbl = (idx, fallback) => {
+    const c = byIdx.get(idx);
+    if (c && c.label) return c.label;
+    const raw = (c && c.header) ? c.header : fallback;
+    const stripped = String(raw || '').replace(/^broker\s+/i, '').trim();
+    return stripped || fallback;
+  };
 
   const slots = [];
   if (isVis(1, true)) slots.push({ kind: 'subject', colIndex: 1, sortKey: 'subject', label: getLbl(1, 'Subject') });
@@ -531,8 +538,8 @@ function getStandardTableColumnsDescriptor() {
       kind: 'master_bidder',
       showMaster,
       showBidder,
-      masterLabel: getLbl(4, 'Master'),
-      bidderLabel: getLbl(5, 'Bidder')
+      masterLabel: getCompactMasterBidderLbl(4, 'Master #'),
+      bidderLabel: getCompactMasterBidderLbl(5, 'Bidder #')
     });
   }
 
@@ -579,24 +586,146 @@ function getActiveTableColSpan() {
   return 4 + getStandardTableColumnsDescriptor().slots.length;
 }
 
+let trackerColResizeState = null; // { colKey, thEl, resizerEl, tableEl, startX, startWidthPx, currentWidthPx } | null
+let lastTrackerColResizeAt = 0;
+
+function getActiveTrackerTableColWidthsKey() {
+  const profId = (typeof activeProfileId === 'string' && activeProfileId.trim()) ? activeProfileId.trim() : 'default';
+  const seriesKey = (typeof getWorkbookSeriesKey === 'function' && workingFileHandle && workingFileHandle.name)
+    ? getWorkbookSeriesKey(workingFileHandle.name)
+    : 'default';
+  const modeKey = (activeSchemaConfig && !activeSchemaConfig.isStandardSchema) ? 'custom' : 'standard';
+  return `${profId}::${seriesKey}::${modeKey}`;
+}
+
+function getSavedTrackerTableColWidths() {
+  if (typeof tableColWidthsStore !== 'object' || !tableColWidthsStore) return {};
+  const key = getActiveTrackerTableColWidthsKey();
+  const entry = tableColWidthsStore[key];
+  return (entry && typeof entry === 'object' && !Array.isArray(entry)) ? entry : {};
+}
+
+function setSavedTrackerTableColWidth(colKey, widthPx) {
+  if (!colKey || typeof tableColWidthsStore !== 'object' || !tableColWidthsStore) return;
+  const storeKey = getActiveTrackerTableColWidthsKey();
+  if (!tableColWidthsStore[storeKey] || typeof tableColWidthsStore[storeKey] !== 'object') {
+    tableColWidthsStore[storeKey] = {};
+  }
+  if (widthPx === null || widthPx === undefined) {
+    delete tableColWidthsStore[storeKey][colKey];
+    if (Object.keys(tableColWidthsStore[storeKey]).length === 0) {
+      delete tableColWidthsStore[storeKey];
+    }
+  } else {
+    const clamped = Math.max(64, Math.min(680, Math.round(Number(widthPx) || 0)));
+    tableColWidthsStore[storeKey][colKey] = clamped;
+  }
+  if (typeof saveTableColWidthsStore === 'function') {
+    saveTableColWidthsStore();
+  }
+}
+
+function applySavedTrackerTableColumnWidths() {
+  if (!tableHead) return;
+  const tableEl = tableHead.closest('table');
+  const saved = getSavedTrackerTableColWidths();
+  const savedKeys = Object.keys(saved);
+  const hasAny = savedKeys.length > 0;
+  if (tableEl) {
+    tableEl.classList.toggle('has-custom-col-widths', hasAny);
+  }
+  tableHead.querySelectorAll('th[data-col-width-key]').forEach(th => {
+    const k = th.dataset.colWidthKey;
+    const w = saved[k];
+    if (Number.isFinite(Number(w)) && Number(w) >= 64) {
+      const clamped = Math.max(64, Math.min(680, Math.round(Number(w))));
+      th.style.width = `${clamped}px`;
+      th.style.minWidth = `${clamped}px`;
+    } else {
+      th.style.width = '';
+      th.style.minWidth = '';
+    }
+  });
+}
+
+function resetActiveTrackerTableColWidths() {
+  if (typeof closeToolsMenu === 'function') closeToolsMenu();
+  const storeKey = getActiveTrackerTableColWidthsKey();
+  if (typeof tableColWidthsStore === 'object' && tableColWidthsStore && tableColWidthsStore[storeKey]) {
+    delete tableColWidthsStore[storeKey];
+    if (typeof saveTableColWidthsStore === 'function') saveTableColWidthsStore();
+    applySavedTrackerTableColumnWidths();
+    showToast('Reset Daily Tracker table column widths to automatic defaults.', 'info');
+  } else {
+    applySavedTrackerTableColumnWidths();
+    showToast('Daily Tracker columns are already at default widths.', 'info');
+  }
+}
+
+function autoFitTrackerTableColumnWidth(thEl) {
+  if (!thEl || !tableHead) return;
+  const colKey = thEl.dataset.colWidthKey;
+  if (!colKey) return;
+  const hdrRow = tableHead.rows && tableHead.rows[0];
+  if (!hdrRow) return;
+  const cellIndex = Array.from(hdrRow.cells).indexOf(thEl);
+  if (cellIndex < 0) return;
+
+  let maxChars = (thEl.textContent || '').trim().length + 4;
+  if (listBody) {
+    listBody.querySelectorAll('tr.tracker-main-row').forEach(tr => {
+      const td = tr.cells[cellIndex];
+      if (!td) return;
+      const txt = (td.textContent || '').replace(/\s+/g, ' ').trim();
+      const firstLineLen = Math.min(80, txt.length);
+      if (firstLineLen > maxChars) maxChars = firstLineLen;
+    });
+  }
+  const fittedPx = Math.max(88, Math.min(460, Math.round(maxChars * 7.6 + 34)));
+  const saved = getSavedTrackerTableColWidths();
+  // Double-clicking an already auto-fitted column toggles it back to automatic default width
+  if (saved[colKey] && Math.abs(saved[colKey] - fittedPx) <= 6) {
+    setSavedTrackerTableColWidth(colKey, null);
+  } else {
+    setSavedTrackerTableColWidth(colKey, fittedPx);
+  }
+  applySavedTrackerTableColumnWidths();
+}
+
 function renderTableHeader() {
   if (!tableHead) return;
   const selectColClass = isDeleteMode ? 'delete-col' : 'select-col';
+  const resizerSpan = (colKey) => `<span class="tracker-col-resizer" data-resize-col-key="${escapeHtml(colKey)}" title="Drag to resize column • Double-click to auto-fit"></span>`;
 
   if (activeSchemaConfig && !activeSchemaConfig.isStandardSchema && Array.isArray(activeSchemaConfig.columns) && activeSchemaConfig.columns.length > 0) {
     const visibleCols = getVisibleCustomTableColumns();
     const visibleSortKeys = new Set(visibleCols.map(c => `col_${c.colIndex}`));
+    const hasCustomStatusCol = Boolean(
+      activeSchemaConfig.statusCol &&
+      visibleCols.some(c => c.colIndex === activeSchemaConfig.statusCol)
+    );
     if (sortState.column && !['date', 'key', 'accessed'].includes(sortState.column) && !visibleSortKeys.has(sortState.column)) {
       sortState = { column: null, direction: 'asc' };
     }
     const customThsHtml = visibleCols.map(c => {
       const sortKey = `col_${c.colIndex}`;
+      if (hasCustomStatusCol && c.colIndex === activeSchemaConfig.statusCol) {
+        return `
+          <th class="sortable-th tracker-status-th" data-sort="${sortKey}" data-col-width-key="${sortKey}" title="Click ${escapeHtml(c.header)} or Accessed to sort">
+            <span class="th-stacked-sub-sorts"><span class="th-sub-sort" data-sort="${sortKey}" title="Sort by ${escapeHtml(c.header)}">${escapeHtml(c.header)}<span class="sort-indicator" data-ind="${sortKey}">↕</span></span><span class="th-sub-sort th-sub-sort-accessed" data-sort="accessed" title="Sort by Last Accessed Time">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span></span>${resizerSpan(sortKey)}
+          </th>
+        `;
+      }
       return `
-        <th class="sortable-th" data-sort="${sortKey}" title="Click to sort by ${escapeHtml(c.header)}">
-          <span>${escapeHtml(c.header)}</span><span class="sort-indicator" data-ind="${sortKey}">↕</span>
+        <th class="sortable-th" data-sort="${sortKey}" data-col-width-key="${sortKey}" title="Click to sort by ${escapeHtml(c.header)}">
+          <span>${escapeHtml(c.header)}</span><span class="sort-indicator" data-ind="${sortKey}">↕</span>${resizerSpan(sortKey)}
         </th>
       `;
     }).join('');
+
+    const customActionsThHtml = hasCustomStatusCol
+      ? `<th class="tracker-actions-th" data-col-width-key="actions" title="Row Actions">${resizerSpan('actions')}</th>`
+      : `<th class="sortable-th tracker-actions-th" data-sort="accessed" data-col-width-key="actions" title="Click to sort by Last Accessed Time"><span>Accessed</span><span class="sort-indicator" data-ind="accessed">↕</span>${resizerSpan('actions')}</th>`;
 
     tableHead.innerHTML = `
       <tr>
@@ -604,22 +733,20 @@ function renderTableHeader() {
         <th id="thDeleteSelect" class="${selectColClass}" title="Select rows for batch status update or deletion">
           <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
         </th>
-        <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
-          <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
+        <th class="sortable-th" data-sort="date" data-col-width-key="date" title="Click to sort by Date Tab">
+          <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>${resizerSpan('date')}
         </th>
         ${customThsHtml}
-        <th class="sortable-th tracker-actions-th" data-sort="accessed" title="Sort by Last Accessed or Tracking ID">
-          <span class="th-sub-sort" data-sort="accessed" title="Sort by Last Accessed">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span>
-          <span class="th-sep">/</span>
-          <span class="th-sub-sort" data-sort="key" title="Sort by Tracking ID (UUIDv4)">ID<span class="sort-indicator" data-ind="key">↕</span></span>
-        </th>
+        ${customActionsThHtml}
       </tr>
     `;
     syncSelectAllCheckboxes();
+    applySavedTrackerTableColumnWidths();
     return;
   }
 
   const descriptor = getStandardTableColumnsDescriptor();
+  const hasStdStatusSlot = descriptor.slots.some(s => s.kind === 'status');
   const validStdSorts = new Set(['date', 'key', 'accessed']);
   descriptor.slots.forEach(s => {
     if (s.kind === 'master_bidder') {
@@ -640,46 +767,56 @@ function renderTableHeader() {
     if (s.kind === 'master_bidder') {
       if (s.showMaster && s.showBidder) {
         return `
-          <th class="sortable-th" data-sort="master" title="Click ${escapeHtml(s.masterLabel)} or ${escapeHtml(s.bidderLabel)} to sort">
-            <span class="th-sub-sort" data-sort="master" title="Sort by ${escapeHtml(s.masterLabel)}">${escapeHtml(s.masterLabel)}<span class="sort-indicator" data-ind="master">↕</span></span>
-            <span class="th-sep">/</span>
-            <span class="th-sub-sort" data-sort="bidder" title="Sort by ${escapeHtml(s.bidderLabel)}">${escapeHtml(s.bidderLabel)}<span class="sort-indicator" data-ind="bidder">↕</span></span>
+          <th class="sortable-th tracker-master-bidder-th col-master-bidder" data-sort="master" data-col-width-key="master_bidder" title="Click ${escapeHtml(s.masterLabel)} or ${escapeHtml(s.bidderLabel)} to sort">
+            <span class="th-stacked-sub-sorts"><span class="th-sub-sort" data-sort="master" title="Sort by ${escapeHtml(s.masterLabel)}">${escapeHtml(s.masterLabel)}<span class="sort-indicator" data-ind="master">↕</span></span><span class="th-sub-sort" data-sort="bidder" title="Sort by ${escapeHtml(s.bidderLabel)}">${escapeHtml(s.bidderLabel)}<span class="sort-indicator" data-ind="bidder">↕</span></span></span>${resizerSpan('master_bidder')}
           </th>
         `;
       }
       const key = s.showMaster ? 'master' : 'bidder';
       const lbl = s.showMaster ? s.masterLabel : s.bidderLabel;
       return `
-        <th class="sortable-th" data-sort="${key}" title="Click to sort by ${escapeHtml(lbl)}">
-          <span>${escapeHtml(lbl)}</span><span class="sort-indicator" data-ind="${key}">↕</span>
+        <th class="sortable-th tracker-master-bidder-th col-master-bidder" data-sort="${key}" data-col-width-key="${key}" title="Click to sort by ${escapeHtml(lbl)}">
+          <span>${escapeHtml(lbl)}</span><span class="sort-indicator" data-ind="${key}">↕</span>${resizerSpan(key)}
         </th>
       `;
     }
     if (s.kind === 'yard_lots') {
       if (s.showYard && s.showLots) {
         return `
-          <th class="sortable-th" data-sort="yard" title="Click ${escapeHtml(s.yardLabel)} or ${escapeHtml(s.lotsLabel)} to sort">
+          <th class="sortable-th" data-sort="yard" data-col-width-key="yard_lots" title="Click ${escapeHtml(s.yardLabel)} or ${escapeHtml(s.lotsLabel)} to sort">
             <span class="th-sub-sort" data-sort="yard" title="Sort by ${escapeHtml(s.yardLabel)}">${escapeHtml(s.yardLabel)}<span class="sort-indicator" data-ind="yard">↕</span></span>
             <span class="th-sep">/</span>
-            <span class="th-sub-sort" data-sort="lots" title="Sort by ${escapeHtml(s.lotsLabel)}">${escapeHtml(s.lotsLabel)}<span class="sort-indicator" data-ind="lots">↕</span></span>
+            <span class="th-sub-sort" data-sort="lots" title="Sort by ${escapeHtml(s.lotsLabel)}">${escapeHtml(s.lotsLabel)}<span class="sort-indicator" data-ind="lots">↕</span></span>${resizerSpan('yard_lots')}
           </th>
         `;
       }
       const key = s.showYard ? 'yard' : 'lots';
       const lbl = s.showYard ? s.yardLabel : s.lotsLabel;
       return `
-        <th class="sortable-th" data-sort="${key}" title="Click to sort by ${escapeHtml(lbl)}">
-          <span>${escapeHtml(lbl)}</span><span class="sort-indicator" data-ind="${key}">↕</span>
+        <th class="sortable-th" data-sort="${key}" data-col-width-key="${key}" title="Click to sort by ${escapeHtml(lbl)}">
+          <span>${escapeHtml(lbl)}</span><span class="sort-indicator" data-ind="${key}">↕</span>${resizerSpan(key)}
+        </th>
+      `;
+    }
+    const widthKey = s.sortKey || s.kind || 'col';
+    if (s.kind === 'status') {
+      return `
+        <th class="sortable-th tracker-status-th" data-sort="${s.sortKey}" data-col-width-key="${widthKey}" title="Click ${escapeHtml(s.label)} or Accessed to sort">
+          <span class="th-stacked-sub-sorts"><span class="th-sub-sort" data-sort="${s.sortKey}" title="Sort by ${escapeHtml(s.label)}">${escapeHtml(s.label)}<span class="sort-indicator" data-ind="${s.sortKey}">↕</span></span><span class="th-sub-sort th-sub-sort-accessed" data-sort="accessed" title="Sort by Last Accessed Time">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span></span>${resizerSpan(widthKey)}
         </th>
       `;
     }
     const extraCls = s.kind === 'subject' ? ' tracker-subject-th' : '';
     return `
-      <th class="sortable-th${extraCls}" data-sort="${s.sortKey}" title="Click to sort by ${escapeHtml(s.label)}">
-        <span>${escapeHtml(s.label)}</span><span class="sort-indicator" data-ind="${s.sortKey}">↕</span>
+      <th class="sortable-th${extraCls}" data-sort="${s.sortKey}" data-col-width-key="${widthKey}" title="Click to sort by ${escapeHtml(s.label)}">
+        <span>${escapeHtml(s.label)}</span><span class="sort-indicator" data-ind="${s.sortKey}">↕</span>${resizerSpan(widthKey)}
       </th>
     `;
   }).join('');
+
+  const stdActionsThHtml = hasStdStatusSlot
+    ? `<th class="tracker-actions-th" data-col-width-key="actions" title="Row Actions">${resizerSpan('actions')}</th>`
+    : `<th class="sortable-th tracker-actions-th" data-sort="accessed" data-col-width-key="actions" title="Click to sort by Last Accessed Time"><span>Accessed</span><span class="sort-indicator" data-ind="accessed">↕</span>${resizerSpan('actions')}</th>`;
 
   tableHead.innerHTML = `
     <tr>
@@ -687,18 +824,15 @@ function renderTableHeader() {
       <th id="thDeleteSelect" class="${selectColClass}" title="Select rows for batch status update or deletion">
         <input type="checkbox" id="chkSelectAllHeader" title="Select all visible requests">
       </th>
-      <th class="sortable-th" data-sort="date" title="Click to sort by Date Tab">
-        <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>
+      <th class="sortable-th" data-sort="date" data-col-width-key="date" title="Click to sort by Date Tab">
+        <span>Date Tab</span><span class="sort-indicator" data-ind="date">↕</span>${resizerSpan('date')}
       </th>
       ${stdThsHtml}
-      <th class="sortable-th tracker-actions-th" data-sort="accessed" title="Sort by Last Accessed or Tracking ID">
-        <span class="th-sub-sort" data-sort="accessed" title="Sort by Last Accessed">Accessed<span class="sort-indicator" data-ind="accessed">↕</span></span>
-        <span class="th-sep">/</span>
-        <span class="th-sub-sort" data-sort="key" title="Sort by Tracking ID (UUIDv4)">ID<span class="sort-indicator" data-ind="key">↕</span></span>
-      </th>
+      ${stdActionsThHtml}
     </tr>
   `;
   syncSelectAllCheckboxes();
+  applySavedTrackerTableColumnWidths();
 }
 
 function createShadowNewRowElement(colSpan, currentSheet) {
@@ -956,7 +1090,8 @@ function updateSortAndFilterUI(matchCount) {
       const isCompositeMatch =
         (thSort === 'master' && (sortState.column === 'master' || sortState.column === 'bidder')) ||
         (thSort === 'yard' && (sortState.column === 'yard' || sortState.column === 'lots')) ||
-        (thSort === 'accessed' && (sortState.column === 'accessed' || sortState.column === 'key'));
+        (thSort === 'accessed' && (sortState.column === 'accessed' || sortState.column === 'key')) ||
+        (th.classList.contains('tracker-status-th') && sortState.column === 'accessed');
       const isDirectMatch = thSort === sortState.column;
       th.classList.toggle('sorted-active', isDirectMatch || isCompositeMatch);
     });
@@ -1047,6 +1182,60 @@ function buildItemSearchHaystack(item) {
   ].join(' ').toLowerCase();
 }
 
+function getEffectiveItemStatus(item) {
+  if (!item) return '';
+  const isCustomSchema = Boolean(activeSchemaConfig && !activeSchemaConfig.isStandardSchema && activeSchemaConfig.columns.length > 0);
+  if (isCustomSchema && activeSchemaConfig.statusCol) {
+    const stFieldKey = `col_${activeSchemaConfig.statusCol}`;
+    const rawCustomSt = item.customValues && item.customValues[stFieldKey] !== undefined
+      ? String(item.customValues[stFieldKey]).trim()
+      : '';
+    if (rawCustomSt) {
+      return rawCustomSt;
+    }
+  }
+  return String(item.status || '');
+}
+
+function syncHideCompletedButtonUI(completedInScopeCount = 0) {
+  if (!btnToggleHideCompleted) return;
+  const isHiding = Boolean(hideCompletedRequests);
+  btnToggleHideCompleted.classList.toggle('active', isHiding);
+  btnToggleHideCompleted.setAttribute('aria-checked', String(isHiding));
+  btnToggleHideCompleted.setAttribute('aria-pressed', String(isHiding));
+  const countSuffix = completedInScopeCount > 0 ? ` (${completedInScopeCount})` : '';
+  if (hideCompletedLabel) {
+    hideCompletedLabel.textContent = isHiding
+      ? `Hiding Completed${countSuffix}`
+      : `Hide Completed${countSuffix}`;
+  }
+  btnToggleHideCompleted.title = isHiding
+    ? 'Hiding completed requests — click to show completed entries'
+    : 'Click to hide completed requests';
+}
+
+function syncHideUuidButtonUI() {
+  if (typeof btnToggleHideUuid === 'undefined' || !btnToggleHideUuid) return;
+  const isHiding = Boolean(typeof hideUuidKey !== 'undefined' && hideUuidKey);
+  btnToggleHideUuid.classList.toggle('active', isHiding);
+  btnToggleHideUuid.setAttribute('aria-checked', String(isHiding));
+  btnToggleHideUuid.setAttribute('aria-pressed', String(isHiding));
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.classList.toggle('hide-tracker-uuid-keys', isHiding);
+  }
+  if (typeof listBody !== 'undefined' && listBody && typeof listBody.querySelectorAll === 'function') {
+    listBody.querySelectorAll('th.tracker-row-num-cell, td.select-cell, td.delete-cell').forEach(cell => {
+      cell.rowSpan = isHiding ? 1 : 2;
+    });
+  }
+  if (typeof hideUuidLabel !== 'undefined' && hideUuidLabel) {
+    hideUuidLabel.textContent = isHiding ? 'Hiding ID' : 'Hide ID';
+  }
+  btnToggleHideUuid.title = isHiding
+    ? 'Hiding UUID Tracking ID keys — click to show UUID keys'
+    : 'Click to hide the UUID Tracking ID key on each request row';
+}
+
 function renderList() {
   const query = searchInput.value.trim().toLowerCase();
   const scope = scopeSelect.value;
@@ -1063,7 +1252,7 @@ function renderList() {
     }
   }
 
-  const filtered = allRows.filter(item => {
+  const baseFiltered = allRows.filter(item => {
     if (activeFilter) {
       if (!doesItemMatchFieldFilter(item, activeFilter)) return false;
       if (query.length > 0) {
@@ -1079,6 +1268,17 @@ function renderList() {
     }
     return true;
   });
+
+  const completedInBaseCount = baseFiltered.filter(item => isCompletedStatus(getEffectiveItemStatus(item))).length;
+  syncHideCompletedButtonUI(completedInBaseCount);
+  syncHideUuidButtonUI();
+
+  const explicitCompletedStatusFilter = Boolean(
+    activeFilter && activeFilter.field === 'status' && isCompletedStatus(activeFilter.value)
+  );
+  const filtered = (hideCompletedRequests && !explicitCompletedStatusFilter)
+    ? baseFiltered.filter(item => !isCompletedStatus(getEffectiveItemStatus(item)))
+    : baseFiltered;
 
   const sorted = sortRowsList(filtered);
   currentlyVisibleRows = sorted;
@@ -1103,6 +1303,7 @@ function renderList() {
       scope === 'current' &&
       !activeFilter &&
       query.length === 0 &&
+      completedInBaseCount === 0 &&
       currentSheet &&
       DATE_TAB_REGEX.test(currentSheet)
     ) {
@@ -1123,7 +1324,30 @@ function renderList() {
          </div>`
       : '';
 
-    listBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell"><div>No matching requests found.</div>${emptyRolloverBtnHtml}</td></tr>`;
+    const onlyHiddenCompleted = Boolean(hideCompletedRequests && !explicitCompletedStatusFilter && completedInBaseCount > 0);
+    const emptyMsgText = onlyHiddenCompleted
+      ? `All ${completedInBaseCount} request${completedInBaseCount === 1 ? ' is' : 's are'} completed (Hiding Completed).`
+      : 'No matching requests found.';
+    const showCompletedInlineHtml = onlyHiddenCompleted
+      ? `<div>
+           <button type="button" id="btnShowHiddenCompletedInline" class="btn-sm empty-rollover-cta">
+             Show Completed (${completedInBaseCount})
+           </button>
+         </div>`
+      : '';
+
+    listBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-table-cell"><div>${emptyMsgText}</div>${showCompletedInlineHtml}${emptyRolloverBtnHtml}</td></tr>`;
+    const btnShowHidden = document.getElementById('btnShowHiddenCompletedInline');
+    if (btnShowHidden) {
+      btnShowHidden.addEventListener('click', () => {
+        if (typeof setHideCompletedPreference === 'function') {
+          setHideCompletedPreference(false);
+        } else {
+          hideCompletedRequests = false;
+        }
+        renderList();
+      });
+    }
     const btnEmptyRollover = document.getElementById('btnEmptyTabRolloverPrev');
     if (btnEmptyRollover) {
       btnEmptyRollover.addEventListener('click', () => {
@@ -1200,27 +1424,22 @@ function renderList() {
       });
       occurrencesUpToSheet = Math.max(1, count);
     }
-    let effectiveRowStatus = item.status;
-    if (isCustomSchema && activeSchemaConfig && activeSchemaConfig.statusCol) {
-      const stFieldKey = `col_${activeSchemaConfig.statusCol}`;
-      const rawCustomSt = item.customValues && item.customValues[stFieldKey] !== undefined
-        ? String(item.customValues[stFieldKey]).trim()
-        : '';
-      if (rawCustomSt) {
-        effectiveRowStatus = rawCustomSt;
-      }
-    }
+    const effectiveRowStatus = getEffectiveItemStatus(item);
+    const isRowCompleted = isCompletedStatus(effectiveRowStatus);
     const isRowWaiting =
-      !isCompletedStatus(effectiveRowStatus) &&
+      !isRowCompleted &&
       typeof isWaitingOrHoldStatus === 'function' &&
       isWaitingOrHoldStatus(effectiveRowStatus);
     const isRowOverdue =
-      !isCompletedStatus(effectiveRowStatus) &&
+      !isRowCompleted &&
       (
         (typeof isOverdueStatus === 'function' && isOverdueStatus(effectiveRowStatus)) ||
         (!isRowWaiting && (ageDays > SMART_OVERDUE_MAX_AGE_DAYS || occurrencesUpToSheet >= SMART_OVERDUE_MIN_CARRIES))
       );
-    if (isRowOverdue) {
+    if (isRowCompleted) {
+      tr.classList.add('completed-outline-green');
+      metaTr.classList.add('completed-outline-green');
+    } else if (isRowOverdue) {
       tr.classList.add('overdue-outline-red');
       metaTr.classList.add('overdue-outline-red');
     } else if (isRowWaiting) {
@@ -1232,26 +1451,26 @@ function renderList() {
     const isLongNote = noteText.length > 45 || noteText.includes('\n');
     const shortGuid = item.key.length > 8 ? `${item.key.slice(0, 8)}...` : item.key;
 
-    const rowNumCell = `<th scope="row" rowspan="2" class="tracker-row-num-cell" title="Line ${idx + 1} (Excel Row ${item.rowNumber} on ${escapeHtml(item.sheetName)})">${idx + 1}</th>`;
-    const rowCheckboxCell = `<td rowspan="2" class="${isDeleteMode ? 'delete-cell' : 'select-cell'}">
+    const isHidingUuid = Boolean(typeof hideUuidKey !== 'undefined' && hideUuidKey);
+    const rowSpanAttr = isHidingUuid ? '' : ' rowspan="2"';
+    const rowNumCell = `<th scope="row"${rowSpanAttr} class="tracker-row-num-cell" title="Line ${idx + 1} (Excel Row ${item.rowNumber} on ${escapeHtml(item.sheetName)})">${idx + 1}</th>`;
+    const rowCheckboxCell = `<td${rowSpanAttr} class="${isDeleteMode ? 'delete-cell' : 'select-cell'}">
       <input type="checkbox" class="chk-delete-row" data-comp="${escapeHtml(compId)}" data-key="${escapeHtml(item.key)}" ${isRowChecked ? 'checked' : ''} aria-label="Select request row ${item.rowNumber} on ${escapeHtml(item.sheetName)}">
     </td>`;
     const accessedInfo = (typeof getRowLastAccessedMs === 'function' && typeof formatRowLastAccessedLabel === 'function')
       ? formatRowLastAccessedLabel(getRowLastAccessedMs(item.key))
       : { ms: 0, short: '—', full: 'Not accessed yet' };
+    const statusAccessedCornerHtml = `<span class="status-accessed-time${accessedInfo.ms ? '' : ' is-empty'}" data-accessed-key="${escapeHtml(normItemKey)}" title="${escapeHtml(accessedInfo.full)}">${accessedInfo.ms ? escapeHtml(accessedInfo.short) : ''}</span>`;
     const keyActiveClass = isFieldFilterActive('key', item.key) ? ' active-filter-match' : '';
     const metaBarColSpan = Math.max(1, colSpan - 2);
-    const metaAccessedInner = accessedInfo.ms
-      ? `<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-pill">${escapeHtml(accessedInfo.short)}</span>`
-      : '<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-empty">—</span>';
+    const keyCopyBtnHtml = copyBtnFn(item.key, 'Tracking ID');
     metaTr.innerHTML = `
       <td colspan="${metaBarColSpan}" class="tracker-meta-bar-cell">
         <div class="tracker-meta-bar">
-          <span class="key-chip key-chip-compact${keyActiveClass}" title="Click to filter by Tracking ID: ${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
-            🔍 ${escapeHtml(item.key)}
-          </span>
-          <span class="tracker-meta-accessed" data-accessed-key="${escapeHtml(normItemKey)}" title="${escapeHtml(accessedInfo.full)}">
-            ${metaAccessedInner}
+          <span class="key-chip-copy-group">
+            <span class="key-chip key-chip-compact${keyActiveClass}" title="Click to filter by Tracking ID: ${escapeHtml(item.key)}" data-key="${escapeHtml(item.key)}">
+              🔍 ${escapeHtml(item.key)}
+            </span>${keyCopyBtnHtml}
           </span>
         </div>
       </td>
@@ -1259,6 +1478,10 @@ function renderList() {
 
     if (isCustomSchema) {
       const visibleCustomCols = getVisibleCustomTableColumns();
+      const hasCustomStatusCol = Boolean(
+        activeSchemaConfig.statusCol &&
+        visibleCustomCols.some(c => c.colIndex === activeSchemaConfig.statusCol)
+      );
       const customCellsHtml = visibleCustomCols.map(c => {
         const fieldKey = `col_${c.colIndex}`;
         const rawVal = (item.customValues && item.customValues[fieldKey] !== undefined)
@@ -1273,10 +1496,13 @@ function renderList() {
             : (isCompletedStatus(stText) ? 'badge-complete' : 'badge-pending');
           const stActive = isFieldFilterActive(fieldKey, stText) ? ' active-filter-match' : '';
           return `
-            <td>
-              <span class="badge clickable-badge ${stBadgeClass}${stActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(stText)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(stText)}">
-                ${escapeHtml(stText)}
-              </span>
+            <td class="tracker-status-cell">
+              <div class="status-cell-wrap">
+                <span class="badge clickable-badge ${stBadgeClass}${stActive}" data-filter-field="${fieldKey}" data-filter-label="${escapeHtml(c.header)}" data-filter-val="${escapeHtml(stText)}" title="Click to filter by ${escapeHtml(c.header)}: ${escapeHtml(stText)}">
+                  ${escapeHtml(stText)}
+                </span>
+                ${statusAccessedCornerHtml}
+              </div>
             </td>
           `;
         }
@@ -1331,10 +1557,13 @@ function renderList() {
             <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Details &amp; Aggregated Timestamped Notes">Details</button>
             <button type="button" class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="Load into Bottom Editor (Double-click for Modal)">Edit</button>
           </div>
+          ${hasCustomStatusCol ? '' : `<div class="actions-accessed-fallback">${statusAccessedCornerHtml}</div>`}
         </td>
       `;
       listBody.appendChild(tr);
-      listBody.appendChild(metaTr);
+      if (!isHidingUuid) {
+        listBody.appendChild(metaTr);
+      }
       return;
     }
 
@@ -1404,9 +1633,9 @@ function renderList() {
           return `<td>${brokerHtml}</td>`;
         case 'master_bidder': {
           if (s.showMaster && s.showBidder) {
-            return `<td class="cell-mono-sm">M: ${masterHtml}<br>B: ${bidderHtml}</td>`;
+            return `<td class="cell-mono-sm col-master-bidder">M: ${masterHtml}<br>B: ${bidderHtml}</td>`;
           }
-          return `<td class="cell-mono-sm">${s.showMaster ? masterHtml : bidderHtml}</td>`;
+          return `<td class="cell-mono-sm col-master-bidder">${s.showMaster ? masterHtml : bidderHtml}</td>`;
         }
         case 'action':
           return `<td>${actionHtml}</td>`;
@@ -1419,7 +1648,7 @@ function renderList() {
         case 'notes':
           return `<td class="notes-cell"><div class="notes-preview" id="note-${idx}">${escapeHtml(noteText)}</div>${isLongNote ? `<span class="notes-toggle" data-target="note-${idx}">[+ Expand]</span>` : ''}</td>`;
         case 'status':
-          return `<td><span class="badge clickable-badge ${stdStatusBadgeClass}${statusActiveClass}" data-filter-field="status" data-filter-label="Status" data-filter-val="${escapeHtml(item.status)}" title="Click to show all requests with Status: ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>`;
+          return `<td class="tracker-status-cell"><div class="status-cell-wrap"><span class="badge clickable-badge ${stdStatusBadgeClass}${statusActiveClass}" data-filter-field="status" data-filter-label="Status" data-filter-val="${escapeHtml(item.status)}" title="Click to show all requests with Status: ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span>${statusAccessedCornerHtml}</div></td>`;
         case 'extra': {
           const fKey = `col_${s.colIndex}`;
           const ev = (item.customValues && item.customValues[fKey] !== undefined) ? String(item.customValues[fKey]).trim() : '';
@@ -1453,10 +1682,13 @@ function renderList() {
           <button type="button" class="btn-details" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="View Ticket Details &amp; Aggregated Timestamped Notes">Details</button>
           <button type="button" class="btn-edit" data-sheet="${escapeHtml(item.sheetName)}" data-row="${item.rowNumber}" title="Load into Bottom Editor (Double-click for Modal)">Edit</button>
         </div>
+        ${stdDescriptor.slots.some(s => s.kind === 'status') ? '' : `<div class="actions-accessed-fallback">${statusAccessedCornerHtml}</div>`}
       </td>
     `;
     listBody.appendChild(tr);
-    listBody.appendChild(metaTr);
+    if (!isHidingUuid) {
+      listBody.appendChild(metaTr);
+    }
   });
 
   const shadowRow = createShadowNewRowElement(colSpan, currentSheet);
@@ -2118,9 +2350,57 @@ if (btnBatchDeleteSelected) {
   btnBatchDeleteSelected.addEventListener('click', executeBatchDeleteSelected);
 }
 
-// Column Header Sorting
+// Column Header Sorting & Drag-to-Resize Handles
 if (tableHead) {
+  tableHead.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const resizer = e.target.closest('.tracker-col-resizer[data-resize-col-key]');
+    if (!resizer) return;
+    const thEl = resizer.closest('th[data-col-width-key]');
+    const tableEl = tableHead.closest('table');
+    if (!thEl || !tableEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Snapshot all current column widths on first custom resize so adjacent columns don't jump
+    if (!tableEl.classList.contains('has-custom-col-widths')) {
+      tableHead.querySelectorAll('th[data-col-width-key]').forEach(otherTh => {
+        const w = Math.max(64, Math.round(otherTh.getBoundingClientRect().width));
+        otherTh.style.width = `${w}px`;
+        otherTh.style.minWidth = `${w}px`;
+      });
+      tableEl.classList.add('has-custom-col-widths');
+    }
+
+    const startW = thEl.getBoundingClientRect().width;
+    resizer.classList.add('resizing');
+    document.body.classList.add('is-resizing-tracker-col');
+    trackerColResizeState = {
+      colKey: resizer.dataset.resizeColKey,
+      thEl,
+      resizerEl: resizer,
+      tableEl,
+      startX: e.clientX,
+      startWidthPx: startW,
+      currentWidthPx: startW
+    };
+  });
+
+  tableHead.addEventListener('dblclick', (e) => {
+    const resizer = e.target.closest('.tracker-col-resizer[data-resize-col-key]');
+    if (!resizer) return;
+    const thEl = resizer.closest('th[data-col-width-key]');
+    if (!thEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    lastTrackerColResizeAt = Date.now();
+    autoFitTrackerTableColumnWidth(thEl);
+  });
+
   tableHead.addEventListener('click', (e) => {
+    if (e.target.closest('.tracker-col-resizer') || Date.now() - lastTrackerColResizeAt < 250) {
+      return;
+    }
     const subSort = e.target.closest('.th-sub-sort');
     const thSort = e.target.closest('th.sortable-th');
     const col = subSort ? subSort.dataset.sort : (thSort ? thSort.dataset.sort : null);
@@ -2141,6 +2421,56 @@ if (tableHead) {
   });
 }
 
+window.addEventListener('mousemove', (e) => {
+  if (!trackerColResizeState) return;
+  const deltaX = e.clientX - trackerColResizeState.startX;
+  const nextW = Math.max(64, Math.min(680, Math.round(trackerColResizeState.startWidthPx + deltaX)));
+  trackerColResizeState.currentWidthPx = nextW;
+  trackerColResizeState.thEl.style.width = `${nextW}px`;
+  trackerColResizeState.thEl.style.minWidth = `${nextW}px`;
+});
+
+window.addEventListener('mouseup', () => {
+  if (!trackerColResizeState) return;
+  const st = trackerColResizeState;
+  trackerColResizeState = null;
+  lastTrackerColResizeAt = Date.now();
+  if (st.resizerEl) st.resizerEl.classList.remove('resizing');
+  document.body.classList.remove('is-resizing-tracker-col');
+  if (Math.abs(st.currentWidthPx - st.startWidthPx) >= 2) {
+    setSavedTrackerTableColWidth(st.colKey, st.currentWidthPx);
+  }
+});
+
+if (typeof btnResetTableColWidths !== 'undefined' && btnResetTableColWidths) {
+  btnResetTableColWidths.addEventListener('click', resetActiveTrackerTableColWidths);
+}
+
+if (typeof btnToggleHideCompleted !== 'undefined' && btnToggleHideCompleted) {
+  syncHideCompletedButtonUI(0);
+  btnToggleHideCompleted.addEventListener('click', () => {
+    if (typeof setHideCompletedPreference === 'function') {
+      setHideCompletedPreference(!hideCompletedRequests);
+    } else {
+      hideCompletedRequests = !hideCompletedRequests;
+    }
+    renderList();
+  });
+}
+
+if (typeof btnToggleHideUuid !== 'undefined' && btnToggleHideUuid) {
+  syncHideUuidButtonUI();
+  btnToggleHideUuid.addEventListener('click', () => {
+    if (typeof setHideUuidKeyPreference === 'function') {
+      setHideUuidKeyPreference(!hideUuidKey);
+    } else {
+      hideUuidKey = !hideUuidKey;
+      syncHideUuidButtonUI();
+    }
+    renderList();
+  });
+}
+
 function refreshRowLastAccessedDOM(trackingKey) {
   const normKey = String(trackingKey || '').trim().toLowerCase();
   if (!normKey || !listBody || typeof getRowLastAccessedMs !== 'function' || typeof formatRowLastAccessedLabel !== 'function') {
@@ -2150,9 +2480,8 @@ function refreshRowLastAccessedDOM(trackingKey) {
   listBody.querySelectorAll('[data-accessed-key]').forEach(el => {
     if (el.dataset.accessedKey === normKey) {
       el.title = info.full;
-      el.innerHTML = info.ms
-        ? `<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-pill">${escapeHtml(info.short)}</span>`
-        : '<span class="tracker-meta-label">Accessed:</span> <span class="accessed-ts-empty">—</span>';
+      el.textContent = info.ms ? info.short : '';
+      el.classList.toggle('is-empty', !info.ms);
     }
   });
 }

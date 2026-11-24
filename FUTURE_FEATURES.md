@@ -57,20 +57,6 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-### 🔍 1-Click Copyable UUIDv4 Tracking IDs
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Make the UUIDv4 Tracking ID chips in the table (`🔍 8f4a92c1...`) and badges in the Bottom Editor Dock (`#dockKeyBadge`), Edit Modal (`#modalKeyDisplay`), and Ticket Details modal 1-click copy-able.
-  - Clicking the chip or an adjacent copy icon will copy the full 36-character UUIDv4 to the system clipboard (`navigator.clipboard.writeText`) and trigger a quick feedback toast (e.g., `📋 Copied Tracking ID to clipboard: 8f4a92c1-...`).
-
----
-
-### ↔️ Resizable Tracker Table Columns
-- **Status**: 📋 Planned
-- **Proposal**:
-  - Add Excel-style draggable column resize handles along the right edge of `#tableHead` column headers in the Daily Requests tracker table (for both Standard and Custom Department schemas), similar to the column resizers already present on Scratch Sheets.
-  - Persist custom column widths per tracker profile / schema key in `localStorage` (and include them in `.json` Workspace Config export/import), with a double-click auto-fit or `Reset Column Widths` option.
-
 ---
 
 | Feature / Suggestion | Subsystem | Status | Description & Architecture |
@@ -79,8 +65,6 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 | **2. Agent Identity (`Agent Name` + `UUIDv4`) & Hidden `TrackerConfig` Sheet** | *Identity / Workbook I/O* | 📋 Planned *(Queued #2)* | Enter Agent Name & generate persistent `UUIDv4` in TrackerUI; persist identity & workbook-level settings in a hidden `TrackerConfig` Excel sheet so settings travel with the workbook. |
 | **3. Team Root Auto-Scaffolding & Startup `.json` Config** | *Config / Onboarding* | 📋 Planned *(Queued #3)* | Auto-create canonical OneDrive/SharePoint folder tree from a single Team Root handle (`{ create: true }`), store agent identity + subpaths in `.json`, and auto-check `_Config/trackerui-config.json` on startup. |
 | **4. JSON Mirrors, Shared Queue, Wipe Recovery & Separate Aggregator Repo** | *Sync / Persistence / Multi-Repo* | 📋 Planned *(Queued #4)* | Lock-free per-agent `.json` mirrors (`_ViewOnly_JSON/`), conflict-free per-ticket `_SharedQueue/`, Chrome-wipe `IndexedDB`+`localStorage` JSON snapshots (`_State/`), and a separate Aggregator repo synced via `CONTRACT.md`. |
-| **1-Click Copyable UUIDv4 Tracking IDs** | *Daily Tracker / Editors* | 📋 Planned | Clicking any Tracking ID chip/badge copies the full 36-character UUIDv4 to clipboard with toast feedback. |
-| **Resizable Tracker Table Columns** | *Daily Tracker Table* | 📋 Planned | Draggable column header resize handles in `#tableHead` across Standard & Custom Department trackers, persisted per profile/schema in `localStorage` and `.json` config backups. |
 | **Custom Ticket ID Schemas** | *Core UI / Editors* | 📋 Planned | Settings input to define custom ticket formats via Regular Expressions, removing hardcoded validations for greater queue flexibility. |
 | **In-Cell Validation Dropdowns** | *Scratch Sheets* | 📋 Planned | Map IndexedDB validation lists to custom columns using isolated `<select>` nodes that bypass the grid's multi-cell selection event bubbling. |
 | **Charts & Visual Analytics Panel (Phase 1 & 2)** | *Daily Tracker / Scratch Sheets / Supervisor Rollup* | 📋 Planned | Native SVG (zero-dependency) or offline-cached Chart.js visual cards for Daily Request Volume/Status breakdown, Title Tracking Red/Yellow/Green bucket progress, and Multi-Workbook Supervisor Category trends, with optional image/HTML export. |
@@ -88,7 +72,18 @@ This document maintains the roadmap, feature requests, planned enhancements, and
 
 ---
 
-## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.9`)
+## 2. Newly & Recently Implemented Features (`v1.17.0` – `v1.19.10`)
+
+### 🟠 Orange Pulsing Update Alert, Completed Green Rows, Toggle Switches, Compact Headers, Duplicate UUID Reuse & `TrackerConfig` Guard (`v1.19.10`)
+- **Status**: ✅ Implemented in `v1.19.10`
+- **Delivered**:
+  - **Orange Pulsing Update Alert (`index.html`, `css/styles.css`, `js/core-ui.js`)**: Friendly warm-orange pulsing version badge (`#appVersionTag.update-available`), Tools menu indicator, and orange pulsing `#pwaUpdateBanner` so agents notice available updates without alarm-red styling.
+  - **Completed Green Rows & "Hiding Completed" Switch (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/tracker-table.js`, `js/rollover.js`, `js/workbook-io.js`)**: Added `.completed-outline-green` (`--success` perimeter outline & `--success-soft` green background) on completed entries and Rollover target previews, plus a persistent **`Hide Completed`** / **`Hiding Completed`** sliding pill switch (`role="switch"`) displaying `"Hiding Completed (N)"` when active.
+  - **Compact `Master # / Bidder #` Header, Status-Folded `Accessed` Time & "Hide ID" Switch (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/tracker-table.js`, `js/workbook-io.js`)**: Dropped `"Broker "` from Col D/E table headers, stacked `Master #` / `Bidder #` sort controls vertically in a compact column (`.col-master-bidder`), folded transparent corner Last Accessed timestamps directly beneath Status badges inside `.tracker-status-cell` (with `Accessed ↕` stacked in `th.tracker-status-th`), and added a persistent **`Hide ID`** / **`Hiding ID`** switch (`#btnToggleHideUuid`) that collapses the bottom UUID bar completely when active.
+  - **Duplicate Request Check & Shared UUIDv4 Assignment (`js/request-editors.js`)**: Allows duplicate/follow-up request entries (e.g., duplicate email subjects) to be saved normally while automatically reusing the existing matching request's UUIDv4 Tracking ID (`findExistingMatchingRequestForNewEntry()`).
+  - **1-Click Copyable UUIDv4 Tracking IDs (`js/tracker-table.js`, `js/request-editors.js`, `css/styles.css`)**: Integrated split-pill copy button next to each row's UUIDv4 chip plus 1-click copy on `#dockKeyBadge`, `#modalKeyDisplay`, and `#ticketDetailsKeyBadge`.
+  - **Resizable Tracker Table Columns (`index.html`, `css/styles.css`, `js/core-ui.js`, `js/tracker-table.js`, `js/workbook-io.js`)**: Draggable right-edge resize handles + double-click auto-fit on `#tableHead` across Standard & Custom Department schemas, persisted per profile/schema in `localStorage` and `.json` config export/import, plus **Reset Table Column Widths** in Tools & Setup.
+  - **Forward-Compat `TrackerConfig` Protection (`js/core-ui.js`)**: Added `TrackerConfig` / `Tracker Config` to `isProtectedReferenceSheetName()` so older cached clients safely ignore upcoming hidden `TrackerConfig` sheets.
 
 ### ✍️ Simple Text Editing & Cell Formatting Controls for Scratch Sheets (`v1.19.9`)
 - **Status**: ✅ Implemented in `v1.19.9`
